@@ -56,18 +56,13 @@ To run the simulation, you can execute the `run_base_sim.py` script from the `sr
 
 ## Simulation Lifecycle
 
-The simulation operates in discrete rounds. The following diagram illustrates the sequence of events that occur in each round:
+The simulation operates in discrete rounds. The following steps occur in each round:
 
-```mermaid
-graph TD;
-    A[Start Round] --> B{1. Update Market State};
-    B --> C{2. Collect Agent Decisions};
-    C --> D{3. Match Orders in Engine};
-    D --> E{4. Record Round Data};
-    E --> F{5. Pay Dividends/Interest};
-    F --> G{End Round};
-    G --> A;
-```
+1.  **Update Market State:** The simulation updates the market context, including the fundamental price and any potential dividend payments for the upcoming round.
+2.  **Collect Agent Decisions:** Each agent analyzes the current market state and their own internal state to decide whether to place a buy, sell, or hold order.
+3.  **Match Orders:** The matching engine resolves the collected orders, executing trades and determining the new market price.
+4.  **Record Round Data:** All data from the round, including trades, prices, and agent decisions, is recorded.
+5.  **Pay Dividends/Interest:** Any scheduled dividends or interest payments are distributed to the agents.
 
 This lifecycle is orchestrated by the `execute_round` method in `src/base_sim.py`.
 
