@@ -27,7 +27,12 @@ This project simulates a financial market where agents, powered by LLMs, make tr
     ```
 
 4.  **Configure Environment Variables:**
-    This project requires API keys and other configuration to be stored in a `.env` file at the root of the project. This file is not tracked by Git for security reasons. You will need to create it yourself and add the necessary variables (e.g., `OPENAI_API_KEY=...`).
+    This project requires an `OPENAI_API_KEY` to be stored in a `.env` file at the root of the project. This file is not tracked by Git for security reasons. 
+
+    You will need to create this file yourself and add your key like this:
+    ```
+    OPENAI_API_KEY="sk-..."
+    ```
 
 ## Usage
 
