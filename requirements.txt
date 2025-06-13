@@ -1,0 +1,12 @@
+graphviz==0.20.3
+matplotlib==3.10.3
+numpy==2.3.0
+openai==1.86.0
+pandas==2.3.0
+pyan3==1.2.0
+pydantic==2.11.6
+python-dotenv==1.1.0
+python_call_graph==2.1.2
+scikit_learn==1.7.0
+tqdm==4.67.1
+wordcloud==1.9.4
