@@ -20,9 +20,30 @@ from market.orders.order_service_factory import OrderServiceFactory
 from services.shared_service_factory import SharedServiceFactory
 from market.information.base_information_services import InformationService
 from services.logging_service import LoggingService
+import random
+from base_sim import BaseSimulation
+import warnings
+from wordcloud import WordCloud
 
 class BaseSimulation:
-    """Base simulation class with core functionality"""
+    """
+    The core class for running a trading simulation.
+
+    This class orchestrates the entire simulation, including setting up the
+    environment, creating agents, running the market rounds, and collecting data.
+
+    Attributes:
+        num_rounds (int): The total number of rounds to run the simulation.
+        agent_params (dict): Parameters for creating agents.
+        sim_type (str): The name of the scenario being run.
+        run_dir (Path): The directory where simulation data and plots are saved.
+        context (TradingContext): The context object holding the current state of the market.
+        agent_repository (AgentRepository): The repository managing all agents.
+        data_recorder (DataRecorder): The service for recording simulation data.
+        market (Market): The market where trades are executed.
+        dividend_service (DividendService): The service for managing dividends.
+        interest_service (InterestService): The service for managing interest payments.
+    """
     def __init__(self, 
                  num_rounds: int,
                  initial_price: float,
@@ -189,7 +210,7 @@ class BaseSimulation:
         # Store pre-round states for verification
         pre_round_states = self._store_pre_round_states()
         
-        # Update context with current market depth
+        # 1. UPDATE MARKET AND CONTEXT at the beginning of the round
         self.market_state_manager.update_market_depth()
         
         # Get last volume from data recorder
@@ -198,11 +219,9 @@ class BaseSimulation:
             if self.data_recorder.history 
             else 0
         )
-        
-        # Update context with round info
         self.context.update_public_info(round_number, last_volume)
         
-        # Update market components
+        # Update market components (e.g., fundamental price, dividends if any)
         market_state = self.market_state_manager.update(
             round_number=round_number,
             last_volume=last_volume,
@@ -212,7 +231,7 @@ class BaseSimulation:
         # Log state before collecting decisions
         LoggingService.log_all_agent_states(self.agent_repository, round_number, "Pre-Decision ")
         
-        # 2. Collect new agent decisions
+        # 2. COLLECT NEW AGENT DECISIONS (ORDERS)
         new_orders = self.decision_service.collect_decisions(
             market_state=market_state,
             history=self.data_recorder.history,
@@ -225,7 +244,7 @@ class BaseSimulation:
         LoggingService.log_all_agent_states(self.agent_repository, round_number, "Post-Decision ")
         self.order_book.log_order_book_state(f"After New Orders Round {round_number}")
         
-        # 3. Execute trades using matching engine
+        # 3. EXECUTE TRADES using the matching engine
         market_result = self.matching_engine.match_orders(
             new_orders,
             self.context.current_price,
@@ -237,7 +256,7 @@ class BaseSimulation:
         LoggingService.log_all_agent_states(self.agent_repository, round_number, "Post-Matching ")
         self.order_book.log_order_book_state(f"After Trades Matched Round {round_number}")
         
-        # Update price and round number
+        # Update price and round number in the context
         self.context.current_price = market_result.price
         self.context.round_number = round_number + 1
 
@@ -245,7 +264,7 @@ class BaseSimulation:
             self.logger.info(f"Last round, redeeming shares for fundamental value: {self.context.fundamental_price}")
             self.logger.info(f"Shares are worthless after redemption")
         
-        # 4. Record round data (now including order state information)
+        # 4. RECORD DATA for the round
         
         last_paid_dividend = market_state.get('last_paid_dividend', 0.0)
         if not last_paid_dividend and round_number == 0:
@@ -277,7 +296,7 @@ class BaseSimulation:
         # Final order book state
         self.order_book.log_order_book_state(f"End of Round {round_number}")
         
-        # End of round update (with payments)
+        # 5. FINAL END-OF-ROUND UPDATES (including interest/dividend payments)
         self.market_state_manager.update(
             round_number=round_number,
             last_volume=market_result.volume,

@@ -2,6 +2,20 @@ from typing import Dict, Any
 from calculate_fundamental import calculate_fundamental_price, calibrate_redemption_value
 
 class SimulationScenario:
+    """
+    Represents a specific simulation scenario with a defined set of parameters.
+
+    This class encapsulates the configuration for a simulation run, including
+    its name, description, and all the necessary parameters to initialize
+    and run the simulation. It also automatically calculates and validates
+    the fundamental value and redemption value based on the provided
+    dividend and interest rate parameters.
+
+    Attributes:
+        name (str): The unique name of the scenario.
+        description (str): A brief description of what the scenario is testing.
+        parameters (Dict[str, Any]): A dictionary of parameters for the simulation.
+    """
     def __init__(self, name: str, description: str, parameters: Dict[str, Any]):
         self.name = name
         self.description = description

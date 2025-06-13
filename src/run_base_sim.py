@@ -1010,33 +1010,68 @@ def run_scenario(scenario_name: str):
             f"Total Value: ${total_value:.2f}")
 
 def main():
+    """
+    Main function to run simulations.
+    Parses command-line arguments to run a specific scenario or list available ones.
+    """
+    import argparse
+    
     # Don't convert warnings to errors - allow normal warnings
-    # warnings.filterwarnings('error')  # Remove this line
-    np.seterr(all='warn')  # Change from 'raise' to 'warn'
+    np.seterr(all='warn')
 
-    # List of scenarios to run
-    scenarios_to_run = [
-        # "test_imbalanced_agents",  # Run our new test scenario first
-        # "price_discovery_infinite_above_fundamental",
-        # "price_discovery_infinite_below_fundamental",
-        "price_discovery_above_fundamental",
-        # "price_discovery_below_fundamental",
-        # "divergent_beliefs_above_fundamental",
-        # "divergent_beliefs_below_fundamental",
-        # "simple_mixed_traders"
-    ]
+    # Set up argument parser
+    parser = argparse.ArgumentParser(description="Run a trading simulation scenario.")
+    parser.add_argument(
+        "scenario", 
+        nargs='?', 
+        default=None, 
+        help="The name of the scenario to run. If not provided, lists available scenarios."
+    )
+    parser.add_argument(
+        "-l", "--list", 
+        action="store_true", 
+        help="List all available scenarios and their descriptions."
+    )
+    
+    args = parser.parse_args()
 
-    # Run each scenario
-    for scenario_name in scenarios_to_run:
-        print(f"\nRunning scenario: {scenario_name}")
-        print("-" * 50)
-        try:
-            run_scenario(scenario_name)
-            print(f"Successfully completed scenario: {scenario_name}")
-        except Exception as e:
-            print(f"Error running scenario {scenario_name}: {str(e)}")
-            import traceback
-            print(traceback.format_exc())  # Print full stack trace for debugging
+    # Get available scenarios
+    available_scenarios = list_scenarios()
+
+    # If --list is used, print scenarios and exit
+    if args.list:
+        print("Available scenarios:")
+        for name, desc in available_scenarios.items():
+            print(f"  - {name}: {desc}")
+        return
+
+    # If no scenario is provided, print list and exit
+    if args.scenario is None:
+        print("No scenario specified. Please choose from the list below:")
+        for name, desc in available_scenarios.items():
+            print(f"  - {name}")
+        print("\nUsage: python src/run_base_sim.py <scenario_name>")
+        return
+
+    # Check if the chosen scenario exists
+    if args.scenario not in available_scenarios:
+        print(f"Error: Scenario '{args.scenario}' not found.")
+        print("Please choose from the available scenarios:")
+        for name in available_scenarios.keys():
+            print(f"  - {name}")
+        return
+        
+    # Run the selected scenario
+    scenario_name = args.scenario
+    print(f"\nRunning scenario: {scenario_name}")
+    print("-" * 50)
+    try:
+        run_scenario(scenario_name)
+        print(f"Successfully completed scenario: {scenario_name}")
+    except Exception as e:
+        print(f"Error running scenario {scenario_name}: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
 
 if __name__ == "__main__":
     main()
