@@ -6,6 +6,38 @@ This repository contains the source code for a trading simulation environment po
 
 This project simulates a financial market where agents, powered by LLMs, make trading decisions.
 
+## Paper
+
+This repository accompanies the research paper:
+
+**"Can Large Language Models Trade? Testing Financial Theories with LLM Agents in Market Simulations"**
+
+*Author:* Alejandro Lopez-Lira (University of Florida - Department of Finance, Insurance and Real Estate)
+
+*Date:* April 14, 2025
+
+### Abstract
+
+This paper presents a realistic simulated stock market where large language models (LLMs) act as heterogeneous competing trading agents. The open-source framework incorporates a persistent order book with market and limit orders, partial fills, dividends, and equilibrium clearing alongside agents with varied strategies, information sets, and endowments. Agents submit standardized decisions using structured outputs and function calls while expressing their reasoning in natural language. Three findings emerge: First, LLMs demonstrate consistent strategy adherence and can function as value investors, momentum traders, or market makers per their instructions. Second, market dynamics exhibit features of real financial markets, including price discovery, bubbles, underreaction, and strategic liquidity provision. Third, the framework enables analysis of LLMs' responses to varying market conditions, similar to partial dependence plots in machine-learning interpretability. The framework allows simulating financial theories without closed-form solutions, creating experimental designs that would be costly with human participants, and establishing how prompts can generate correlated behaviors affecting market stability.
+
+### Citation
+
+```bibtex
+@article{lopez2025llm,
+  title={Can Large Language Models Trade? Testing Financial Theories with LLM Agents in Market Simulations},
+  author={Lopez-Lira, Alejandro},
+  year={2025},
+  month={April},
+  day={14},
+  url={https://ssrn.com/abstract=5217340},
+  doi={10.2139/ssrn.5217340}
+}
+```
+
+*Available at SSRN:* https://ssrn.com/abstract=5217340
+
+*Keywords:* LLM Agents, Agent-Based Markets, Experimental Finance, AI Trading, Multi-Agent Systems
+
 ## Setup
 
 1.  **Clone the repository:**
