@@ -21,7 +21,6 @@ from services.shared_service_factory import SharedServiceFactory
 from market.information.base_information_services import InformationService
 from services.logging_service import LoggingService
 import random
-from base_sim import BaseSimulation
 import warnings
 from wordcloud import WordCloud
 
