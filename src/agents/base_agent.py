@@ -823,10 +823,18 @@ class BaseAgent(ABC):
         """Get total available cash (main account, dividend account is not for trading)"""
         return self.cash
 
-    def record_payment(self, account: str, amount: float, 
-                      payment_type: Literal['interest', 'dividend', 'trade', 'other'], 
+    def record_payment(self, account: str, amount: float,
+                      payment_type: Literal['interest', 'dividend', 'trade', 'other'],
                       round_number: int):
-        """Record a payment in the agent's history"""
+        """Record a payment in the agent's history.
+
+        Args:
+            account: Account affected ("main" or "dividend").
+            amount: Payment amount. Negative values represent cash outflows,
+                such as dividend obligations on short positions.
+            payment_type: Type of payment.
+            round_number: Simulation round when the payment occurred.
+        """
         payment = Payment(
             round_number=round_number,
             amount=amount,
