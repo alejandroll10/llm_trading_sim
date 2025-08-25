@@ -15,6 +15,7 @@ from market.state.services.dividend_service import DividendService
 from agents.agent_manager.agent_repository import AgentRepository
 from typing import Dict
 from market.state.services.interest_service import InterestService
+from market.state.services.borrow_service import BorrowService
 from agents.agent_manager.services.agent_decision_service import AgentDecisionService
 from market.orders.order_service_factory import OrderServiceFactory
 from services.shared_service_factory import SharedServiceFactory
@@ -56,6 +57,7 @@ class BaseSimulation:
                  model_open_ai = "gpt-4o-2024-07-18",
                  dividend_params: dict = None,
                  interest_params: dict = None,
+                 borrow_params: dict = None,
                  infinite_rounds: bool = False,
                  sim_type: str = "default"):
 
@@ -138,6 +140,17 @@ class BaseSimulation:
                 'compound_frequency': self.agent_params['interest_model']['compound_frequency']
             }
         )
+
+        # Initialize borrow fee service
+        default_borrow_model = self.agent_params.get('borrow_model', {})
+        self.borrow_service = BorrowService(
+            agent_repository=self.agent_repository,
+            logger=LoggingService.get_logger('market_state'),
+            borrow_params=borrow_params or {
+                'rate': default_borrow_model.get('rate', 0.0),
+                'payment_frequency': default_borrow_model.get('payment_frequency', 1)
+            }
+        )
         # Create and set information service
         information_service = InformationService(agent_repository=self.agent_repository)
         # Create market state manager with both services
@@ -149,6 +162,7 @@ class BaseSimulation:
             information_service=information_service,
             dividend_service=self.dividend_service,
             interest_service=self.interest_service,
+            borrow_service=self.borrow_service,
             hide_fundamental_price=self.hide_fundamental_price
         )
 
