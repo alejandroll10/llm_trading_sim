@@ -53,10 +53,10 @@ class DataRecorder:
         timestamp = datetime.now().isoformat()
         # Calculate aggregate short interest before recording
         short_interest = sum(
-            max(0, -self.agent_repository.get_agent_state_snapshot(
+            self.agent_repository.get_agent_state_snapshot(
                 agent_id,
                 self.context.current_price
-            ).shares)
+            ).borrowed_shares
             for agent_id in self.agent_repository.get_all_agent_ids()
         )
         self.context.update_short_interest(short_interest)

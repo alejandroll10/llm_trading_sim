@@ -18,6 +18,7 @@ class MarketHistory:
     trade_history: List[Dict]
     quote_history: List[Dict]
     short_interest: List[float]
+    borrow_fees_paid: List[float]
 
 class SimulationContext:
     """
@@ -54,7 +55,8 @@ class SimulationContext:
             interest_paid=[],
             trade_history=[],
             quote_history=[],
-            short_interest=[0]
+            short_interest=[0],
+            borrow_fees_paid=[]
         )
         
         # Public market information (observable by all)
@@ -99,6 +101,14 @@ class SimulationContext:
     def record_interest_payment(self, amount: float, round_number: int):
         """Record interest payment"""
         self.market_history.interest_paid.append({
+            'round': round_number,
+            'amount': amount,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    def record_borrow_fee_payment(self, amount: float, round_number: int):
+        """Record borrow fee payment"""
+        self.market_history.borrow_fees_paid.append({
             'round': round_number,
             'amount': amount,
             'timestamp': datetime.now().isoformat()

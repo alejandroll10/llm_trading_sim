@@ -12,8 +12,8 @@ Trading Options:
    - For each order:
      - Market order: Set order_type='market'
      - Limit order: Set order_type='limit' and specify price_limit
-   - IMPORTANT: Sell orders require sufficient available shares
-   - Short selling is NOT allowed
+   - IMPORTANT: Sell orders may require borrowing shares if you don't hold enough
+   - Short selling is allowed when borrowing is available
 
 2. Cancel Orders (replace_decision='Cancel'):
    - Return an empty orders list: orders=[]
@@ -31,10 +31,10 @@ Your decision must include:
 
 POSITION_INFO_TEMPLATE = """
 Your Position:
-- Available Shares: {shares} shares (Short selling is not allowed)
+- Available Shares: {shares} shares (negative indicates a short position)
 - Main Cash Account: ${cash:.2f}
 - Dividend Cash Account (not available for trading): ${dividend_cash:.2f}
-- Total Available Cash: ${total_available_cash:.2f} (Borrowing is not allowed)
+- Total Available Cash: ${total_available_cash:.2f} (Cash borrowing is not allowed)
 - Shares in Orders: {committed_shares} shares
 - Cash in Orders: ${committed_cash:.2f}
 """

@@ -1,6 +1,6 @@
 from typing import Dict, List
 from agents.base_agent import BaseAgent
-from agents.agents_api import TradeDecision, OrderType
+from agents.agents_api import TradeDecision, OrderType, OrderDetails
 
 class MomentumTrader(BaseAgent):
     """Trades based on price momentum/trend following"""
@@ -25,66 +25,98 @@ class MomentumTrader(BaseAgent):
         recent_prices = [h['price'] for h in history[-window:]]
         return sum(recent_prices) / len(recent_prices)
 
-    def make_decision(self, market_state: Dict, history: List, round_number: int) -> Dict:
+    def make_decision(self, market_state: Dict, history: List, round_number: int) -> TradeDecision:
+        current_price = market_state['price']
+
         if len(history) < self.long_window:  # Need sufficient history
             return TradeDecision(
-                decision="Hold",
-                quantity=0,
-                reasoning="Insufficient history for momentum analysis"
-            ).model_dump()
+                orders=[],
+                replace_decision="Add",
+                reasoning="Insufficient history for momentum analysis",
+                valuation=current_price,
+                valuation_reasoning="Using current price as valuation baseline",
+                price_target=current_price,
+                price_target_reasoning="No trend data available",
+            )
 
-        current_price = market_state['price']
         short_ma = self.calculate_moving_average(history, self.short_window)
         long_ma = self.calculate_moving_average(history, self.long_window)
-        
+
         # Calculate trend strength
         trend = (short_ma - long_ma) / long_ma
-        
+
         # If trend is too weak, hold
         if abs(trend) < self.min_trend:
             return TradeDecision(
-                decision="Hold",
-                quantity=0,
-                reasoning="Insufficient trend strength"
-            ).model_dump()
-        
+                orders=[],
+                replace_decision="Add",
+                reasoning="Insufficient trend strength",
+                valuation=current_price,
+                valuation_reasoning="Using current price as valuation baseline",
+                price_target=current_price,
+                price_target_reasoning="Trend below threshold",
+            )
+
         # Upward trend -> Buy
         if trend > 0:
             available_cash = self.available_cash
             max_shares = int(available_cash / current_price)
             quantity = int(max_shares * min(abs(trend), self.max_position))
-            
+
             if quantity == 0:
                 return TradeDecision(
-                    decision="Hold",
-                    quantity=0,
-                    reasoning="Insufficient cash for momentum trade"
-                ).model_dump()
-                
-            return TradeDecision(
+                    orders=[],
+                    replace_decision="Add",
+                    reasoning="Insufficient cash for momentum trade",
+                    valuation=current_price,
+                    valuation_reasoning="Using current price as valuation baseline",
+                    price_target=current_price,
+                    price_target_reasoning="Cannot participate in trend",
+                )
+
+            order = OrderDetails(
                 decision="Buy",
                 quantity=quantity,
                 order_type=OrderType.LIMIT,
-                price_limit=current_price * 1.01,  # Pay up to 1% more
-                reasoning=f"Upward trend: Short MA ${short_ma:.2f} above Long MA ${long_ma:.2f} by {trend:.1%}"
-            ).model_dump()
-            
-        # Downward trend -> Sell
-        else:
-            available_shares = self.available_shares
-            quantity = int(available_shares * min(abs(trend), self.max_position))
-            
-            if quantity == 0:
-                return TradeDecision(
-                    decision="Hold",
-                    quantity=0,
-                    reasoning="Insufficient shares for momentum trade"
-                ).model_dump()
-                
+                price_limit=current_price * 1.01,
+            )
             return TradeDecision(
-                decision="Sell",
-                quantity=quantity,
-                order_type=OrderType.LIMIT,
-                price_limit=current_price * 0.99,  # Accept up to 1% less
-                reasoning=f"Downward trend: Short MA ${short_ma:.2f} below Long MA ${long_ma:.2f} by {abs(trend):.1%}"
-            ).model_dump()
+                orders=[order],
+                replace_decision="Replace",
+                reasoning=f"Upward trend: Short MA ${short_ma:.2f} above Long MA ${long_ma:.2f} by {trend:.1%}",
+                valuation=current_price,
+                valuation_reasoning="Using current price as valuation baseline",
+                price_target=current_price * (1 + min(trend, 0.05)),
+                price_target_reasoning="Expect price to rise with trend",
+            )
+
+        # Downward trend -> Sell
+        available_shares = self.available_shares
+        quantity = int(available_shares * min(abs(trend), self.max_position))
+
+        if quantity == 0:
+            return TradeDecision(
+                orders=[],
+                replace_decision="Add",
+                reasoning="Insufficient shares for momentum trade",
+                valuation=current_price,
+                valuation_reasoning="Using current price as valuation baseline",
+                price_target=current_price,
+                price_target_reasoning="Cannot participate in trend",
+            )
+
+        order = OrderDetails(
+            decision="Sell",
+            quantity=quantity,
+            order_type=OrderType.LIMIT,
+            price_limit=current_price * 0.99,
+        )
+        return TradeDecision(
+            orders=[order],
+            replace_decision="Replace",
+            reasoning=f"Downward trend: Short MA ${short_ma:.2f} below Long MA ${long_ma:.2f} by {abs(trend):.1%}",
+            valuation=current_price,
+            valuation_reasoning="Using current price as valuation baseline",
+            price_target=current_price * (1 - min(abs(trend), 0.05)),
+            price_target_reasoning="Expect price to fall with trend",
+        )

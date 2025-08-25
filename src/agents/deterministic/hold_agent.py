@@ -8,9 +8,14 @@ class HoldTrader(BaseAgent):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def make_decision(self, market_state: Dict, history: List, round_number: int) -> Dict:
+    def make_decision(self, market_state: Dict, history: List, round_number: int) -> TradeDecision:
+        current_price = market_state.get('price', 0)
         return TradeDecision(
-            decision="Hold",
-            quantity=0,
-            reasoning="Always hold strategy"
-        ).model_dump()
+            orders=[],
+            replace_decision="Add",
+            reasoning="Always hold strategy",
+            valuation=current_price,
+            valuation_reasoning="Using current price as valuation baseline",
+            price_target=current_price,
+            price_target_reasoning="No expected price change",
+        )

@@ -1,6 +1,6 @@
 from typing import Dict, List
 from agents.base_agent import BaseAgent
-from agents.agents_api import TradeDecision, OrderType
+from agents.agents_api import TradeDecision, OrderType, OrderDetails
 
 class ProportionalGapTrader(BaseAgent):
     """Trades proportionally to the gap between price and fundamental value"""
@@ -27,59 +27,87 @@ class ProportionalGapTrader(BaseAgent):
         )
         return proportion
 
-    def make_decision(self, market_state: Dict, history: List, round_number: int) -> Dict:
+    def make_decision(self, market_state: Dict, history: List, round_number: int) -> TradeDecision:
         price = market_state['price']
         fundamental = market_state.get('fundamental_price', price)
-        
+
         # Calculate gap as percentage
         gap_percentage = (fundamental - price) / price
-        
+
         # Calculate proportion to trade
         proportion = self.calculate_trade_proportion(gap_percentage)
-        
+
         if proportion == 0:
             return TradeDecision(
-                decision="Hold",
-                quantity=0,
-                reasoning="Gap between price and fundamental too small"
-            ).model_dump()
-        
+                orders=[],
+                replace_decision="Add",
+                reasoning="Gap between price and fundamental too small",
+                valuation=fundamental,
+                valuation_reasoning="Fundamental estimate provided",
+                price_target=price,
+                price_target_reasoning="No trade executed",
+            )
+
         # Decide whether to buy or sell
         if gap_percentage > 0:  # Undervalued -> Buy
             available_cash = self.available_cash
             max_shares = int(available_cash / price)
             quantity = int(max_shares * proportion)
-            
+
             if quantity == 0:
                 return TradeDecision(
-                    decision="Hold",
-                    quantity=0,
-                    reasoning="Insufficient cash for minimum trade"
-                ).model_dump()
-                
-            return TradeDecision(
+                    orders=[],
+                    replace_decision="Add",
+                    reasoning="Insufficient cash for minimum trade",
+                    valuation=fundamental,
+                    valuation_reasoning="Fundamental estimate provided",
+                    price_target=price,
+                    price_target_reasoning="Cannot participate",
+                )
+
+            order = OrderDetails(
                 decision="Buy",
                 quantity=quantity,
                 order_type=OrderType.LIMIT,
-                price_limit=price * 1.01,  # Willing to pay 1% more
-                reasoning=f"Price ${price:.2f} below fundamental ${fundamental:.2f} by {gap_percentage:.1%}"
-            ).model_dump()
-            
-        else:  # Overvalued -> Sell
-            available_shares = self.available_shares
-            quantity = int(available_shares * proportion)
-            
-            if quantity == 0:
-                return TradeDecision(
-                    decision="Hold",
-                    quantity=0,
-                    reasoning="Insufficient shares for minimum trade"
-                ).model_dump()
-                
+                price_limit=price * 1.01,
+            )
             return TradeDecision(
-                decision="Sell",
-                quantity=quantity,
-                order_type=OrderType.LIMIT,
-                price_limit=price * 0.99,  # Willing to accept 1% less
-                reasoning=f"Price ${price:.2f} above fundamental ${fundamental:.2f} by {abs(gap_percentage):.1%}"
-            ).model_dump()
+                orders=[order],
+                replace_decision="Replace",
+                reasoning=f"Price ${price:.2f} below fundamental ${fundamental:.2f} by {gap_percentage:.1%}",
+                valuation=fundamental,
+                valuation_reasoning="Fundamental estimate provided",
+                price_target=price * (1 + min(abs(gap_percentage), 0.05)),
+                price_target_reasoning="Expect move toward fundamental",
+            )
+
+        # Overvalued -> Sell
+        available_shares = self.available_shares
+        quantity = int(available_shares * proportion)
+
+        if quantity == 0:
+            return TradeDecision(
+                orders=[],
+                replace_decision="Add",
+                reasoning="Insufficient shares for minimum trade",
+                valuation=fundamental,
+                valuation_reasoning="Fundamental estimate provided",
+                price_target=price,
+                price_target_reasoning="Cannot participate",
+            )
+
+        order = OrderDetails(
+            decision="Sell",
+            quantity=quantity,
+            order_type=OrderType.LIMIT,
+            price_limit=price * 0.99,
+        )
+        return TradeDecision(
+            orders=[order],
+            replace_decision="Replace",
+            reasoning=f"Price ${price:.2f} above fundamental ${fundamental:.2f} by {abs(gap_percentage):.1%}",
+            valuation=fundamental,
+            valuation_reasoning="Fundamental estimate provided",
+            price_target=price * (1 - min(abs(gap_percentage), 0.05)),
+            price_target_reasoning="Expect move toward fundamental",
+        )

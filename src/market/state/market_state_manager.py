@@ -102,7 +102,9 @@ class MarketStateManager:
 
         # 2. Process borrow fee payments
         if self.borrow_service:
-            self.borrow_service.process_borrow_fees(round_number, self.context.current_price)
+            borrow_result = self.borrow_service.process_borrow_fees(round_number, self.context.current_price)
+            if borrow_result.total_fee > 0:
+                self.context.record_borrow_fee_payment(borrow_result.total_fee, round_number)
         
         # 3. Process dividend payments if needed
         if self.dividend_service:

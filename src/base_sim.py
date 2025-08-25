@@ -419,8 +419,8 @@ class BaseSimulation:
         # Get payments from this round
         current_round = self.context.round_number
         dividend_payment = sum(
-            payment['amount'] 
-            for payment in self.context.market_history.dividends_paid 
+            payment['amount']
+            for payment in self.context.market_history.dividends_paid
             if payment['round'] == current_round - 1
         )
         interest_payment = sum(
@@ -428,14 +428,21 @@ class BaseSimulation:
             for payment in self.context.market_history.interest_paid
             if payment['round'] == current_round - 1
         )
-        
-        self.logger.info(f"Round payments - Dividends: ${dividend_payment:.2f}, Interest: ${interest_payment:.2f}")
-        
+        borrow_fee_payment = sum(
+            payment['amount']
+            for payment in self.context.market_history.borrow_fees_paid
+            if payment['round'] == current_round - 1
+        )
+
+        self.logger.info(
+            f"Round payments - Dividends: ${dividend_payment:.2f}, Interest: ${interest_payment:.2f}, Borrow Fees: ${borrow_fee_payment:.2f}"
+        )
+
         # Verify round-by-round changes
         cash_difference = total_cash_post - total_cash_pre
-        total_round_payments = dividend_payment + interest_payment
+        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment
         self.logger.info(f"Cash change: ${cash_difference:.2f}, Expected: ${total_round_payments:.2f}")
-        
+
         if abs(cash_difference - total_round_payments) > 0.01:
             msg = (f"Round cash change doesn't match round payments:\n"
                    f"Change in cash: ${cash_difference:.2f}\n"
@@ -450,15 +457,19 @@ class BaseSimulation:
         )
         total_historical_dividends = sum(payment['amount'] for payment in self.context.market_history.dividends_paid)
         total_historical_interest = sum(payment['amount'] for payment in self.context.market_history.interest_paid)
-        expected_total_cash = initial_cash + total_historical_dividends + total_historical_interest
-        
+        total_historical_borrow_fees = sum(payment['amount'] for payment in self.context.market_history.borrow_fees_paid)
+        expected_total_cash = (
+            initial_cash + total_historical_dividends + total_historical_interest - total_historical_borrow_fees
+        )
+
         self.logger.info(f"\n=== System-wide cash verification ===")
         self.logger.info(f"Initial cash: ${initial_cash:.2f}")
         self.logger.info(f"Total historical dividends: ${total_historical_dividends:.2f}")
         self.logger.info(f"Total historical interest: ${total_historical_interest:.2f}")
+        self.logger.info(f"Total historical borrow fees: ${total_historical_borrow_fees:.2f}")
         self.logger.info(f"Current total cash: ${total_cash_post:.2f}")
         self.logger.info(f"Expected total: ${expected_total_cash:.2f}")
-        
+
         if abs(total_cash_post - expected_total_cash) > 0.01:
             msg = (f"Total system cash doesn't match historical payments")
             logger.error(msg)
@@ -503,7 +514,10 @@ class BaseSimulation:
         
         total_shares_current = sum(post_shares.values())
         self.logger.info(f"Post-round total: {total_shares_current}")
-        
+
+        borrowed_total = self.agent_repository.borrowing_repository.total_lendable - self.agent_repository.borrowing_repository.available_shares
+        expected_total_shares = initial_shares + borrowed_total
+
         # Modified verification logic
         if is_final_redemption:
             if total_shares_current != 0:
@@ -517,9 +531,10 @@ class BaseSimulation:
                 logger.error(msg)
                 raise ValueError(msg)
             self.logger.info("Final redemption: All shares successfully redeemed")
-        elif total_shares_current != initial_shares:
+        elif total_shares_current != expected_total_shares:
             msg = (f"Total shares in system changed from initial allocation:\n"
                    f"Initial shares: {initial_shares}\n"
+                   f"Borrowed shares: {borrowed_total}\n"
                    f"Current shares: {total_shares_current}\n"
                    f"Share changes this round:")
             for agent_id in pre_shares:
