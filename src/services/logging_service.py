@@ -74,6 +74,7 @@ class LoggingService:
         cls._setup_interest_logger(console_handler)
         cls._setup_dividend_logger(console_handler)
         cls._setup_verification_logger(console_handler)
+        cls._setup_margin_call_logger(console_handler)
 
         # Prevent duplicate messages
         for logger in cls._loggers.values():
@@ -113,6 +114,20 @@ class LoggingService:
                     f.write("timestamp,round_number,agent_id,agent_type,error_type,details,attempted_action\n")
         
         cls._setup_logger('validation_errors', console_handler, 'validation_errors.csv', csv_formatter)
+
+    @classmethod
+    def _setup_margin_call_logger(cls, console_handler):
+        """Setup margin call events logger"""
+        csv_formatter = logging.Formatter('%(message)s')
+        header = (
+            "timestamp,round_number,agent_id,agent_type,borrowed_shares," \
+            "max_borrowable,action,excess_shares,price\n"
+        )
+        for path in [cls._run_dir / 'margin_calls.csv', cls._latest_dir / 'margin_calls.csv']:
+            if not path.exists() or path.stat().st_size == 0:
+                with open(path, 'w') as f:
+                    f.write(header)
+        cls._setup_logger('margin_calls', console_handler, 'margin_calls.csv', csv_formatter)
 
     @classmethod
     def _setup_structured_decisions_logger(cls, console_handler):
@@ -323,6 +338,18 @@ class LoggingService:
     def log_structured_decision(cls, entry):
         """Log structured decision"""
         cls._loggers['structured_decisions'].info(entry.to_csv())
+
+    @classmethod
+    def log_margin_call(cls, round_number: int, agent_id: str, agent_type: str,
+                        borrowed_shares: float, max_borrowable: float,
+                        action: str, excess_shares: float, price: float):
+        """Log margin call events for auditability."""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+        csv_message = (
+            f"{timestamp},{round_number},{agent_id},{agent_type},{borrowed_shares},"
+            f"{max_borrowable},{action},{excess_shares},{price}"
+        )
+        cls._loggers['margin_calls'].info(csv_message)
 
     @classmethod
     def log_decision(cls, message: str):

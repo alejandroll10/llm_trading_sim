@@ -54,10 +54,29 @@ class MatchingEngine:
         """Match orders for a trading round with prioritized processing"""
         # Log pre-match state
         LoggingService.log_market_state(self.order_book, round_number, "Pre-Match State")
-        
-        # Split orders and initialize trades list
-        market_orders, limit_orders = self.order_processing_service.split_orders_by_type(new_orders)
+
+        # Separate liquidation orders initiated by broker
+        liquidation_orders = [o for o in new_orders if getattr(o, 'liquidation', False)]
+        regular_orders = [o for o in new_orders if not getattr(o, 'liquidation', False)]
+
         trades = []
+
+        # Process liquidation orders with highest priority
+        if liquidation_orders:
+            liq_trades, _ = self.market_order_handler.process_orders(
+                liquidation_orders, current_price, round_number
+            )
+            trades.extend(
+                self.trade_processing_service.process_market_order_results(
+                    liq_trades, [], []
+                )
+            )
+            LoggingService.log_market_state(
+                self.order_book, round_number, "Post-Liquidation Order State"
+            )
+
+        # Split remaining orders by type
+        market_orders, limit_orders = self.order_processing_service.split_orders_by_type(regular_orders)
         
         # Handle limit orders
         crossing_orders = self.limit_order_handler.add_non_crossing_orders(limit_orders)
