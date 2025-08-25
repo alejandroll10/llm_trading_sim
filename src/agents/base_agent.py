@@ -437,10 +437,51 @@ class BaseAgent(ABC):
         """Update agent's total wealth based on current price, accounting for borrowed shares"""
         # Track the last price for margin requirement checks
         self.last_price = current_price
-        
+
         # Net shares position (can be negative with short selling)
         net_shares = self.total_shares - self.borrowed_shares
         self.wealth = self.total_cash + (net_shares * current_price)
+
+        # Automatically handle margin requirements after price update
+        self.handle_margin_call(current_price, self.last_update_round)
+
+    def handle_margin_call(self, current_price: float, round_number: int):
+        """Force buy-to-cover when margin requirements are violated."""
+        if self.borrowed_shares <= 0:
+            return
+
+        max_borrowable = self.get_max_borrowable_shares(current_price)
+        if self.borrowed_shares > max_borrowable:
+            excess = self.borrowed_shares - max_borrowable
+            original_borrowed = self.borrowed_shares
+            cost = excess * current_price
+
+            # Execute forced buy-to-cover
+            self.borrowed_shares -= excess
+            self.shares += excess
+            self.cash -= cost
+            self.record_payment('main', -cost, 'trade', round_number)
+
+            LoggingService.log_margin_call(
+                round_number=round_number,
+                agent_id=self.agent_id,
+                agent_type=self.agent_type.name,
+                borrowed_shares=original_borrowed,
+                max_borrowable=max_borrowable,
+                action="BUY_TO_COVER",
+                excess_shares=excess,
+                price=current_price
+            )
+
+            LoggingService.log_agent_state(
+                agent_id=self.agent_id,
+                operation="MARGIN CALL - FORCED BUY TO COVER",
+                amount=excess,
+                agent_state=self._get_state_dict(),
+                outstanding_orders=self.outstanding_orders,
+                order_history=self.order_history,
+                is_error=True
+            )
 
     def sync_orders(self, orders):
         """Sync agent's orders with the order repository"""
@@ -636,27 +677,9 @@ class BaseAgent(ABC):
             )
             state_valid = False
         
-        # Check margin requirements
+        # Check margin requirements and trigger margin call if needed
         if self.borrowed_shares > 0 and hasattr(self, 'last_price'):
-            max_borrowable = self.get_max_borrowable_shares(self.last_price)
-            if self.borrowed_shares > max_borrowable:
-                margin_base_value = self.cash if self.margin_base == "cash" else (
-                    self.total_cash + (self.total_shares - self.borrowed_shares) * self.last_price
-                )
-                
-                LoggingService.log_agent_state(
-                    agent_id=self.agent_id,
-                    operation="MARGIN REQUIREMENT NOT MET",
-                    amount=(f"Borrowed shares: {self.borrowed_shares}, "
-                           f"Max allowed: {max_borrowable:.2f}, "
-                           f"Margin base ({self.margin_base}): {margin_base_value:.2f}, "
-                           f"Requirement: {self.margin_requirement:.2%}"),
-                    agent_state=self._get_state_dict(),
-                    outstanding_orders=self.outstanding_orders,
-                    order_history=self.order_history,
-                    is_error=True
-                )
-                state_valid = False
+            self.handle_margin_call(self.last_price, self.last_update_round)
         
         return state_valid
 
