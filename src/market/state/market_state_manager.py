@@ -1,6 +1,6 @@
 from datetime import datetime
 from market.information.information_types import InformationType
-from market.information.information_providers import ProviderConfig,MarketPriceProvider, OrderBookProvider, FundamentalProvider, DividendProvider, InterestProvider, VolumeProvider
+from market.information.information_providers import ProviderConfig,MarketPriceProvider, OrderBookProvider, FundamentalProvider, DividendProvider, InterestProvider, VolumeProvider, BorrowRateProvider
 from typing import Optional
 from services.logging_service import LoggingService
 
@@ -22,7 +22,8 @@ class MarketStateManager:
     """
 
     def __init__(self, context, order_book, agent_repository, logger,  information_service,
-                 dividend_service, interest_service, 
+                 dividend_service, interest_service,
+                 borrow_service=None,
                  hide_fundamental_price=False):
         self.context = context
         self.order_book = order_book
@@ -31,6 +32,7 @@ class MarketStateManager:
         self.hide_fundamental_price = hide_fundamental_price
         self.dividend_service = dividend_service
         self.interest_service = interest_service
+        self.borrow_service = borrow_service
 
     @property
     def current_price(self) -> float:
@@ -66,6 +68,10 @@ class MarketStateManager:
             LoggingService.get_logger('simulation').error("No dividend service found")
             raise RuntimeError("No dividend service found")
 
+        # 3. Update borrow state if exists
+        if self.borrow_service:
+            self.borrow_service.update(round_number)
+
     def _distribute_market_information(self, round_number: int):
         """Handle all information distribution"""
         if not self.information_service:
@@ -93,8 +99,12 @@ class MarketStateManager:
                     amount=interest_result.total_payment,
                     round_number=round_number
                 )
+
+        # 2. Process borrow fee payments
+        if self.borrow_service:
+            self.borrow_service.process_borrow_fees(round_number, self.context.current_price)
         
-        # 2. Process dividend payments if needed
+        # 3. Process dividend payments if needed
         if self.dividend_service:
             LoggingService.get_logger('simulation').info(f"Processing dividend payments for round {round_number}")
             payment_result = self.dividend_service.process_round_end(round_number, is_final_round)
@@ -199,6 +209,7 @@ class MarketStateManager:
             'fundamental': self._format_fundamental_state(),
             'dividend': self._format_dividend_state(),
             'interest': self._format_interest_state(),
+            'borrow': self._format_borrow_state(),
             'metadata': self._format_metadata(public_info)
         }
 
@@ -241,6 +252,19 @@ class MarketStateManager:
                             if self.interest_service.interest_history else None),
             'next_payment_round': self.interest_service.next_payment_round,
             'destination': self.interest_service.interest_model['destination']
+        }
+
+    def _format_borrow_state(self) -> dict:
+        """Format borrow fee state information"""
+        if not self.borrow_service:
+            return {}
+
+        return {
+            'rate': self.borrow_service.get_current_rate(),
+            'payment_frequency': self.borrow_service.borrow_model.get('payment_frequency', 1),
+            'last_payment': (self.borrow_service.borrow_history[-1]
+                             if self.borrow_service.borrow_history else None),
+            'next_payment_round': self.borrow_service.next_payment_round
         }
 
     def _format_metadata(self, public_info: dict) -> dict:
@@ -300,6 +324,12 @@ class MarketStateManager:
             
         if self.interest_service:
             providers[InformationType.INTEREST] = InterestProvider(
+                market_state_manager=self,
+                config=base_config
+            )
+
+        if self.borrow_service:
+            providers[InformationType.BORROW_FEE] = BorrowRateProvider(
                 market_state_manager=self,
                 config=base_config
             )

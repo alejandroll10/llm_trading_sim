@@ -63,6 +63,24 @@ class InterestProvider(BaseProvider):
             }
         )
 
+
+class BorrowRateProvider(BaseProvider):
+    def generate_signal(self, round_number: int) -> InformationSignal:
+        state = self.market_state
+        borrow_state = state['borrow']
+
+        return InformationSignal(
+            type=InformationType.BORROW_FEE,
+            value=borrow_state['rate'],
+            reliability=self.config.reliability,
+            metadata={
+                'round': round_number,
+                'payment_frequency': borrow_state['payment_frequency'],
+                'last_payment': borrow_state.get('last_payment'),
+                'next_payment_round': borrow_state.get('next_payment_round')
+            }
+        )
+
 class OrderBookProvider(BaseProvider):
     def generate_signal(self, round_number: int) -> InformationSignal:
         state = self.market_state

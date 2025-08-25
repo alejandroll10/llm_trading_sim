@@ -10,6 +10,7 @@ class InformationType(Enum):
     FUNDAMENTAL = "fundamental"
     DIVIDEND = "dividend"
     INTEREST = "interest"
+    BORROW_FEE = "borrow_fee"
     INSIDER = "insider"
 
 class SignalCategory(Enum):
@@ -49,6 +50,7 @@ SIGNAL_CATEGORIES = {
     InformationType.FUNDAMENTAL: SignalCategory.FUNDAMENTAL,
     InformationType.DIVIDEND: SignalCategory.FUNDAMENTAL,
     InformationType.INTEREST: SignalCategory.PUBLIC,
+    InformationType.BORROW_FEE: SignalCategory.PUBLIC,
     InformationType.INSIDER: SignalCategory.RESTRICTED
 }
 
