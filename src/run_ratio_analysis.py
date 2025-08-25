@@ -61,14 +61,23 @@ def setup_logging(name: str = "ratio_analysis") -> logging.Logger:
     
     return logger
 
-def setup_test_agent() -> LLMAgent:
-    """Initialize a test agent with standard parameters"""
+def setup_test_agent(
+    allow_short_selling: bool = False,
+    margin_requirement: float = 0.5,
+    borrow_rate: float = 0.01,
+) -> LLMAgent:
+    """Initialize a test agent with configurable parameters"""
     base_params = {
         'agent_id': "test_agent",
         'initial_cash': INITIAL_CASH,
         'initial_shares': INITIAL_SHARES,
         'position_limit': POSITION_LIMIT,
-        'allow_short_selling': False,
+        'allow_short_selling': allow_short_selling,
+        'margin_requirement': margin_requirement,
+        'borrow_model': {
+            'rate': borrow_rate,
+            'payment_frequency': 1
+        },
         'initial_price': INITIAL_PRICE
     }
     
@@ -102,7 +111,10 @@ def save_parameters(save_dir: Path):
 def run_ratio_analysis(
     ratios: List[float] = RATIOS,
     repeats_per_ratio: int = REPEATS_PER_RATIO,
-    archive: bool = True
+    archive: bool = True,
+    allow_short_selling: bool = False,
+    margin_requirement: float = 0.5,
+    borrow_rate: float = 0.01,
 ) -> Dict:
     """Run price/fundamental ratio analysis"""
     logger = setup_logging()
@@ -157,7 +169,11 @@ def run_ratio_analysis(
     )
     
     # Setup analyzer
-    agent = setup_test_agent()
+    agent = setup_test_agent(
+        allow_short_selling=allow_short_selling,
+        margin_requirement=margin_requirement,
+        borrow_rate=borrow_rate,
+    )
     analyzer = PriceFundamentalAnalyzer(agent, base_scenario, repeats_per_ratio)
     
     # Open conversation log file
@@ -197,7 +213,41 @@ def run_ratio_analysis(
     return results
 
 if __name__ == "__main__":
-    results = run_ratio_analysis()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run price/fundamental ratio analysis")
+    parser.add_argument(
+        "--allow-short-selling",
+        dest="allow_short_selling",
+        action="store_true",
+        help="Enable short selling for the test agent",
+    )
+    parser.add_argument(
+        "--disallow-short-selling",
+        dest="allow_short_selling",
+        action="store_false",
+        help="Disable short selling for the test agent",
+    )
+    parser.set_defaults(allow_short_selling=False)
+    parser.add_argument(
+        "--margin-requirement",
+        type=float,
+        default=0.5,
+        help="Margin requirement for the test agent",
+    )
+    parser.add_argument(
+        "--borrow-rate",
+        type=float,
+        default=0.01,
+        help="Borrow rate applied to short positions",
+    )
+    args = parser.parse_args()
+
+    results = run_ratio_analysis(
+        allow_short_selling=args.allow_short_selling,
+        margin_requirement=args.margin_requirement,
+        borrow_rate=args.borrow_rate,
+    )
     
     print("\nAnalysis complete!")
     print(f"Results saved to: {results['results_dir']}")
