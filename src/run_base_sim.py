@@ -966,11 +966,28 @@ def copy_data_to_latest(simulation):
         shutil.copy2(params_file, target_params)
         print(f"Copied parameters to {target_params}")
 
-def run_scenario(scenario_name: str):
+def run_scenario(
+    scenario_name: str,
+    allow_short_selling: bool = None,
+    margin_requirement: float = None,
+    borrow_rate: float = None,
+):
     """Run a single scenario by name"""
     # Load scenario
     scenario = get_scenario(scenario_name)
     params = scenario.parameters
+
+    # Apply overrides if provided
+    agent_params = params.get("AGENT_PARAMS", {})
+    if allow_short_selling is not None:
+        agent_params['allow_short_selling'] = allow_short_selling
+    if margin_requirement is not None:
+        agent_params['margin_requirement'] = margin_requirement
+    if borrow_rate is not None:
+        borrow_model = agent_params.get('borrow_model', {})
+        borrow_model['rate'] = borrow_rate
+        borrow_model.setdefault('payment_frequency', 1)
+        agent_params['borrow_model'] = borrow_model
 
     # Set random seeds for reproducibility
     np.random.seed(params["RANDOM_SEED"])
@@ -1041,11 +1058,36 @@ def main():
         help="The name of the scenario to run. If not provided, lists available scenarios."
     )
     parser.add_argument(
-        "-l", "--list", 
-        action="store_true", 
+        "-l", "--list",
+        action="store_true",
         help="List all available scenarios and their descriptions."
     )
-    
+    parser.add_argument(
+        "--allow-short-selling",
+        dest="allow_short_selling",
+        action="store_true",
+        help="Enable short selling regardless of scenario settings"
+    )
+    parser.add_argument(
+        "--disallow-short-selling",
+        dest="allow_short_selling",
+        action="store_false",
+        help="Disable short selling regardless of scenario settings"
+    )
+    parser.set_defaults(allow_short_selling=None)
+    parser.add_argument(
+        "--margin-requirement",
+        type=float,
+        default=None,
+        help="Override margin requirement for agents"
+    )
+    parser.add_argument(
+        "--borrow-rate",
+        type=float,
+        default=None,
+        help="Override borrow rate for short positions"
+    )
+
     args = parser.parse_args()
 
     # Get available scenarios
@@ -1079,7 +1121,12 @@ def main():
     print(f"\nRunning scenario: {scenario_name}")
     print("-" * 50)
     try:
-        run_scenario(scenario_name)
+        run_scenario(
+            scenario_name,
+            allow_short_selling=args.allow_short_selling,
+            margin_requirement=args.margin_requirement,
+            borrow_rate=args.borrow_rate,
+        )
         print(f"Successfully completed scenario: {scenario_name}")
     except Exception as e:
         print(f"Error running scenario {scenario_name}: {str(e)}")

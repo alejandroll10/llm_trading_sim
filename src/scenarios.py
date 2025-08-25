@@ -99,6 +99,11 @@ DEFAULT_PARAMS = {
     "MODEL_OPEN_AI": "gpt-4o-2024-11-20",
     "AGENT_PARAMS": {
         'allow_short_selling': False,
+        'margin_requirement': 0.5,
+        'borrow_model': {
+            'rate': 0.01,
+            'payment_frequency': 1
+        },
         'position_limit': BASE_POSITION_LIMIT,
         'initial_cash': BASE_INITIAL_CASH,
         'initial_shares': BASE_INITIAL_SHARES,
@@ -603,6 +608,23 @@ SCENARIOS = {
                         'scaling_factor': 2.0
                     }
                 }
+            }
+        }
+    ),
+    "short_selling_benchmark": SimulationScenario(
+        name="short_selling_benchmark",
+        description="Benchmark scenario with short selling enabled and borrow costs",
+        parameters={
+            **DEFAULT_PARAMS,
+            "LENDABLE_SHARES": 20000,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.02,
+                    'payment_frequency': 1
+                },
             }
         }
     ),
