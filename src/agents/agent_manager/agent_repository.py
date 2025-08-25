@@ -298,6 +298,8 @@ class AgentRepository:
             committed_cash=agent.committed_cash,
             committed_shares=agent.committed_shares,
             total_shares=agent.total_shares,
+            borrowed_shares=agent.borrowed_shares,
+            net_shares=agent.total_shares - agent.borrowed_shares,
             wealth=agent.wealth,
             orders_by_state=agent.orders,
             trade_summary=agent.get_trade_summary()

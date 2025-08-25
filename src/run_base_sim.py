@@ -174,10 +174,12 @@ def save_plots(simulation, params: dict):
             min_round = agent_df[agent_df['agent_type'] == agent_type]['round'].min()
             # Get data from the first round
             type_data = agent_df[(agent_df['agent_type'] == agent_type) & (agent_df['round'] == min_round)]
-            
+
             if not type_data.empty:
                 initial_values[agent_type] = {
                     'shares': type_data['shares'].sum(),
+                    'borrowed_shares': type_data['borrowed_shares'].sum() if 'borrowed_shares' in type_data.columns else 0,
+                    'net_shares': type_data['net_shares'].sum() if 'net_shares' in type_data.columns else type_data['shares'].sum(),
                     'cash': type_data['cash'].sum(),
                     'total_value': type_data['total_value'].sum()
                 }
@@ -278,7 +280,7 @@ def save_plots(simulation, params: dict):
             print(f"  Error creating wealth composition plot: {str(e)}")
         
         # 1. Absolute value plots - Show raw values for all metrics
-        for metric in ['shares', 'cash', 'total_value']:
+        for metric in ['shares', 'borrowed_shares', 'net_shares', 'cash', 'total_value']:
             try:
                 if metric not in agent_df.columns:
                     continue
@@ -293,6 +295,8 @@ def save_plots(simulation, params: dict):
                 
                 title_map = {
                     'shares': 'Share Holdings',
+                    'borrowed_shares': 'Borrowed Shares',
+                    'net_shares': 'Net Share Holdings',
                     'cash': 'Trading Cash Holdings',
                     'total_value': 'Total Wealth'
                 }
@@ -307,34 +311,42 @@ def save_plots(simulation, params: dict):
             except Exception as e:
                 print(f"  Error creating {metric} absolute plot: {str(e)}")
         
-        # 2. For shares - Show absolute change in number of shares
-        try:
-            plt.figure(figsize=(12, 6))
-            
-            # Group by round and agent_type, sum shares
-            grouped = agent_df.groupby(['round', 'agent_type'])['shares'].sum().unstack()
-            
-            # Calculate absolute change from initial shares
-            share_changes = pd.DataFrame(index=grouped.index, columns=grouped.columns)
-            
-            for agent_type in grouped.columns:
-                if agent_type in initial_values:
-                    initial = initial_values[agent_type]['shares']
-                    share_changes[agent_type] = grouped[agent_type] - initial
-            
-            # Plot share changes
-            share_changes.plot(kind='line', marker='o')
-            
-            plt.xlabel('Round')
-            plt.ylabel('Change in Shares')
-            plt.title('Change in Number of Shares by Agent Type')
-            plt.legend(title='Agent Type')
-            plt.grid(True, alpha=0.3)
-            plt.axhline(y=0, color='black', linestyle='-', alpha=0.3)
-            
-            save_plot_with_suffix('agent_shares_change')
-        except Exception as e:
-            print(f"  Error creating shares change plot: {str(e)}")
+        # 2. For share-related metrics - Show absolute change
+        for metric, label in [
+            ('shares', 'Change in Shares'),
+            ('net_shares', 'Change in Net Shares'),
+            ('borrowed_shares', 'Change in Borrowed Shares'),
+        ]:
+            try:
+                if metric not in agent_df.columns:
+                    continue
+
+                plt.figure(figsize=(12, 6))
+
+                # Group by round and agent_type, sum metric
+                grouped = agent_df.groupby(['round', 'agent_type'])[metric].sum().unstack()
+
+                # Calculate absolute change from initial values
+                changes = pd.DataFrame(index=grouped.index, columns=grouped.columns)
+
+                for agent_type in grouped.columns:
+                    if agent_type in initial_values:
+                        initial = initial_values[agent_type].get(metric, 0)
+                        changes[agent_type] = grouped[agent_type] - initial
+
+                # Plot changes
+                changes.plot(kind='line', marker='o')
+
+                plt.xlabel('Round')
+                plt.ylabel(label)
+                plt.title(f'{label} by Agent Type')
+                plt.legend(title='Agent Type')
+                plt.grid(True, alpha=0.3)
+                plt.axhline(y=0, color='black', linestyle='-', alpha=0.3)
+
+                save_plot_with_suffix(f'agent_{metric}_change')
+            except Exception as e:
+                print(f"  Error creating {metric} change plot: {str(e)}")
             
         # 3. For cash - Show both percentage return and absolute change
         try:

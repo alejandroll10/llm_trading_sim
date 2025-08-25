@@ -12,6 +12,8 @@ class AgentRecordData:
     agent_type: str
     cash: float
     shares: int
+    borrowed_shares: int
+    net_shares: int
     share_value: float
     total_value: float
     dividends_received: float
@@ -138,12 +140,12 @@ class DataRecorder:
             )
             
             # Calculate values
-            share_value = state.shares * self.context.current_price
-            
+            share_value = round(state.net_shares * self.context.current_price, 2)
+
             # Use the wealth already calculated by the agent
-            current_wealth = state.wealth
-            
-            dividends_received = state.shares * dividends
+            current_wealth = round(state.wealth, 2)
+
+            dividends_received = round(state.net_shares * dividends, 2)
             
             # Update wealth history
             self.wealth_history[agent_id].append(current_wealth)
@@ -153,15 +155,17 @@ class DataRecorder:
                 'round': round_number + 1,
                 'agent_id': state.agent_id,
                 'agent_type': state.agent_type,
-                'cash': state.cash,
+                'cash': round(state.cash, 2),
                 'shares': state.shares,
-                'price': self.context.current_price,
+                'borrowed_shares': state.borrowed_shares,
+                'net_shares': state.net_shares,
+                'price': round(self.context.current_price, 2),
                 'share_value': share_value,
                 'total_value': current_wealth,
                 'dividends_received': dividends_received,
                 'timestamp': timestamp,
-                'dividend_cash': state.dividend_cash,
-                'total_cash': state.cash + state.dividend_cash
+                'dividend_cash': round(state.dividend_cash, 2),
+                'total_cash': round(state.cash + state.dividend_cash, 2)
             })
 
     def _record_order_data(self, round_number, orders, timestamp):
@@ -212,7 +216,8 @@ class DataRecorder:
             'price': round(self.context.current_price, 2),
             'total_dividend_payment': round(
                 last_paid * total_shares
-                if dividend_state.get('should_pay', False) else 0
+                if dividend_state.get('should_pay', False) else 0,
+                2
             )
         })
 
