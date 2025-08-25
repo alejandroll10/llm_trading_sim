@@ -847,16 +847,14 @@ class BaseAgent(ABC):
         """Get total available cash (main account, dividend account is not for trading)"""
         return self.cash
 
-def record_payment(
-    self,
-    account: str,
-    amount: float,
-    payment_type: Literal['interest', 'dividend', 'trade', 'borrow_fee', 'other'],
-    round_number: int,
-) -> None:
-    """Record a payment in the agent's history."""
-    ...
-
+    def record_payment(
+        self,
+        account: str,
+        amount: float,
+        payment_type: Literal['interest', 'dividend', 'trade', 'borrow_fee', 'other'],
+        round_number: int,
+    ) -> None:
+        """Record a payment in the agent's history.
 
         Args:
             account: Account affected ("main" or "dividend").
@@ -869,8 +867,9 @@ def record_payment(
             round_number=round_number,
             amount=amount,
             account=account,
-            payment_type=payment_type
+            payment_type=payment_type,
         )
+
         if payment_type not in self.payment_history:
             self.payment_history['other'].append(payment)
         else:
