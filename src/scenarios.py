@@ -93,7 +93,8 @@ DEFAULT_PARAMS = {
     # Market parameters
     "INITIAL_PRICE": FUNDAMENTAL_WITH_DEFAULT_PARAMS,
     "TRANSACTION_COST": 0.0,
-    
+    "LENDABLE_SHARES": 0,
+
     # Agent parameters
     "MODEL_OPEN_AI": "gpt-4o-2024-11-20",
     "AGENT_PARAMS": {

@@ -980,6 +980,7 @@ def run_scenario(scenario_name: str):
         fundamental_price=params["FUNDAMENTAL_PRICE"],
         redemption_value=redemption_value,
         transaction_cost=params["TRANSACTION_COST"],
+        lendable_shares=params.get("LENDABLE_SHARES", 0),
         agent_params=params["AGENT_PARAMS"],
         dividend_params=params["DIVIDEND_PARAMS"],
         model_open_ai=params["MODEL_OPEN_AI"],
