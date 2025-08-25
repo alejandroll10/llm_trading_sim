@@ -12,15 +12,17 @@ from agents.agent_manager.services.agent_data_structures import (
     AgentStateSnapshot, PositionUpdate, AgentInfoProfile
 )
 from agents.agent_manager.services.order_services import is_active
+from agents.agent_manager.services.borrowing_repository import BorrowingRepository
 
 class AgentRepository:
     """Manages a collection of agents"""
-    def __init__(self, agents: List[BaseAgent], logger, context):
+    def __init__(self, agents: List[BaseAgent], logger, context, borrowing_repository: Optional[BorrowingRepository] = None):
         self._agents: Dict[str, BaseAgent] = {
             agent.agent_id: agent for agent in agents
         }
         self._info_profiles: Dict[str, AgentInfoProfile] = {}
         self.context = context
+        self.borrowing_repository = borrowing_repository or BorrowingRepository(logger=LoggingService.get_logger('borrowing'))
     
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
         """Get agent by ID"""
@@ -248,6 +250,27 @@ class AgentRepository:
             committed_cash=agent.committed_cash,
             committed_shares=agent.committed_shares
         )
+
+    def commit_shares(self, agent_id: str, share_amount: int) -> CommitmentResult:
+        """Commit shares for an agent, borrowing if necessary."""
+        agent = self.get_agent(agent_id)
+        current_price = self.context.current_price
+        round_number = self.context.round_number
+
+        # Determine if we need to borrow shares
+        shares_needed = max(0, share_amount - agent.shares)
+        if shares_needed > 0:
+            if not self.borrowing_repository.allocate_shares(agent_id, shares_needed):
+                return CommitmentResult(False, f"Insufficient lendable shares: requested {shares_needed}")
+
+        try:
+            agent.commit_shares(share_amount, round_number=round_number, current_price=current_price)
+            return CommitmentResult(True, "Shares committed successfully", share_amount)
+        except ValueError as e:
+            # Roll back any allocated shares on failure
+            if shares_needed > 0:
+                self.borrowing_repository.release_shares(agent_id, shares_needed)
+            return CommitmentResult(False, str(e))
     
     def commit_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0) -> CommitmentResult:
         """Commit agent resources with validation"""
@@ -257,10 +280,7 @@ class AgentRepository:
                 agent.commit_cash(cash_amount)
                 return CommitmentResult(True, "Cash committed successfully", cash_amount)
             elif share_amount > 0:  # Changed from if to elif to avoid potential double commits
-                # Get current price from context
-                current_price = self.context.current_price
-                agent.commit_shares(share_amount, round_number=self.context.round_number, current_price=current_price)
-                return CommitmentResult(True, "Shares committed successfully", share_amount)
+                return self.commit_shares(agent_id, share_amount)
             else:
                 LoggingService.get_logger('agents').error(f"No amount specified for agent {agent_id} with orders: {agent.get_trade_summary()}")
         except ValueError as e:
@@ -275,9 +295,13 @@ class AgentRepository:
                 agent._release_cash(cash_amount)
                 results.append(f"Cash released: {cash_amount}")
             if share_amount > 0:
+                borrowed_before = agent.borrowed_shares
                 agent._release_shares(share_amount)
                 results.append(f"Shares released: {share_amount}")
-            
+                returned = borrowed_before - agent.borrowed_shares
+                if returned > 0:
+                    self.borrowing_repository.release_shares(agent_id, returned)
+
             if results:
                 return CommitmentResult(True, "; ".join(results))
             return CommitmentResult(False, "No amount specified")

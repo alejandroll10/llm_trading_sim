@@ -21,6 +21,7 @@ from market.orders.order_service_factory import OrderServiceFactory
 from services.shared_service_factory import SharedServiceFactory
 from market.information.base_information_services import InformationService
 from services.logging_service import LoggingService
+from agents.agent_manager.services.borrowing_repository import BorrowingRepository
 import random
 from base_sim import BaseSimulation
 import warnings
@@ -44,6 +45,7 @@ class BaseSimulation:
         market (Market): The market where trades are executed.
         dividend_service (DividendService): The service for managing dividends.
         interest_service (InterestService): The service for managing interest payments.
+        lendable_shares (int): Total shares available to borrow for short positions.
     """
     def __init__(self, 
                  num_rounds: int,
@@ -52,8 +54,9 @@ class BaseSimulation:
                  redemption_value: float,
                  transaction_cost: float = 0.0,
                  fundamental_volatility: float = 0.0,
+                 lendable_shares: int = 0,
                  agent_params: dict = None,
-                 hide_fundamental_price: bool = True, 
+                 hide_fundamental_price: bool = True,
                  model_open_ai = "gpt-4o-2024-07-18",
                  dividend_params: dict = None,
                  interest_params: dict = None,
@@ -77,6 +80,7 @@ class BaseSimulation:
         # Store parameters
         self.dividend_params = dividend_params
         self.initial_price = initial_price
+        self.lendable_shares = lendable_shares
         self.order_repository = OrderRepository()
 
         # Create context with logger
@@ -101,9 +105,13 @@ class BaseSimulation:
         # Initialize agents with explicit parameters
         agents = self.initialize_agents(self.agent_params)
         self.agent_repository = AgentRepository(
-            agents, 
+            agents,
             logger=LoggingService.get_logger('agent_repository'),
-            context=self.context
+            context=self.context,
+            borrowing_repository=BorrowingRepository(
+                total_lendable=lendable_shares,
+                logger=LoggingService.get_logger('borrowing')
+            )
         )
         # Initialize components in correct order
         self.order_book = OrderBook(
