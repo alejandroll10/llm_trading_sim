@@ -70,7 +70,9 @@ class DividendPaymentProcessor:
 
         for agent_id in self.agent_repository.get_all_agent_ids():
             agent = self.agent_repository.get_agent(agent_id)
-            state = self.agent_repository.get_agent_state_snapshot(agent_id, 0)
+            state = self.agent_repository.get_agent_state_snapshot(
+                agent_id, self.agent_repository.context.current_price
+            )
 
             # Net share position accounts for short holdings
             net_position = agent.total_shares - agent.borrowed_shares
@@ -118,7 +120,9 @@ class DividendPaymentProcessor:
         total_payment = 0
         
         for agent_id in self.agent_repository.get_all_agent_ids():
-            state = self.agent_repository.get_agent_state_snapshot(agent_id, 0)
+            state = self.agent_repository.get_agent_state_snapshot(
+                agent_id, self.agent_repository.context.current_price
+            )
             if state.total_shares > 0:
                 payment = redemption_value * state.total_shares
                 total_shares += state.total_shares

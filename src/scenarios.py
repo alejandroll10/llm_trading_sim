@@ -348,7 +348,7 @@ SCENARIOS = {
             "INITIAL_PRICE": 28.0,
             # Fundamental calculated as E(d)/r
             "AGENT_PARAMS": {
-                'allow_short_selling': False,  # Change when short selling is implemented
+                'allow_short_selling': True,
                 'position_limit': 100000000,
                 'initial_cash': BASE_INITIAL_CASH,
                 'initial_shares': BASE_INITIAL_SHARES,
@@ -429,7 +429,7 @@ SCENARIOS = {
             "INITIAL_PRICE": 2*FUNDAMENTAL_WITH_DEFAULT_PARAMS,
             # Fundamental calculated as E(d)/r
             "AGENT_PARAMS": {
-                'allow_short_selling': False, # Change when short selling is implemented
+                'allow_short_selling': True,
                 'position_limit': BASE_POSITION_LIMIT,
                 'initial_cash': BASE_INITIAL_CASH,
                 'initial_shares': int(0.5 * BASE_INITIAL_SHARES),
@@ -472,7 +472,7 @@ SCENARIOS = {
             "INITIAL_PRICE": round(FUNDAMENTAL_WITH_DEFAULT_PARAMS/2, 2),
             # Fundamental calculated as E(d)/r
             "AGENT_PARAMS": {
-                'allow_short_selling': False, # Change when short selling is implemented
+                'allow_short_selling': True,
                 'position_limit': BASE_POSITION_LIMIT,
                 'initial_cash': BASE_INITIAL_CASH,
                 'initial_shares': int(0.5 * BASE_INITIAL_SHARES),
@@ -577,7 +577,7 @@ SCENARIOS = {
             "INITIAL_PRICE": FUNDAMENTAL_WITH_DEFAULT_PARAMS,
             "HIDE_FUNDAMENTAL_PRICE": True,
             "AGENT_PARAMS": {
-                'allow_short_selling': False, # Change when short selling is implemented
+                'allow_short_selling': True,
                 'position_limit': BASE_POSITION_LIMIT,
                 'initial_cash': BASE_INITIAL_CASH,
                 'initial_shares': BASE_INITIAL_SHARES,
