@@ -73,6 +73,8 @@ class LoggingService:
         cls._setup_order_book_logger(console_handler)
         cls._setup_interest_logger(console_handler)
         cls._setup_dividend_logger(console_handler)
+        cls._setup_borrow_logger(console_handler)
+        cls._setup_borrowing_logger(console_handler)
         cls._setup_verification_logger(console_handler)
         cls._setup_margin_call_logger(console_handler)
 
@@ -268,6 +270,16 @@ class LoggingService:
         dividend_logger.addHandler(file_handler)
         dividend_logger.addHandler(console_handler)
         cls._loggers['dividend'] = dividend_logger
+
+    @classmethod
+    def _setup_borrow_logger(cls, console_handler):
+        """Setup borrow fee logger"""
+        cls._setup_logger('borrow', console_handler, 'borrow.log')
+
+    @classmethod
+    def _setup_borrowing_logger(cls, console_handler):
+        """Setup share borrowing logger"""
+        cls._setup_logger('borrowing', console_handler, 'borrowing.log')
 
     @classmethod
     def _setup_verification_logger(cls, console_handler):
