@@ -17,6 +17,7 @@ class MarketHistory:
     interest_paid: List[float]
     trade_history: List[Dict]
     quote_history: List[Dict]
+    short_interest: List[float]
 
 class SimulationContext:
     """
@@ -52,7 +53,8 @@ class SimulationContext:
             dividends_paid=[],
             interest_paid=[],
             trade_history=[],
-            quote_history=[]
+            quote_history=[],
+            short_interest=[0]
         )
         
         # Public market information (observable by all)
@@ -72,13 +74,19 @@ class SimulationContext:
                 'midpoint': None,
                 'aggregated_levels': {'buy_levels': [], 'sell_levels': []}
             },
-            'trade_history': []
+            'trade_history': [],
+            'short_interest': 0
         }
         
         # Simulation parameters
         self.infinite_rounds = infinite_rounds
         self._num_rounds = num_rounds
         self.initial_price = initial_price
+
+    def update_short_interest(self, short_interest: float):
+        """Update aggregate short interest and record history"""
+        self.public_info['short_interest'] = short_interest
+        self.market_history.short_interest.append(short_interest)
     
     def record_dividend_payment(self, amount: float, round_number: int):
         """Record dividend payment"""
