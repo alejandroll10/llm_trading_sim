@@ -149,8 +149,21 @@ def save_plots(simulation, params: dict):
         plt.title('Price and Bid-Ask Spread')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         save_plot_with_suffix('bid_ask_spread')
+
+        # Net short exposure over time
+        short_interest = clean_data([h.get('short_interest') for h in history])
+        plt.figure(figsize=(12, 6))
+        plt.plot(rounds, [-s for s in short_interest], label='Net Short Exposure', color='blue', linewidth=2)
+        plt.axhline(0, color='black', linestyle='--', linewidth=1, alpha=0.7)
+        plt.xlabel('Round')
+        plt.ylabel('Shares')
+        plt.title('Net Short Exposure Over Time')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
+        save_plot_with_suffix('net_short_exposure')
     except Exception as e:
         print(f"  Error creating price plots: {str(e)}")
 

@@ -45,17 +45,26 @@ class DataRecorder:
             agent_id: [] for agent_id in self.agent_repository.get_all_agent_ids()
         }
 
-    def record_round_data(self, round_number: int, market_state: dict, 
+    def record_round_data(self, round_number: int, market_state: dict,
                          orders: List[dict], trades: List[dict], total_volume: float, dividends: float):
         """Record all data for a single round, including dividends"""
         timestamp = datetime.now().isoformat()
-        
+        # Calculate aggregate short interest before recording
+        short_interest = sum(
+            max(0, -self.agent_repository.get_agent_state_snapshot(
+                agent_id,
+                self.context.current_price
+            ).shares)
+            for agent_id in self.agent_repository.get_all_agent_ids()
+        )
+        self.context.update_short_interest(short_interest)
+
         # Record market history
-        self._record_market_history(round_number, market_state, orders, 
+        self._record_market_history(round_number, market_state, orders,
                                   trades, total_volume)
-        
+
         # Record market data
-        self._record_market_data(round_number, market_state, trades, 
+        self._record_market_data(round_number, market_state, trades,
                                total_volume, timestamp)
         
         # Record trade data
@@ -96,7 +105,8 @@ class DataRecorder:
             'last_trade_price': self.context.public_info['last_trade']['price'],
             'best_bid': self.context.public_info['order_book_state']['best_bid'],
             'best_ask': self.context.public_info['order_book_state']['best_ask'],
-            'midpoint': self.context.public_info['order_book_state']['midpoint']
+            'midpoint': self.context.public_info['order_book_state']['midpoint'],
+            'short_interest': self.context.public_info.get('short_interest', 0)
         })
 
     def _record_market_data(self, round_number, market_state, trades, total_volume, timestamp):
@@ -113,7 +123,8 @@ class DataRecorder:
                 if self.context.fundamental_price else 0),
             'best_bid': market_state['best_bid'],
             'best_ask': market_state['best_ask'],
-            'market_depth': market_state['market_depth']
+            'market_depth': market_state['market_depth'],
+            'short_interest': self.context.public_info.get('short_interest', 0)
         })
 
     def _record_trade_data(self, round_number, trades, timestamp):
