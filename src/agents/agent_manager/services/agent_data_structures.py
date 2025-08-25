@@ -37,6 +37,8 @@ class AgentStateSnapshot:
     committed_cash: float
     committed_shares: int
     total_shares: int
+    borrowed_shares: int
+    net_shares: int
     wealth: float
     orders_by_state: dict
     trade_summary: dict

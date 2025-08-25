@@ -67,26 +67,33 @@ class DividendPaymentProcessor:
         """Process actual payments"""
         total_shares = 0
         total_payment = 0
-        
+
         for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
             state = self.agent_repository.get_agent_state_snapshot(agent_id, 0)
-            if state.shares > 0:
-                payment = dividend * state.shares
-                total_shares += state.shares
-                total_payment += payment
-                
-                account_type = "dividend" if destination == PaymentDestination.DIVIDEND_ACCOUNT else "main"
-                self.agent_repository.update_account_balance(
-                    agent_id=agent_id,
-                    amount=payment,
-                    account_type=account_type,
-                    payment_type="dividend",
-                    round_number=round_number
-                )
-                
-                LoggingService.get_logger('dividend').info(
-                    f"Paid {payment:.2f} to agent {agent_id} ({state.shares} shares @ {dividend:.2f})"
-                )
+
+            # Net share position accounts for short holdings
+            net_position = agent.total_shares - agent.borrowed_shares
+            if net_position == 0:
+                continue
+
+            payment = dividend * net_position
+            total_shares += abs(net_position)
+            total_payment += payment
+
+            account_type = "dividend" if destination == PaymentDestination.DIVIDEND_ACCOUNT else "main"
+            self.agent_repository.update_account_balance(
+                agent_id=agent_id,
+                amount=payment,
+                account_type=account_type,
+                payment_type="dividend",
+                round_number=round_number
+            )
+
+            action = "Paid" if payment >= 0 else "Deducted"
+            LoggingService.get_logger('dividend').info(
+                f"{action} {abs(payment):.2f} {'to' if payment >= 0 else 'from'} agent {agent_id} ({net_position} shares @ {dividend:.2f})"
+            )
         
         LoggingService.get_logger('dividend').info(
             f"\n=== Round {round_number} Dividend Payment ===\n"
