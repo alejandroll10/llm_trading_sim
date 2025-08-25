@@ -42,8 +42,8 @@ This paper presents a realistic simulated stock market where large language mode
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repository-url>
-    cd LLMTradingSimulation_public
+    git clone https://github.com/alejandroll10/llm_trading_sim.git
+    cd llm_trading_sim
     ```
 
 2.  **Create a virtual environment:**
