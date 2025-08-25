@@ -23,7 +23,6 @@ from market.information.base_information_services import InformationService
 from services.logging_service import LoggingService
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
 import random
-from base_sim import BaseSimulation
 import warnings
 from wordcloud import WordCloud
 
