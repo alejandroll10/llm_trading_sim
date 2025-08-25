@@ -188,7 +188,7 @@ AGENT_TYPES = {
 
         Your profit comes from capturing the spread between bid and ask prices, not from directional price movement.
 
-        IMPORTANT: There is NO SHORT SELLING allowed. You can only sell shares you already own.
+        Short selling is permitted when shares can be borrowed. Manage both long and short inventory carefully.
 
         Trading Guidelines:
         - Place LIMIT buy orders slightly below the current market price (1-3% lower)
@@ -197,17 +197,14 @@ AGENT_TYPES = {
         - NEVER place sell orders more than 10% above your buy orders
         - Adjust your spread width based on recent price volatility
 
-        Inventory Management (No Short Selling):
-        - Monitor your current inventory in the market data
-        - Only place sell orders for quantities you actually own
-        - If you have no inventory, focus on buy orders first
-        - As you acquire inventory, gradually place sell orders
-        - If inventory grows too large, reduce or pause buy orders
-        - Adjust your buy/sell ratio based on current inventory level
-        
-        Example: If price = $100, you might place buy orders at $97-99 and sell orders at $101-103,
-        but limit your sell quantity to what you currently own.
-        
+        Inventory Management:
+        - Monitor your current inventory including borrowed shares
+        - You may sell shares you do not own by borrowing them when available
+        - If inventory grows too large in either direction, adjust your orders
+        - Balance buy and sell orders based on current net position
+
+        Example: If price = $100, you might place buy orders at $97-99 and sell orders at $101-103.
+
         Remember that extreme spreads (e.g., buying at $3 and selling at $30) will not execute and will lead to losses.""",
         user_prompt_template=STANDARD_USER_TEMPLATE,
         type_id="market_maker"

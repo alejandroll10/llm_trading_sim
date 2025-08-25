@@ -1,6 +1,6 @@
 from typing import Dict, List
 from agents.base_agent import BaseAgent
-from agents.agents_api import TradeDecision, OrderType
+from agents.agents_api import TradeDecision, OrderType, OrderDetails
 
 class MarketMakerBuy(BaseAgent):
     """Market maker that places buy orders based on fundamental value"""
@@ -31,44 +31,60 @@ class MarketMakerBuy(BaseAgent):
         
         return price * (1 - final_discount)
 
-    def make_decision(self, market_state: Dict, history: List, round_number: int) -> Dict:
+    def make_decision(self, market_state: Dict, history: List, round_number: int) -> TradeDecision:
         price = market_state['price']
         fundamental = market_state.get('fundamental_price', price)
         current_position = self.shares
-        
+
         # Don't buy if at position limit
         if current_position >= self.position_limit:
             return TradeDecision(
-                decision="Hold",
-                quantity=0,
-                reasoning="At position limit"
-            ).model_dump()
-        
+                orders=[],
+                replace_decision="Add",
+                reasoning="At position limit",
+                valuation=fundamental,
+                valuation_reasoning="Fundamental estimate provided",
+                price_target=price,
+                price_target_reasoning="No trade executed",
+            )
+
         # Calculate bid price
         bid_price = self.calculate_bid_price(price, fundamental)
-        
+
         # Check available cash
         available_cash = self.available_cash
         max_shares = int(available_cash / bid_price)
-        
+
         if max_shares == 0:
             return TradeDecision(
-                decision="Hold",
-                quantity=0,
-                reasoning="Insufficient cash for trade"
-            ).model_dump()
-        
+                orders=[],
+                replace_decision="Add",
+                reasoning="Insufficient cash for trade",
+                valuation=fundamental,
+                valuation_reasoning="Fundamental estimate provided",
+                price_target=price,
+                price_target_reasoning="Cannot participate",
+            )
+
         # Adjust order size based on remaining position capacity
         buy_size = min(
             self.order_size,
             self.position_limit - current_position,
             max_shares
         )
-        
-        return TradeDecision(
+
+        order = OrderDetails(
             decision="Buy",
             quantity=buy_size,
             order_type=OrderType.LIMIT,
             price_limit=bid_price,
-            reasoning=f"Making market: Bid ${bid_price:.2f} (fundamental: ${fundamental:.2f})"
-        ).model_dump()
+        )
+        return TradeDecision(
+            orders=[order],
+            replace_decision="Replace",
+            reasoning=f"Making market: Bid ${bid_price:.2f} (fundamental: ${fundamental:.2f})",
+            valuation=fundamental,
+            valuation_reasoning="Fundamental estimate provided",
+            price_target=fundamental,
+            price_target_reasoning="Target aligns with fundamental",
+        )
