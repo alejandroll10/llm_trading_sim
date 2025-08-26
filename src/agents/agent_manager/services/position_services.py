@@ -53,6 +53,6 @@ class PositionCalculator:
             ),
             seller=PositionChange(
                 cash_change=trade_value,
-                shares_change=-trade.quantity
+                shares_change=0  # Share reduction handled during commitment release
             )
         )

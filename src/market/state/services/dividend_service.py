@@ -123,21 +123,28 @@ class DividendPaymentProcessor:
             state = self.agent_repository.get_agent_state_snapshot(
                 agent_id, self.agent_repository.context.current_price
             )
-            if state.total_shares > 0:
-                payment = redemption_value * state.total_shares
-                total_shares += state.total_shares
+
+            net_position = state.net_shares
+            payment = 0
+
+            if net_position != 0:
+                payment = redemption_value * net_position
+                total_shares += abs(net_position)
                 total_payment += payment
-                
+
                 self.agent_repository.update_account_balance(
                     agent_id=agent_id,
                     amount=payment,
                     account_type="main"
                 )
-                self.agent_repository.redeem_all_shares(agent_id)
-                
+
+                action = "Redeemed" if payment >= 0 else "Covered"
                 LoggingService.get_logger('dividend').info(
-                    f"Redeemed {state.total_shares} shares from agent {agent_id} for ${payment:.2f}"
+                    f"{action} {abs(net_position)} shares for agent {agent_id} at ${redemption_value:.2f}"
                 )
+
+            # Always clear shares and outstanding borrows
+            self.agent_repository.redeem_all_shares(agent_id)
         
         return DividendPaymentResult(
             success=True,
