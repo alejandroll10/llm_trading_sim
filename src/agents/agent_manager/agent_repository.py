@@ -121,11 +121,23 @@ class AgentRepository:
         return agent
     
     def update_share_balance(self, agent_id: str, amount: int) -> BaseAgent:
-        """Update agent's share balance"""
-        LoggingService.get_logger('agents').info(f"Updating share balance for agent {agent_id}, amount: {amount}")
+        """Update agent's share balance and handle short covering"""
+        LoggingService.get_logger('agents').info(
+            f"Updating share balance for agent {agent_id}, amount: {amount}")
         agent = self.get_agent(agent_id)
-        agent.shares += amount
-        LoggingService.get_logger('agents').info(f"Updated share balance for agent {agent_id}, new balance: {agent.shares}")
+
+        if amount > 0 and agent.borrowed_shares > 0:
+            # Use purchases to cover existing borrowed shares first
+            cover = min(amount, agent.borrowed_shares)
+            agent.borrowed_shares -= cover
+            agent.shares += amount - cover
+            if cover > 0:
+                self.borrowing_repository.release_shares(agent_id, cover)
+        else:
+            agent.shares += amount
+
+        LoggingService.get_logger('agents').info(
+            f"Updated share balance for agent {agent_id}, new balance: {agent.shares}")
         return agent
 
 
@@ -286,7 +298,8 @@ class AgentRepository:
         except ValueError as e:
             return CommitmentResult(False, str(e))
     
-    def release_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0) -> CommitmentResult:
+    def release_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0,
+                          return_borrowed: bool = True) -> CommitmentResult:
         """Release agent resources with validation"""
         agent = self.get_agent(agent_id)
         try:
@@ -296,7 +309,7 @@ class AgentRepository:
                 results.append(f"Cash released: {cash_amount}")
             if share_amount > 0:
                 borrowed_before = agent.borrowed_shares
-                agent._release_shares(share_amount)
+                agent._release_shares(share_amount, return_borrowed=return_borrowed)
                 results.append(f"Shares released: {share_amount}")
                 returned = borrowed_before - agent.borrowed_shares
                 if returned > 0:
@@ -374,11 +387,17 @@ class AgentRepository:
             agent.receive_information(signals)
 
     def redeem_all_shares(self, agent_id: str) -> BaseAgent:
-        """Set agent's shares to zero after redemption"""
+        """Set agent's shares to zero after redemption and clear borrows"""
         agent = self.get_agent(agent_id)
         previous_shares = agent.shares
         agent.shares = 0
         agent.committed_shares = 0
+
+        if agent.borrowed_shares > 0:
+            borrowed = agent.borrowed_shares
+            agent.borrowed_shares = 0
+            self.borrowing_repository.release_shares(agent_id, borrowed)
+
         LoggingService.get_logger('agents').info(
             f"Redeemed all shares for agent {agent_id}, "
             f"previous balance: {previous_shares}, new balance: {agent.shares}"

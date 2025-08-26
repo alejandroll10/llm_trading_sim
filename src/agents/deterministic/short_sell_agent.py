@@ -68,7 +68,7 @@ class ShortSellTrader(BaseAgent):
         desired_short = 500
             
         # Only do this if we don't already have a large short position
-        current_short_position = max(0, -self.shares)
+        current_short_position = self.borrowed_shares
         
         if current_short_position >= 1000:
             # Already have a significant short position, don't add more

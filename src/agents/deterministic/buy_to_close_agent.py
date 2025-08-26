@@ -44,8 +44,8 @@ class BuyToCloseTrader(BaseAgent):
         # For price target, expect continued momentum
         price_target = current_price * (1 + price_change_pct * 0.5)  # Damped continuation
         
-        # Check if we have a short position (negative shares)
-        current_short = max(0, -self.shares)  # A positive number representing short position
+        # Check if we have a short position (use borrowed shares tracking)
+        current_short = self.borrowed_shares
         
         if current_short == 0:
             return TradeDecision(

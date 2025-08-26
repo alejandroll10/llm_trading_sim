@@ -23,13 +23,15 @@ def release_for_cancellation(agent_repository, logger, order: Order):
         'cash' if order.side == 'buy' else 'shares'
     )
 
-def release_commitment_agent(agent_repository, logger, order: Order, amount: float, resource_type: str):
+def release_commitment_agent(agent_repository, logger, order: Order, amount: float,
+                             resource_type: str, return_borrowed: bool = True):
     """Helper for releasing commitments"""
     try:
         result = agent_repository.release_resources(
             order.agent_id,
             cash_amount=amount if resource_type == 'cash' else 0,
-            share_amount=amount if resource_type == 'shares' else 0
+            share_amount=amount if resource_type == 'shares' else 0,
+            return_borrowed=return_borrowed
         )
         
         if not result.success:
@@ -55,14 +57,14 @@ def release_for_trade(trade: Trade, order_repository, agent_repository, commitme
     """Release commitments after trade execution"""
     buy_order = order_repository.get_order(trade.buyer_order_id)
     sell_order = order_repository.get_order(trade.seller_order_id)
-    
+
     # Calculate release amounts
     cash_to_release = commitment_calculator.calculate_release_amount(trade, buy_order)
     shares_to_release = commitment_calculator.calculate_release_amount(trade, sell_order)
-    
+
     # Release through repository
     release_commitment_agent(agent_repository, logger, buy_order, cash_to_release, 'cash')
-    release_commitment_agent(agent_repository, logger, sell_order, shares_to_release, 'shares')
+    release_commitment_agent(agent_repository, logger, sell_order, shares_to_release, 'shares', return_borrowed=False)
 
 
 class CommitmentCalculator:

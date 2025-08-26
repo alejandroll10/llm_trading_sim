@@ -385,8 +385,16 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict()
         )
 
-    def _release_shares(self, quantity: float):
-        """Release committed shares after order is filled or cancelled, returning borrowed shares if applicable"""
+    def _release_shares(self, quantity: float, return_borrowed: bool = True):
+        """Release committed shares after order completion.
+
+        Args:
+            quantity: Amount of shares to release from commitment
+            return_borrowed: When ``True`` the released shares reduce any
+                outstanding borrow. When ``False`` (used when a sell order is
+                filled), borrowed shares remain outstanding to represent the
+                short position.
+        """
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
             operation="releasing shares",
@@ -394,24 +402,25 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict(),
             outstanding_orders=self.outstanding_orders
         )
-        
+
         FLOAT_TOLERANCE = 1e-10  # tolerance for floating point comparisons
-        
+
         if quantity - self.committed_shares > FLOAT_TOLERANCE:
             raise ValueError(f"Cannot release more than committed: {quantity} > {self.committed_shares}")
-        
+
         self.committed_shares = max(0, self.committed_shares - quantity)
-        
-        # If we've borrowed shares, return those first
-        if self.borrowed_shares > 0:
-            shares_to_return = min(quantity, self.borrowed_shares)
-            self.borrowed_shares -= shares_to_return
-            # Only add the remaining shares (if any) to available balance
-            self.shares += max(0, quantity - shares_to_return)
-        else:
-            # No borrowed shares, so just add everything back
-            self.shares += quantity
-        
+
+        if return_borrowed:
+            # If we've borrowed shares, return those first
+            if self.borrowed_shares > 0:
+                shares_to_return = min(quantity, self.borrowed_shares)
+                self.borrowed_shares -= shares_to_return
+                # Only add the remaining shares (if any) to available balance
+                self.shares += max(0, quantity - shares_to_return)
+            else:
+                # No borrowed shares, so just add everything back
+                self.shares += quantity
+
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
             operation="after share release",
