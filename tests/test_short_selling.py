@@ -95,3 +95,29 @@ def test_redemption_clears_outstanding_short():
     assert borrow_repo.get_borrowed("short") == 0
     assert agent.shares == 0
     assert agent.cash == pytest.approx(1000)
+
+
+def test_redemption_updates_short_interest_history():
+    context = SimulationContext(
+        num_rounds=1,
+        initial_price=100,
+        fundamental_price=100,
+        redemption_value=100,
+        transaction_cost=0,
+    )
+    context.round_number = 1
+    context.current_price = 100
+
+    agent = DummyAgent("short", initial_cash=1000, initial_shares=0, allow_short_selling=True)
+    borrow_repo = BorrowingRepository(total_lendable=100, logger=None)
+    repo = AgentRepository([agent], logger=None, context=context, borrowing_repository=borrow_repo)
+
+    repo.commit_shares("short", 5)
+    repo.release_resources("short", share_amount=5, return_borrowed=False)
+    context.update_short_interest(5)
+
+    processor = DividendPaymentProcessor(agent_repository=repo, logger=None)
+    processor.process_redemption(100, round_number=1)
+
+    assert context.public_info["short_interest"] == 0
+    assert context.market_history.short_interest[-1] == 0
