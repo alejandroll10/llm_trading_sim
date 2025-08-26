@@ -145,7 +145,18 @@ class DividendPaymentProcessor:
 
             # Always clear shares and outstanding borrows
             self.agent_repository.redeem_all_shares(agent_id)
-        
+
+        # After all positions are cleared, ensure aggregate short interest
+        # reflects the forced covering that occurred during redemption.
+        total_borrowed = sum(
+            self.agent_repository.get_agent_state_snapshot(
+                agent_id,
+                self.agent_repository.context.current_price
+            ).borrowed_shares
+            for agent_id in self.agent_repository.get_all_agent_ids()
+        )
+        self.agent_repository.context.update_short_interest(total_borrowed)
+
         return DividendPaymentResult(
             success=True,
             message="Redemption payment processed successfully",
