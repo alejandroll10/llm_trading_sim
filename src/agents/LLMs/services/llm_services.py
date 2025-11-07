@@ -13,7 +13,7 @@ class OrderSchema(BaseModel):
     price_limit: Optional[float] = Field(None, description="Required for limit orders")
 
 class TradeDecisionSchema(BaseModel):
-    
+
     """Schema for trade decisions"""
     valuation_reasoning: str = Field(..., description="Brief numerical calculation of valuation analysis")
     valuation: float = Field(..., description="Agent's estimated fundamental value")
@@ -22,6 +22,7 @@ class TradeDecisionSchema(BaseModel):
     orders: List[OrderSchema] = Field(..., description="List of orders to execute")
     replace_decision: str = Field(..., description="Add, Cancel, or Replace")
     reasoning: str = Field(..., description="Explanation for the trading decisions")
+    post_message: Optional[str] = Field(None, description="Optional: Post a message to the social feed visible to other agents next round")
     
 
 @dataclass
@@ -103,6 +104,9 @@ class LLMService:
                 reasoning=parsed_response.reasoning
             ).model_dump()
             decision["agent_id"] = request.agent_id
+            # Add optional post_message if provided
+            if parsed_response.post_message:
+                decision["post_message"] = parsed_response.post_message
             
             return LLMResponse(
                 raw_response=raw_response,

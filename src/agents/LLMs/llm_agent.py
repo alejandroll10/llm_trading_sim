@@ -21,21 +21,16 @@ class LLMAgent(BaseAgent):
             # Use signals instead of market_state
             context = self.prepare_context_llm()
 
-            # Get last round messages for context
+            # Get last round messages for social feed context
             last_messages = self.get_last_round_messages(round_number)
             if last_messages:
                 formatted_messages = "\n".join(
-                    (
-                        f"Agent {m['agent_id']}: valuation={msg.get('valuation')}, "
-                        f"price_target={msg.get('price_target')}, reasoning={msg.get('reasoning')}"
-                        if isinstance(msg := m['message'], dict)
-                        else f"Agent {m['agent_id']}: {m['message']}"
-                    )
+                    f"- Agent {m['agent_id']}: {m['message']}"
                     for m in last_messages
                 )
-                messages_section = f"\n\nLast round messages:\n{formatted_messages}"
+                messages_section = f"\n\nSocial Feed (previous round):\n{formatted_messages}\n\nYou can optionally post your own message using the 'post_message' field."
             else:
-                messages_section = "\n\nLast round messages:\nNone"
+                messages_section = "\n\nSocial Feed: No messages yet.\n\nYou can optionally post a message using the 'post_message' field."
 
             user_prompt = (
                 self.agent_type.user_prompt_template.format(**context)
@@ -86,13 +81,14 @@ class LLMAgent(BaseAgent):
             for entry in log_entries:
                 LoggingService.log_structured_decision(entry)
 
-            # Broadcast structured fields for next round
-            broadcast_payload = {
-                'valuation': response.decision.get('valuation'),
-                'price_target': response.decision.get('price_target'),
-                'reasoning': response.decision.get('reasoning')
-            }
-            self.broadcast_message(round_number, broadcast_payload)
+            # Optional: Broadcast message if agent chose to post
+            post_message = response.decision.get('post_message')
+            if post_message:
+                self.broadcast_message(round_number, post_message)
+                LoggingService.log_decision(
+                    f"\n========== Agent {self.agent_id} Posted to Social Feed ==========\n"
+                    f"{post_message}"
+                )
 
             return response.decision
                 
