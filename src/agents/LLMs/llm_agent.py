@@ -23,14 +23,25 @@ class LLMAgent(BaseAgent):
 
             # Get last round messages for social feed context
             last_messages = self.get_last_round_messages(round_number)
+
+            strategic_instructions = """
+You can optionally post a message visible to all agents next round using the 'post_message' field.
+
+Strategic Considerations:
+- Messages can influence other agents' beliefs and decisions
+- You may share information to shape market sentiment
+- You may withhold information for competitive advantage
+- You may signal confidence, uncertainty, or specific views to move prices
+- Consider: What do you want other agents to believe?"""
+
             if last_messages:
                 formatted_messages = "\n".join(
                     f"- Agent {m['agent_id']}: {m['message']}"
                     for m in last_messages
                 )
-                messages_section = f"\n\nSocial Feed (previous round):\n{formatted_messages}\n\nYou can optionally post your own message using the 'post_message' field."
+                messages_section = f"\n\nSocial Feed (previous round):\n{formatted_messages}\n{strategic_instructions}"
             else:
-                messages_section = "\n\nSocial Feed: No messages yet.\n\nYou can optionally post a message using the 'post_message' field."
+                messages_section = f"\n\nSocial Feed: No messages yet.\n{strategic_instructions}"
 
             user_prompt = (
                 self.agent_type.user_prompt_template.format(**context)
