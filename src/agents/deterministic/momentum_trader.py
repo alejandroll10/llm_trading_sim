@@ -29,7 +29,7 @@ class MomentumTrader(BaseAgent):
         current_price = market_state['price']
 
         if len(history) < self.long_window:  # Need sufficient history
-            return TradeDecision(
+            decision = TradeDecision(
                 orders=[],
                 replace_decision="Add",
                 reasoning="Insufficient history for momentum analysis",
@@ -38,6 +38,12 @@ class MomentumTrader(BaseAgent):
                 price_target=current_price,
                 price_target_reasoning="No trend data available",
             )
+            self.broadcast_message(round_number, {
+                'valuation': decision.valuation,
+                'price_target': decision.price_target,
+                'reasoning': decision.reasoning,
+            })
+            return decision
 
         short_ma = self.calculate_moving_average(history, self.short_window)
         long_ma = self.calculate_moving_average(history, self.long_window)
@@ -47,7 +53,7 @@ class MomentumTrader(BaseAgent):
 
         # If trend is too weak, hold
         if abs(trend) < self.min_trend:
-            return TradeDecision(
+            decision = TradeDecision(
                 orders=[],
                 replace_decision="Add",
                 reasoning="Insufficient trend strength",
@@ -56,6 +62,12 @@ class MomentumTrader(BaseAgent):
                 price_target=current_price,
                 price_target_reasoning="Trend below threshold",
             )
+            self.broadcast_message(round_number, {
+                'valuation': decision.valuation,
+                'price_target': decision.price_target,
+                'reasoning': decision.reasoning,
+            })
+            return decision
 
         # Upward trend -> Buy
         if trend > 0:
@@ -64,7 +76,7 @@ class MomentumTrader(BaseAgent):
             quantity = int(max_shares * min(abs(trend), self.max_position))
 
             if quantity == 0:
-                return TradeDecision(
+                decision = TradeDecision(
                     orders=[],
                     replace_decision="Add",
                     reasoning="Insufficient cash for momentum trade",
@@ -73,6 +85,12 @@ class MomentumTrader(BaseAgent):
                     price_target=current_price,
                     price_target_reasoning="Cannot participate in trend",
                 )
+                self.broadcast_message(round_number, {
+                    'valuation': decision.valuation,
+                    'price_target': decision.price_target,
+                    'reasoning': decision.reasoning,
+                })
+                return decision
 
             order = OrderDetails(
                 decision="Buy",
@@ -80,7 +98,7 @@ class MomentumTrader(BaseAgent):
                 order_type=OrderType.LIMIT,
                 price_limit=current_price * 1.01,
             )
-            return TradeDecision(
+            decision = TradeDecision(
                 orders=[order],
                 replace_decision="Replace",
                 reasoning=f"Upward trend: Short MA ${short_ma:.2f} above Long MA ${long_ma:.2f} by {trend:.1%}",
@@ -89,13 +107,19 @@ class MomentumTrader(BaseAgent):
                 price_target=current_price * (1 + min(trend, 0.05)),
                 price_target_reasoning="Expect price to rise with trend",
             )
+            self.broadcast_message(round_number, {
+                'valuation': decision.valuation,
+                'price_target': decision.price_target,
+                'reasoning': decision.reasoning,
+            })
+            return decision
 
         # Downward trend -> Sell
         available_shares = self.available_shares
         quantity = int(available_shares * min(abs(trend), self.max_position))
 
         if quantity == 0:
-            return TradeDecision(
+            decision = TradeDecision(
                 orders=[],
                 replace_decision="Add",
                 reasoning="Insufficient shares for momentum trade",
@@ -104,6 +128,12 @@ class MomentumTrader(BaseAgent):
                 price_target=current_price,
                 price_target_reasoning="Cannot participate in trend",
             )
+            self.broadcast_message(round_number, {
+                'valuation': decision.valuation,
+                'price_target': decision.price_target,
+                'reasoning': decision.reasoning,
+            })
+            return decision
 
         order = OrderDetails(
             decision="Sell",
@@ -111,7 +141,7 @@ class MomentumTrader(BaseAgent):
             order_type=OrderType.LIMIT,
             price_limit=current_price * 0.99,
         )
-        return TradeDecision(
+        decision = TradeDecision(
             orders=[order],
             replace_decision="Replace",
             reasoning=f"Downward trend: Short MA ${short_ma:.2f} below Long MA ${long_ma:.2f} by {abs(trend):.1%}",
@@ -120,3 +150,9 @@ class MomentumTrader(BaseAgent):
             price_target=current_price * (1 - min(abs(trend), 0.05)),
             price_target_reasoning="Expect price to fall with trend",
         )
+        self.broadcast_message(round_number, {
+            'valuation': decision.valuation,
+            'price_target': decision.price_target,
+            'reasoning': decision.reasoning,
+        })
+        return decision

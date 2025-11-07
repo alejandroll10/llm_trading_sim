@@ -645,20 +645,21 @@ def save_plots(simulation, params: dict):
                     save_plot_with_suffix(f'reasoning_wordcloud_{agent_type.lower()}')
             
             # Also keep the overall word cloud
-            plt.figure(figsize=(12, 8))
             all_text = ' '.join(decisions_df['reasoning'].dropna().astype(str))
-            wordcloud = WordCloud(
-                width=1200, 
-                height=800,
-                background_color='white',
-                min_font_size=10
-            ).generate(all_text)
-            
-            plt.imshow(wordcloud, interpolation='bilinear')
-            plt.axis('off')
-            plt.title('Common Terms in All Agent Reasoning')
-            
-            save_plot_with_suffix('reasoning_wordcloud_all')
+            if all_text.strip():
+                plt.figure(figsize=(12, 8))
+                wordcloud = WordCloud(
+                    width=1200,
+                    height=800,
+                    background_color='white',
+                    min_font_size=10
+                ).generate(all_text)
+
+                plt.imshow(wordcloud, interpolation='bilinear')
+                plt.axis('off')
+                plt.title('Common Terms in All Agent Reasoning')
+
+                save_plot_with_suffix('reasoning_wordcloud_all')
 
     # Add valuation analysis plots
     decisions_path = simulation.run_dir / 'structured_decisions.csv'

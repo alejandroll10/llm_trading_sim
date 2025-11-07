@@ -20,11 +20,32 @@ class LLMAgent(BaseAgent):
         try:
             # Use signals instead of market_state
             context = self.prepare_context_llm()
-            
+
+            # Get last round messages for context
+            last_messages = self.get_last_round_messages(round_number)
+            if last_messages:
+                formatted_messages = "\n".join(
+                    (
+                        f"Agent {m['agent_id']}: valuation={msg.get('valuation')}, "
+                        f"price_target={msg.get('price_target')}, reasoning={msg.get('reasoning')}"
+                        if isinstance(msg := m['message'], dict)
+                        else f"Agent {m['agent_id']}: {m['message']}"
+                    )
+                    for m in last_messages
+                )
+                messages_section = f"\n\nLast round messages:\n{formatted_messages}"
+            else:
+                messages_section = "\n\nLast round messages:\nNone"
+
+            user_prompt = (
+                self.agent_type.user_prompt_template.format(**context)
+                + messages_section
+            )
+
             # Create LLM request
             request = LLMRequest(
                 system_prompt=self.agent_type.system_prompt,
-                user_prompt=self.agent_type.user_prompt_template.format(**context),
+                user_prompt=user_prompt,
                 model=self.model,
                 agent_id=self.agent_id,
                 round_number=round_number
@@ -64,7 +85,15 @@ class LLMAgent(BaseAgent):
             # Log each entry
             for entry in log_entries:
                 LoggingService.log_structured_decision(entry)
-            
+
+            # Broadcast structured fields for next round
+            broadcast_payload = {
+                'valuation': response.decision.get('valuation'),
+                'price_target': response.decision.get('price_target'),
+                'reasoning': response.decision.get('reasoning')
+            }
+            self.broadcast_message(round_number, broadcast_payload)
+
             return response.decision
                 
         except Exception as e:

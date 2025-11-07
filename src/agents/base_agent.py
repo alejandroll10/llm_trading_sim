@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Literal
+from typing import Optional, List, Dict, Literal, Any
 import numpy as np
 from market.trade import Trade
 from market.information.information_types import InformationType, InformationSignal, InfoCapability
 from agents.agents_api import TradeDecision
 import logging
 from services.logging_service import LoggingService
+from services.messaging_service import MessagingService
 
 @dataclass
 class AgentType:
@@ -106,6 +107,22 @@ class BaseAgent(ABC):
             'borrow_fee': [],
             'other': []
         }
+
+    def get_last_round_messages(self, round_number: int):
+        """Retrieve broadcast messages from the previous round."""
+        if round_number <= 0:
+            return []
+        return MessagingService.get_messages(round_number - 1)
+
+    def get_message_history(self, round_number: int):
+        """Retrieve all broadcast messages up to the previous round."""
+        if round_number <= 1:
+            return []
+        return MessagingService.get_message_history(round_number - 1)
+
+    def broadcast_message(self, round_number: int, message: Dict[str, Any]):
+        """Broadcast a structured message for other agents to read next round."""
+        MessagingService.add_message(round_number, self.agent_id, message)
 
     def read_state(self):
         """Read and log the current state of the agent."""

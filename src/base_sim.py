@@ -46,7 +46,7 @@ class BaseSimulation:
         interest_service (InterestService): The service for managing interest payments.
         lendable_shares (int): Total shares available to borrow for short positions.
     """
-    def __init__(self, 
+    def __init__(self,
                  num_rounds: int,
                  initial_price: float,
                  fundamental_price: float,
@@ -62,6 +62,7 @@ class BaseSimulation:
                  borrow_params: dict = None,
                  infinite_rounds: bool = False,
                  sim_type: str = "default"):
+        SharedServiceFactory.reset()
 
         self.infinite_rounds = infinite_rounds
         # Setup logging with sim_type directory structure

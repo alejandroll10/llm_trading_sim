@@ -38,7 +38,7 @@ class ProportionalGapTrader(BaseAgent):
         proportion = self.calculate_trade_proportion(gap_percentage)
 
         if proportion == 0:
-            return TradeDecision(
+            decision = TradeDecision(
                 orders=[],
                 replace_decision="Add",
                 reasoning="Gap between price and fundamental too small",
@@ -47,6 +47,12 @@ class ProportionalGapTrader(BaseAgent):
                 price_target=price,
                 price_target_reasoning="No trade executed",
             )
+            self.broadcast_message(round_number, {
+                'valuation': decision.valuation,
+                'price_target': decision.price_target,
+                'reasoning': decision.reasoning,
+            })
+            return decision
 
         # Decide whether to buy or sell
         if gap_percentage > 0:  # Undervalued -> Buy
@@ -55,7 +61,7 @@ class ProportionalGapTrader(BaseAgent):
             quantity = int(max_shares * proportion)
 
             if quantity == 0:
-                return TradeDecision(
+                decision = TradeDecision(
                     orders=[],
                     replace_decision="Add",
                     reasoning="Insufficient cash for minimum trade",
@@ -64,6 +70,12 @@ class ProportionalGapTrader(BaseAgent):
                     price_target=price,
                     price_target_reasoning="Cannot participate",
                 )
+                self.broadcast_message(round_number, {
+                    'valuation': decision.valuation,
+                    'price_target': decision.price_target,
+                    'reasoning': decision.reasoning,
+                })
+                return decision
 
             order = OrderDetails(
                 decision="Buy",
@@ -71,7 +83,7 @@ class ProportionalGapTrader(BaseAgent):
                 order_type=OrderType.LIMIT,
                 price_limit=price * 1.01,
             )
-            return TradeDecision(
+            decision = TradeDecision(
                 orders=[order],
                 replace_decision="Replace",
                 reasoning=f"Price ${price:.2f} below fundamental ${fundamental:.2f} by {gap_percentage:.1%}",
@@ -80,13 +92,19 @@ class ProportionalGapTrader(BaseAgent):
                 price_target=price * (1 + min(abs(gap_percentage), 0.05)),
                 price_target_reasoning="Expect move toward fundamental",
             )
+            self.broadcast_message(round_number, {
+                'valuation': decision.valuation,
+                'price_target': decision.price_target,
+                'reasoning': decision.reasoning,
+            })
+            return decision
 
         # Overvalued -> Sell
         available_shares = self.available_shares
         quantity = int(available_shares * proportion)
 
         if quantity == 0:
-            return TradeDecision(
+            decision = TradeDecision(
                 orders=[],
                 replace_decision="Add",
                 reasoning="Insufficient shares for minimum trade",
@@ -95,6 +113,12 @@ class ProportionalGapTrader(BaseAgent):
                 price_target=price,
                 price_target_reasoning="Cannot participate",
             )
+            self.broadcast_message(round_number, {
+                'valuation': decision.valuation,
+                'price_target': decision.price_target,
+                'reasoning': decision.reasoning,
+            })
+            return decision
 
         order = OrderDetails(
             decision="Sell",
@@ -102,7 +126,7 @@ class ProportionalGapTrader(BaseAgent):
             order_type=OrderType.LIMIT,
             price_limit=price * 0.99,
         )
-        return TradeDecision(
+        decision = TradeDecision(
             orders=[order],
             replace_decision="Replace",
             reasoning=f"Price ${price:.2f} above fundamental ${fundamental:.2f} by {abs(gap_percentage):.1%}",
@@ -111,3 +135,9 @@ class ProportionalGapTrader(BaseAgent):
             price_target=price * (1 - min(abs(gap_percentage), 0.05)),
             price_target_reasoning="Expect move toward fundamental",
         )
+        self.broadcast_message(round_number, {
+            'valuation': decision.valuation,
+            'price_target': decision.price_target,
+            'reasoning': decision.reasoning,
+        })
+        return decision

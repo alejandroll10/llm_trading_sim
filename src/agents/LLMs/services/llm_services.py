@@ -55,6 +55,7 @@ class LLMService:
                 valuation_reasoning="LLM Hold Agent: Always hold strategy",
                 valuation=0,
                 price_target=0,
+                price_target_reasoning="LLM Hold Agent: Always hold strategy",
                 orders=[],  # Empty list for hold
                 replace_decision="Add",
                 reasoning="LLM Hold Agent: Always hold strategy"

@@ -1,6 +1,7 @@
 from typing import Optional
 from agents.agent_manager.services.commitment_services import CommitmentCalculator
 from agents.agent_manager.services.position_services import PositionCalculator
+from services.messaging_service import MessagingService
 
 class SharedServiceFactory:
     """Factory for services shared across multiple components"""
@@ -36,3 +37,4 @@ class SharedServiceFactory:
         cls._commitment_calculator = None
         cls._position_calculator = None
         cls._order_book = None
+        MessagingService.reset()
