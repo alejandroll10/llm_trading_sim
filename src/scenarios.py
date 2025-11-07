@@ -628,6 +628,56 @@ SCENARIOS = {
             }
         }
     ),
+    "cascade_test": SimulationScenario(
+        name="cascade_test",
+        description="Subset of optimistic agents broadcast messages to test information cascades",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 20,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.01,
+                    'payment_frequency': 1
+                },
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'optimistic': 2,
+                    'value': 4,
+                    'market_maker': 2
+                }
+            }
+        }
+    ),
+    "deterministic_only": SimulationScenario(
+        name="deterministic_only",
+        description="Scenario with only deterministic agents to test messaging integration",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.01,
+                    'payment_frequency': 1
+                },
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'gap_trader': 1,
+                    'momentum_trader': 1,
+                    'hold_trader': 1
+                }
+            }
+        }
+    ),
 }
 
 def get_scenario(scenario_name: str) -> SimulationScenario:
@@ -638,4 +688,4 @@ def get_scenario(scenario_name: str) -> SimulationScenario:
 
 def list_scenarios() -> Dict[str, str]:
     """List all available scenarios and their descriptions"""
-    return {name: scenario.description for name, scenario in SCENARIOS.items()} 
+    return {name: scenario.description for name, scenario in SCENARIOS.items()}

@@ -10,7 +10,7 @@ class HoldTrader(BaseAgent):
 
     def make_decision(self, market_state: Dict, history: List, round_number: int) -> TradeDecision:
         current_price = market_state.get('price', 0)
-        return TradeDecision(
+        decision = TradeDecision(
             orders=[],
             replace_decision="Add",
             reasoning="Always hold strategy",
@@ -19,3 +19,9 @@ class HoldTrader(BaseAgent):
             price_target=current_price,
             price_target_reasoning="No expected price change",
         )
+        self.broadcast_message(round_number, {
+            'valuation': decision.valuation,
+            'price_target': decision.price_target,
+            'reasoning': decision.reasoning,
+        })
+        return decision
