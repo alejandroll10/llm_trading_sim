@@ -40,6 +40,7 @@ class DataRecorder:
         self.order_data: List[Dict[str, Any]] = []
         self.wealth_history: Dict[int, List[float]] = {}
         self.dividend_data: List[Dict[str, Any]] = []
+        self.social_messages: List[Dict[str, Any]] = []
 
     def initialize_agent_structures(self):
         """Initialize data structures that depend on agents"""
@@ -234,34 +235,58 @@ class DataRecorder:
             )
         })
 
+    def record_social_message(self, round_number: int, agent_id: str, message: str):
+        """Record a social media post from an agent"""
+        self.social_messages.append({
+            'round': round_number,
+            'agent_id': agent_id,
+            'message': message,
+            'timestamp': datetime.now().isoformat()
+        })
+
     def save_simulation_data(self):
         """Save all simulation data to files"""
         data_path = Path(self.data_dir)
-        
+
+        # Import messages from MessagingService before saving
+        from services.messaging_service import MessagingService
+        all_messages = MessagingService.get_all_messages()
+        if all_messages:
+            # Add timestamps to messages
+            import datetime
+            for msg in all_messages:
+                msg['timestamp'] = datetime.datetime.now().isoformat()
+            self.social_messages.extend(all_messages)
+
         # Save market data
         market_df = pd.DataFrame(self.market_data)
         market_df.to_csv(data_path / 'market_data.csv', index=False)
-        
+
         # Save trade data
         trade_df = pd.DataFrame(self.trade_data)
         trade_df.to_csv(data_path / 'trade_data.csv', index=False)
-        
+
         # Save agent data
         agent_df = pd.DataFrame(self.agent_data)
         agent_df.to_csv(data_path / 'agent_data.csv', index=False)
-        
+
         # Save order data
         order_df = pd.DataFrame(self.order_data)
         order_df.to_csv(data_path / 'order_data.csv', index=False)
-        
+
         # Save wealth history
         wealth_df = pd.DataFrame(self.wealth_history)
         wealth_df.to_csv(data_path / 'wealth_history.csv', index=False)
-        
+
         # Save dividend data
         dividend_df = pd.DataFrame(self.dividend_data)
         dividend_df.to_csv(data_path / 'dividend_data.csv', index=False)
-        
+
+        # Save social messages
+        if self.social_messages:
+            social_df = pd.DataFrame(self.social_messages)
+            social_df.to_csv(data_path / 'social_messages.csv', index=False)
+
         # Create a summary statistics file with safe dividend access
         dividend_model = self.market_state_manager.dividend_model
         

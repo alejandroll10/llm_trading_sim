@@ -30,6 +30,19 @@ class MessagingService:
         return history
 
     @classmethod
+    def get_all_messages(cls) -> List[dict]:
+        """Get all messages from all rounds for export/logging."""
+        all_messages = []
+        for round_num in sorted(cls._messages.keys()):
+            for msg_data in cls._messages[round_num]:
+                all_messages.append({
+                    'round': round_num,
+                    'agent_id': msg_data['agent_id'],
+                    'message': msg_data['message'],
+                })
+        return all_messages
+
+    @classmethod
     def reset(cls) -> None:
         """Clear all stored messages."""
         cls._messages = {}
