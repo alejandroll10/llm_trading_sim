@@ -678,6 +678,90 @@ SCENARIOS = {
             }
         }
     ),
+    "test_short_seller": SimulationScenario(
+        name="test_short_seller",
+        description="Test scenario with new short_seller agent and overvalued price",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "INITIAL_PRICE": 35.0,  # 25% above fundamental to encourage shorting
+            "LENDABLE_SHARES": 30000,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.02,
+                    'payment_frequency': 1
+                },
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'agent_composition': {
+                    'short_seller': 2,      # New aggressive short sellers
+                    'optimistic': 1,        # Provides buy-side liquidity
+                    'market_maker': 1       # Provides liquidity
+                },
+                'type_specific_params': {
+                    'short_seller': {
+                        'initial_cash': 1.5 * BASE_INITIAL_CASH,
+                        'initial_shares': int(0.5 * BASE_INITIAL_SHARES)  # Only 5000 shares
+                    },
+                    'optimistic': {
+                        'initial_cash': 2.0 * BASE_INITIAL_CASH,
+                        'initial_shares': int(0.2 * BASE_INITIAL_SHARES)
+                    },
+                    'market_maker': {
+                        'initial_cash': 3.0 * BASE_INITIAL_CASH,
+                        'initial_shares': int(2.0 * BASE_INITIAL_SHARES)
+                    }
+                }
+            }
+        }
+    ),
+    "aggressive_short_selling": SimulationScenario(
+        name="aggressive_short_selling",
+        description="Force aggressive short selling with extreme overpricing and low dividends",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 45.0,  # 60% above fundamental ($28)!
+            "LENDABLE_SHARES": 50000,  # Plenty of shares to borrow
+            "DIVIDEND_PARAMS": {
+                'type': 'stochastic',
+                'base_dividend': 0.2,  # Very low dividend (was 1.4)
+                'dividend_frequency': 1,
+                'dividend_growth': 0.0,
+                'dividend_probability': 0.5,
+                'dividend_variation': 0.1,  # Very low variation
+                'destination': 'dividend'
+            },
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.01,  # Lower borrow cost (1% vs 2%)
+                    'payment_frequency': 1
+                },
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'agent_composition': {
+                    'short_seller': 3,      # 3 aggressive short sellers
+                    'optimistic': 2,        # 2 optimistic buyers for liquidity
+                },
+                'type_specific_params': {
+                    'short_seller': {
+                        'initial_cash': 3.0 * BASE_INITIAL_CASH,  # Lots of cash for margin
+                        'initial_shares': 0  # ZERO shares - MUST borrow to short!
+                    },
+                    'optimistic': {
+                        'initial_cash': 3.0 * BASE_INITIAL_CASH,  # Lots of cash to buy
+                        'initial_shares': int(0.1 * BASE_INITIAL_SHARES)  # Very few shares
+                    }
+                }
+            }
+        }
+    ),
 }
 
 def get_scenario(scenario_name: str) -> SimulationScenario:

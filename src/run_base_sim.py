@@ -190,14 +190,14 @@ def save_plots(simulation, params: dict):
 
             if not type_data.empty:
                 initial_values[agent_type] = {
-                    'shares': type_data['shares'].sum(),
-                    'borrowed_shares': type_data['borrowed_shares'].sum() if 'borrowed_shares' in type_data.columns else 0,
-                    'net_shares': type_data['net_shares'].sum() if 'net_shares' in type_data.columns else type_data['shares'].sum(),
+                    'total_shares': type_data['total_shares'].sum(),
+                    'borrowed_shares': type_data['borrowed_shares'].sum(),
+                    'net_shares': type_data['net_shares'].sum(),
                     'cash': type_data['cash'].sum(),
                     'total_value': type_data['total_value'].sum()
                 }
                 print(f"  Initial values for {agent_type}: Cash=${initial_values[agent_type]['cash']:.2f}, " +
-                      f"Shares={initial_values[agent_type]['shares']}, Value=${initial_values[agent_type]['total_value']:.2f}")
+                      f"Total Shares={initial_values[agent_type]['total_shares']}, Value=${initial_values[agent_type]['total_value']:.2f}")
         
         # Add plot for dividend cash accumulation
         try:
@@ -293,40 +293,41 @@ def save_plots(simulation, params: dict):
             print(f"  Error creating wealth composition plot: {str(e)}")
         
         # 1. Absolute value plots - Show raw values for all metrics
-        for metric in ['shares', 'borrowed_shares', 'net_shares', 'cash', 'total_value']:
+        for metric, title in [
+            ('total_shares', 'Total Share Holdings (Available + Committed)'),
+            ('available_shares', 'Available Shares (Not in Orders)'),
+            ('committed_shares', 'Committed Shares (Locked in Orders)'),
+            ('borrowed_shares', 'Borrowed Shares'),
+            ('net_shares', 'Net Share Position (Total - Borrowed)'),
+            ('cash', 'Trading Cash Holdings'),
+            ('total_value', 'Total Wealth')
+        ]:
             try:
                 if metric not in agent_df.columns:
                     continue
-                    
+
                 plt.figure(figsize=(12, 6))
-                
+
                 # Group by round and agent_type, sum for the metric
                 grouped = agent_df.groupby(['round', 'agent_type'])[metric].sum().unstack()
-                
+
                 # Plot absolute values
                 grouped.plot(kind='line', marker='o')
-                
-                title_map = {
-                    'shares': 'Share Holdings',
-                    'borrowed_shares': 'Borrowed Shares',
-                    'net_shares': 'Net Share Holdings',
-                    'cash': 'Trading Cash Holdings',
-                    'total_value': 'Total Wealth'
-                }
-                
+
                 plt.xlabel('Round')
-                plt.ylabel(f'Absolute {title_map[metric]}')
-                plt.title(f'Absolute {title_map[metric]} by Agent Type')
+                plt.ylabel(f'{title}')
+                plt.title(f'{title} by Agent Type')
                 plt.legend(title='Agent Type')
                 plt.grid(True, alpha=0.3)
-                
+
                 save_plot_with_suffix(f'agent_{metric}_absolute')
             except Exception as e:
                 print(f"  Error creating {metric} absolute plot: {str(e)}")
         
         # 2. For share-related metrics - Show absolute change
         for metric, label in [
-            ('shares', 'Change in Shares'),
+            ('total_shares', 'Change in Total Shares'),
+            ('available_shares', 'Change in Available Shares'),
             ('net_shares', 'Change in Net Shares'),
             ('borrowed_shares', 'Change in Borrowed Shares'),
         ]:

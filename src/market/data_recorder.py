@@ -167,9 +167,11 @@ class DataRecorder:
                 'agent_id': state.agent_id,
                 'agent_type': state.agent_type,
                 'cash': round(state.cash, 2),
-                'shares': state.shares,
-                'borrowed_shares': state.borrowed_shares,
-                'net_shares': state.net_shares,
+                'available_shares': state.shares,  # Shares available (not in pending orders)
+                'committed_shares': state.committed_shares,  # Shares locked in pending orders
+                'total_shares': state.total_shares,  # available_shares + committed_shares
+                'borrowed_shares': state.borrowed_shares,  # Shares borrowed from lending pool
+                'net_shares': state.net_shares,  # total_shares - borrowed_shares (economic position)
                 'price': round(self.context.current_price, 2),
                 'share_value': share_value,
                 'total_value': current_wealth,
