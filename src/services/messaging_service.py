@@ -2,7 +2,11 @@ from typing import Any, Dict, List
 
 
 class MessagingService:
-    """Simple in-memory broadcast channel for agent messages."""
+    """Simple in-memory broadcast channel for agent messages.
+
+    Messages accumulate during simulation and are cleared on reset.
+    For very long simulations (100+ rounds), consider memory implications.
+    """
 
     _messages: Dict[int, List[dict]] = {}
 
@@ -45,4 +49,4 @@ class MessagingService:
     @classmethod
     def reset(cls) -> None:
         """Clear all stored messages."""
-        cls._messages = {}
+        cls._messages.clear()
