@@ -26,6 +26,7 @@ DETERMINISTIC_AGENTS = {
     "short_sell_trader": ShortSellTrader,
     "buy_to_close_trader": BuyToCloseTrader,
     "multi_stock_test": MultiStockValueTrader,
+    "multi_stock_value": MultiStockValueTrader,
     "multi_stock_buy": MultiStockBuyAgent,
     "multi_stock_sell": MultiStockSellAgent
 }

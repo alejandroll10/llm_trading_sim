@@ -31,6 +31,7 @@ class MultiStockValueTrader(BaseAgent):
         # Handle multi-stock market state
         if market_state.get('is_multi_stock'):
             stocks_data = market_state['stocks']
+            remaining_cash = self.cash
 
             for stock_id, stock_state in stocks_data.items():
                 price = stock_state['price']
@@ -57,9 +58,11 @@ class MultiStockValueTrader(BaseAgent):
                     reasoning_parts.append(
                         f"{stock_id}: SELL {sell_qty} @ ${price:.2f} (overvalued vs ${fundamental:.2f})"
                     )
-                elif price < fundamental * 0.98 and self.cash > price * 100:
+                elif price < fundamental * 0.98 and remaining_cash > price * 100:
                     # Undervalued: buy some shares
-                    buy_qty = min(100, int(self.cash / price))
+                    buy_qty = min(100, int(remaining_cash / price))
+                    cost = price * buy_qty
+                    remaining_cash -= cost
                     orders.append(OrderDetails(
                         stock_id=stock_id,
                         decision="Buy",

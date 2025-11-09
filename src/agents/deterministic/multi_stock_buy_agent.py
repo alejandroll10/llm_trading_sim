@@ -14,13 +14,16 @@ class MultiStockBuyAgent(BaseAgent):
 
         if market_state.get('is_multi_stock'):
             stocks_data = market_state['stocks']
+            remaining_cash = self.cash
 
             for stock_id, stock_state in stocks_data.items():
                 price = stock_state['price']
 
                 # Buy if we have cash
-                if self.cash > price * 50:
+                if remaining_cash > price * 50:
                     buy_qty = 50
+                    cost = price * buy_qty * 1.01  # Account for price limit
+                    remaining_cash -= cost
                     orders.append(OrderDetails(
                         stock_id=stock_id,
                         decision="Buy",

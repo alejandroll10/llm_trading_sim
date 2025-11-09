@@ -1052,6 +1052,79 @@ SCENARIOS = {
             }
         }
     ),
+
+    "multi_stock_cash_bug_test": SimulationScenario(
+        name="multi_stock_cash_bug_test",
+        description="Test cash over-commitment bug fix: 3 stocks with limited agent cash",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 3,  # Short test
+            "IS_MULTI_STOCK": True,
+            "HIDE_FUNDAMENTAL_PRICE": False,
+            "STOCKS": {
+                "STOCK_A": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 105.0,  # Undervalued to trigger buying
+                    "REDEMPTION_VALUE": 105.0,
+                    "TRANSACTION_COST": 0.0,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 5.25,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                },
+                "STOCK_B": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 105.0,  # Undervalued to trigger buying
+                    "REDEMPTION_VALUE": 105.0,
+                    "TRANSACTION_COST": 0.0,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 5.25,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                },
+                "STOCK_C": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 105.0,  # Undervalued to trigger buying
+                    "REDEMPTION_VALUE": 105.0,
+                    "TRANSACTION_COST": 0.0,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 5.25,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': 12000.0,  # LIMITED CASH: Can't afford all 3 stocks
+                'initial_positions': {
+                    "STOCK_A": 50,  # Small positions to avoid triggering sell logic
+                    "STOCK_B": 50,
+                    "STOCK_C": 50
+                },
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'multi_stock_buy': 2,        # Will try to buy 50 shares × $101 × 3 = $15,150
+                    'multi_stock_value': 2,      # Will try to buy 100 shares × $100 × 3 = $30,000
+                }
+            }
+        }
+    ),
 }
 
 def get_scenario(scenario_name: str) -> SimulationScenario:
