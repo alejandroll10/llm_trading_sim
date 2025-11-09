@@ -41,6 +41,7 @@ class DataRecorder:
         self.wealth_history: Dict[int, List[float]] = {}
         self.dividend_data: List[Dict[str, Any]] = []
         self.social_messages: List[Dict[str, Any]] = []
+        self.stock_positions: List[Dict[str, Any]] = []  # NEW: Per-stock position tracking
 
     def initialize_agent_structures(self):
         """Initialize data structures that depend on agents"""
@@ -75,10 +76,13 @@ class DataRecorder:
         
         # Record agent data
         self._record_agent_data(round_number, timestamp, dividends)
-        
+
+        # Record stock positions (multi-stock only)
+        self._record_stock_positions(round_number, market_state, timestamp)
+
         # Record order data
         self._record_order_data(round_number, orders, timestamp)
-        
+
         # Add dividend data recording
         self._record_dividend_data(round_number, market_state, timestamp)
 
@@ -93,6 +97,15 @@ class DataRecorder:
             'order_id': order.order_id
         } for order in orders]
 
+        # Handle multi-stock vs single-stock market_state
+        if market_state.get('is_multi_stock'):
+            # Multi-stock: Get market_depth from first stock for backwards compatibility
+            first_stock_state = list(market_state['stocks'].values())[0] if market_state['stocks'] else {}
+            order_book = first_stock_state.get('market_depth', {})
+        else:
+            # Single-stock: Original behavior
+            order_book = market_state.get('market_depth', {})
+
         self.history.append({
             'round': round_number + 1,
             'price': self.context.current_price,
@@ -101,10 +114,10 @@ class DataRecorder:
             'trades': trades,
             'orders': order_dicts,
             'price_fundamental_ratio': (
-                self.context.current_price / self.context.fundamental_price 
+                self.context.current_price / self.context.fundamental_price
                 if self.context.fundamental_price else 0
             ),
-            'order_book': market_state['market_depth'],
+            'order_book': order_book,
             'last_trade_price': self.context.public_info['last_trade']['price'],
             'best_bid': self.context.public_info['order_book_state']['best_bid'],
             'best_ask': self.context.public_info['order_book_state']['best_ask'],
@@ -113,30 +126,58 @@ class DataRecorder:
         })
 
     def _record_market_data(self, round_number, market_state, trades, total_volume, timestamp):
-        """Record market data"""
-        self.market_data.append({
-            'round': round_number + 1,
-            'price': self.context.current_price,
-            'fundamental_price': self.context.fundamental_price,
-            'total_volume': total_volume,
-            'num_trades': len(trades),
-            'timestamp': timestamp,
-            'price_fundamental_ratio': (self.context.current_price / 
-                self.context.fundamental_price 
-                if self.context.fundamental_price else 0),
-            'best_bid': market_state['best_bid'],
-            'best_ask': market_state['best_ask'],
-            'market_depth': market_state['market_depth'],
-            'short_interest': self.context.public_info.get('short_interest', 0)
-        })
+        """Record market data - one row per stock in multi-stock mode"""
+        if market_state.get('is_multi_stock'):
+            # Multi-stock: Record each stock separately
+            for stock_id, stock_state in market_state['stocks'].items():
+                # Calculate volume for this specific stock
+                stock_trades = [t for t in trades if t.stock_id == stock_id]
+                stock_volume = sum(t.quantity for t in stock_trades)
+
+                self.market_data.append({
+                    'round': round_number + 1,
+                    'stock_id': stock_id,
+                    'price': stock_state['price'],
+                    'fundamental_price': stock_state['fundamental_price'],
+                    'total_volume': stock_volume,
+                    'num_trades': len(stock_trades),
+                    'timestamp': timestamp,
+                    'price_fundamental_ratio': (
+                        stock_state['price'] / stock_state['fundamental_price']
+                        if stock_state['fundamental_price'] else 0
+                    ),
+                    'best_bid': stock_state.get('best_bid'),
+                    'best_ask': stock_state.get('best_ask'),
+                    'market_depth': stock_state.get('market_depth', {}),
+                    'short_interest': stock_state.get('short_interest', 0)
+                })
+        else:
+            # Single-stock: Original behavior
+            self.market_data.append({
+                'round': round_number + 1,
+                'stock_id': 'DEFAULT_STOCK',
+                'price': self.context.current_price,
+                'fundamental_price': self.context.fundamental_price,
+                'total_volume': total_volume,
+                'num_trades': len(trades),
+                'timestamp': timestamp,
+                'price_fundamental_ratio': (self.context.current_price /
+                    self.context.fundamental_price
+                    if self.context.fundamental_price else 0),
+                'best_bid': market_state.get('best_bid'),
+                'best_ask': market_state.get('best_ask'),
+                'market_depth': market_state.get('market_depth', {}),
+                'short_interest': self.context.public_info.get('short_interest', 0)
+            })
 
     def _record_trade_data(self, round_number, trades, timestamp):
         """Record trade data"""
         for trade in trades:
             self.trade_data.append({
                 'round': round_number + 1,
-                'buyer_id': trade.buyer_id,    # Assuming Trade object attributes
+                'buyer_id': trade.buyer_id,
                 'seller_id': trade.seller_id,
+                'stock_id': trade.stock_id,  # NEW: Multi-stock support
                 'quantity': trade.quantity,
                 'price': trade.price,
                 'timestamp': timestamp
@@ -182,16 +223,53 @@ class DataRecorder:
                 'total_cash': round(state.cash + state.dividend_cash, 2)
             })
 
+    def _record_stock_positions(self, round_number: int, market_state: dict, timestamp: str):
+        """Record per-stock positions for each agent in multi-stock mode"""
+        if not market_state.get('is_multi_stock'):
+            return  # Only for multi-stock simulations
+
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+
+            # Record position for each stock
+            for stock_id, stock_state in market_state['stocks'].items():
+                price = stock_state['price']
+
+                # Get positions for this specific stock
+                available_shares = agent.positions.get(stock_id, 0)
+                committed_shares = agent.committed_positions.get(stock_id, 0)
+                borrowed_shares = agent.borrowed_positions.get(stock_id, 0)
+                total_shares = available_shares + committed_shares
+                net_shares = total_shares - borrowed_shares
+
+                # Calculate value
+                share_value = round(net_shares * price, 2)
+
+                self.stock_positions.append({
+                    'round': round_number + 1,
+                    'agent_id': agent_id,
+                    'stock_id': stock_id,
+                    'price': round(price, 2),
+                    'available_shares': available_shares,
+                    'committed_shares': committed_shares,
+                    'total_shares': total_shares,
+                    'borrowed_shares': borrowed_shares,
+                    'net_shares': net_shares,
+                    'share_value': share_value,
+                    'timestamp': timestamp
+                })
+
     def _record_order_data(self, round_number, orders, timestamp):
         """Record order data"""
         for order in orders:
             self.order_data.append({
                 'round': round_number + 1,
-                'agent_id': order.agent_id,  # Use attribute access
-                'decision': order.side,      # Changed from decision to side
+                'agent_id': order.agent_id,
+                'stock_id': order.stock_id,  # NEW: Multi-stock support
+                'decision': order.side,
                 'quantity': order.quantity,
-                'price_limit': order.price,  # Changed from price_limit to price
-                'order_type': order.order_type,  # Added order_type
+                'price_limit': order.price,
+                'order_type': order.order_type,
                 'timestamp': timestamp
             })
 
@@ -200,9 +278,13 @@ class DataRecorder:
         if round_number == 0:
             return
 
+        # Skip dividend recording for multi-stock (not yet implemented)
+        if market_state.get('is_multi_stock'):
+            return
+
         if not self.market_state_manager.dividend_service:
             raise ValueError("Dividend service not found. Recording dividend data for round {round_number}")
-        
+
         dividend_state = market_state.get('dividend_state', {})
         if not dividend_state:
             raise ValueError("Dividend state not found")
@@ -277,6 +359,11 @@ class DataRecorder:
         # Save wealth history
         wealth_df = pd.DataFrame(self.wealth_history)
         wealth_df.to_csv(data_path / 'wealth_history.csv', index=False)
+
+        # Save stock positions (multi-stock)
+        if self.stock_positions:
+            stock_positions_df = pd.DataFrame(self.stock_positions)
+            stock_positions_df.to_csv(data_path / 'stock_positions.csv', index=False)
 
         # Save dividend data
         dividend_df = pd.DataFrame(self.dividend_data)

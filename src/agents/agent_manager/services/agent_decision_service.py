@@ -62,7 +62,26 @@ class AgentDecisionService:
             # Handle new orders creation (for Replace or Add)
             for order_details in decision['orders']:
                 order = self.create_order(order_details, agent_id)
-                valid, _ = self.order_state_manager.handle_new_order(order, market_state['price'])
+
+                # Get current price for this stock
+                if market_state.get('is_multi_stock'):
+                    # Multi-stock: Get price for this specific stock
+                    if order.stock_id not in market_state['stocks']:
+                        available_stocks = list(market_state['stocks'].keys())
+                        error_msg = (
+                            f"Agent {agent_id} order specifies stock_id='{order.stock_id}' which doesn't exist. "
+                            f"Available stocks: {available_stocks}. "
+                            f"In multi-stock scenarios, you must specify the correct stock_id for each order."
+                        )
+                        self.decisions_logger.error(error_msg)
+                        # Skip this order
+                        continue
+                    current_price = market_state['stocks'][order.stock_id]['price']
+                else:
+                    # Single-stock: Get the single price
+                    current_price = market_state['price']
+
+                valid, _ = self.order_state_manager.handle_new_order(order, current_price)
                 if valid:
                     new_orders.append(order)
                     self.agent_repository.record_agent_order(order)
@@ -87,15 +106,17 @@ class AgentDecisionService:
             if isinstance(order_details, dict):
                 order = Order(
                     agent_id=agent_id,
+                    stock_id=order_details.get('stock_id', 'DEFAULT_STOCK'),  # NEW: Multi-stock support
                     order_type=order_details['order_type'].lower(),
                     side=order_details['decision'].lower(),
                     quantity=order_details['quantity'],
-                        round_placed=self.context.round_number,
+                    round_placed=self.context.round_number,
                     price=order_details['price_limit']
                 )
             else:
                 order = Order(
                     agent_id=agent_id,
+                    stock_id=order_details.stock_id,  # NEW: Multi-stock support
                     order_type=order_details.order_type.value,
                     side=order_details.decision.lower(),
                     quantity=order_details.quantity,

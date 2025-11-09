@@ -30,6 +30,7 @@ class PositionChange(NamedTuple):
     """Represents a change in an agent's position"""
     cash_change: float
     shares_change: int
+    stock_id: str = "DEFAULT_STOCK"  # Default for backwards compatibility
 
 @dataclass
 class TradeImpact:
@@ -45,14 +46,16 @@ class PositionCalculator:
         """Calculate position changes from a trade"""
         trade_value = trade.quantity * trade.price
         assert trade_value == trade.value, "Trade value mismatch"
-        
+
         return TradeImpact(
             buyer=PositionChange(
                 cash_change=-trade_value,
-                shares_change=trade.quantity
+                shares_change=trade.quantity,
+                stock_id=trade.stock_id  # Include stock_id for multi-stock support
             ),
             seller=PositionChange(
                 cash_change=trade_value,
-                shares_change=0  # Share reduction handled during commitment release
+                shares_change=0,  # Share reduction handled during commitment release
+                stock_id=trade.stock_id  # Include stock_id for multi-stock support
             )
         )

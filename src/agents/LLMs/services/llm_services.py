@@ -11,6 +11,7 @@ class OrderSchema(BaseModel):
     quantity: int = Field(..., description="Number of shares")
     order_type: str = Field(..., description="Market or Limit")
     price_limit: Optional[float] = Field(None, description="Required for limit orders")
+    stock_id: str = Field(default="DEFAULT_STOCK", description="Stock identifier - required for multi-stock scenarios (e.g., 'TECH_A', 'TECH_B'), defaults to 'DEFAULT_STOCK' for single-stock")
 
 class TradeDecisionSchema(BaseModel):
 

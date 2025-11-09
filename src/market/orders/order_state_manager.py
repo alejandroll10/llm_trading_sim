@@ -47,13 +47,15 @@ class OrderStateManager:
             # Commit resources through repository
             if order.side == 'buy':
                 result = self.agent_repository.commit_resources(
-                    order.agent_id, 
-                    cash_amount=required_cash
+                    order.agent_id,
+                    cash_amount=required_cash,
+                    stock_id=order.stock_id
                 )
             else:
                 result = self.agent_repository.commit_resources(
-                    order.agent_id, 
-                    share_amount=required_shares
+                    order.agent_id,
+                    share_amount=required_shares,
+                    stock_id=order.stock_id
                 )
 
             if result.success:

@@ -1015,24 +1015,46 @@ def run_scenario(
         parameters=params
     )
 
-    # For infinite horizon scenarios, redemption_value may not be present
-    redemption_value = params.get("REDEMPTION_VALUE", None)
+    # Check if this is a multi-stock scenario
+    is_multi_stock = params.get("IS_MULTI_STOCK", False)
 
-    simulation = BaseSimulation(
-        num_rounds=params["NUM_ROUNDS"],
-        initial_price=params["INITIAL_PRICE"],
-        fundamental_price=params["FUNDAMENTAL_PRICE"],
-        redemption_value=redemption_value,
-        transaction_cost=params["TRANSACTION_COST"],
-        lendable_shares=params.get("LENDABLE_SHARES", 0),
-        agent_params=params["AGENT_PARAMS"],
-        dividend_params=params["DIVIDEND_PARAMS"],
-        model_open_ai=params["MODEL_OPEN_AI"],
-        interest_params=params["INTEREST_MODEL"],
-        hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
-        infinite_rounds=params["INFINITE_ROUNDS"],
-        sim_type=scenario.name
-    )
+    if is_multi_stock:
+        # Multi-stock scenario: pass stock_configs instead of single stock params
+        simulation = BaseSimulation(
+            num_rounds=params["NUM_ROUNDS"],
+            initial_price=0,  # Unused for multi-stock, but required parameter
+            fundamental_price=0,  # Unused for multi-stock, but required parameter
+            redemption_value=None,
+            transaction_cost=params.get("TRANSACTION_COST", 0.0),
+            lendable_shares=params.get("LENDABLE_SHARES", 0),
+            agent_params=params["AGENT_PARAMS"],
+            dividend_params=None,  # Per-stock dividend params in stock_configs
+            model_open_ai=params["MODEL_OPEN_AI"],
+            interest_params=params["INTEREST_MODEL"],
+            hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
+            infinite_rounds=params["INFINITE_ROUNDS"],
+            sim_type=scenario.name,
+            stock_configs=params["STOCKS"]  # NEW: Pass stock configurations
+        )
+    else:
+        # Single-stock scenario: original behavior (backwards compatible)
+        redemption_value = params.get("REDEMPTION_VALUE", None)
+
+        simulation = BaseSimulation(
+            num_rounds=params["NUM_ROUNDS"],
+            initial_price=params["INITIAL_PRICE"],
+            fundamental_price=params["FUNDAMENTAL_PRICE"],
+            redemption_value=redemption_value,
+            transaction_cost=params["TRANSACTION_COST"],
+            lendable_shares=params.get("LENDABLE_SHARES", 0),
+            agent_params=params["AGENT_PARAMS"],
+            dividend_params=params["DIVIDEND_PARAMS"],
+            model_open_ai=params["MODEL_OPEN_AI"],
+            interest_params=params["INTEREST_MODEL"],
+            hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
+            infinite_rounds=params["INFINITE_ROUNDS"],
+            sim_type=scenario.name
+        )
 
     # Save parameters and run simulation
     save_parameters(simulation.run_dir, params)
@@ -1044,15 +1066,21 @@ def run_scenario(
 
     # Print final agent states
     for agent_id in simulation.agent_repository.get_all_agent_ids():
+        # Pass prices dict for multi-stock or single price for single-stock
+        if simulation.is_multi_stock:
+            prices = {stock_id: context.current_price for stock_id, context in simulation.contexts.items()}
+        else:
+            prices = simulation.context.current_price
+
         state = simulation.agent_repository.get_agent_state_snapshot(
             agent_id,
-            simulation.context.current_price
+            prices
         )
-        total_value = state.cash + state.shares * simulation.context.current_price
+        # Use wealth from snapshot (correctly calculated for both single and multi-stock)
         print(f"Agent {state.agent_id} Type: {state.agent_type} - "
             f"Cash: ${state.cash:.2f}, "
-            f"Shares: {state.shares}, "
-            f"Total Value: ${total_value:.2f}")
+            f"Shares: {state.total_shares}, "
+            f"Total Value: ${state.wealth:.2f}")
 
 def main():
     """

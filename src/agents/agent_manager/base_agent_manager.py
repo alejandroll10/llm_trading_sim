@@ -76,12 +76,41 @@ class AgentManager:
 
     def _verify_state_invariants(self, state: AgentStateSnapshot):
         """Verify state invariants"""
+        # Basic agent state invariants
         assert state.committed_cash >= 0, "Negative committed cash"
         assert state.committed_shares >= 0, "Negative committed shares"
         assert state.cash >= 0, "Negative cash"
         assert state.shares >= 0, "Negative shares"
         assert state.committed_cash <= state.cash + state.committed_cash, "Excess committed cash"
         assert state.committed_shares <= state.shares + state.committed_shares, "Excess committed shares"
+
+        # Multi-stock invariants (check per-stock positions)
+        agent = self.agent_repository.get_agent(state.agent_id)
+        for stock_id in agent.positions.keys():
+            position = agent.positions.get(stock_id, 0)
+            committed = agent.committed_positions.get(stock_id, 0)
+            borrowed = agent.borrowed_positions.get(stock_id, 0)
+
+            # Per-stock position checks
+            assert committed >= 0, f"Negative committed shares for {stock_id}: {committed}"
+            assert borrowed >= 0, f"Negative borrowed shares for {stock_id}: {borrowed}"
+
+            # If short selling not allowed, position + committed should be non-negative
+            if not agent.allow_short_selling:
+                assert position >= 0, f"Negative position for {stock_id} without short selling: {position}"
+                assert position + committed >= 0, f"Negative total position (available + committed) for {stock_id}: {position + committed}"
+
+            # Borrowed shares should not exceed committed + available (can't borrow more than we're selling)
+            assert borrowed <= position + committed + borrowed, \
+                f"Borrowed shares exceed position for {stock_id}: borrowed={borrowed}, position={position}, committed={committed}"
+
+        # Verify total_shares equals sum of per-stock positions
+        calculated_total = sum(
+            agent.positions.get(stock_id, 0) + agent.committed_positions.get(stock_id, 0)
+            for stock_id in agent.positions.keys()
+        )
+        assert abs(calculated_total - state.total_shares) < 0.01, \
+            f"Total shares mismatch: sum of per-stock={calculated_total}, total_shares={state.total_shares}"
 
     def _log_state_comparison(self, pre: AgentStateSnapshot, current: AgentStateSnapshot):
         """Log comparison between pre and current states"""

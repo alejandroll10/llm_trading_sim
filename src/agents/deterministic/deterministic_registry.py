@@ -9,6 +9,9 @@ from .deterministic_market_maker import DeterministicMarketMaker
 from .hold_agent import HoldTrader
 from .short_sell_agent import ShortSellTrader
 from .buy_to_close_agent import BuyToCloseTrader
+from .multi_stock_value_trader import MultiStockValueTrader
+from .multi_stock_buy_agent import MultiStockBuyAgent
+from .multi_stock_sell_agent import MultiStockSellAgent
 
 DETERMINISTIC_AGENTS = {
     "gap_trader": ProportionalGapTrader,
@@ -21,5 +24,8 @@ DETERMINISTIC_AGENTS = {
     "deterministic_market_maker": DeterministicMarketMaker,
     "hold_trader": HoldTrader,
     "short_sell_trader": ShortSellTrader,
-    "buy_to_close_trader": BuyToCloseTrader
+    "buy_to_close_trader": BuyToCloseTrader,
+    "multi_stock_test": MultiStockValueTrader,
+    "multi_stock_buy": MultiStockBuyAgent,
+    "multi_stock_sell": MultiStockSellAgent
 }

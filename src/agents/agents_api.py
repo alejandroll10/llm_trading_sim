@@ -15,6 +15,7 @@ class OrderDetails(BaseModel):
     quantity: int
     order_type: OrderType
     price_limit: float | None = None
+    stock_id: str = "DEFAULT_STOCK"  # NEW: Multi-stock support, defaults for backwards compatibility
 
     @model_validator(mode='after')
     def validate_order_details(self):

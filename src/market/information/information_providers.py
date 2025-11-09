@@ -33,7 +33,7 @@ class MarketPriceProvider(BaseProvider):
         state = self.market_state
         market_state = state['market']
         metadata = state['metadata']
-        
+
         return InformationSignal(
             type=InformationType.PRICE,
             value=market_state['price'],
@@ -45,11 +45,28 @@ class MarketPriceProvider(BaseProvider):
             }
         )
 
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """Generate signal using specific manager (multi-stock support)"""
+        state = manager.get_observable_state()
+        market_state = state['market']
+        metadata = state['metadata']
+
+        return InformationSignal(
+            type=InformationType.PRICE,
+            value=market_state['price'],
+            reliability=self.config.reliability,
+            metadata={
+                'round': metadata['round'],
+                'best_bid': market_state['best_bid'],
+                'best_ask': market_state['best_ask']
+            }
+        )
+
 class InterestProvider(BaseProvider):
     def generate_signal(self, round_number: int) -> InformationSignal:
         state = self.market_state
         interest_state = state['interest']
-        
+
         return InformationSignal(
             type=InformationType.INTEREST,
             value=interest_state['rate'],  # Current interest rate
@@ -63,10 +80,45 @@ class InterestProvider(BaseProvider):
             }
         )
 
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """Generate signal using specific manager (multi-stock support)"""
+        state = manager.get_observable_state()
+        interest_state = state['interest']
+
+        return InformationSignal(
+            type=InformationType.INTEREST,
+            value=interest_state['rate'],
+            reliability=self.config.reliability,
+            metadata={
+                'round': round_number,
+                'compound_frequency': interest_state['compound_frequency'],
+                'last_payment': interest_state.get('last_payment'),
+                'next_payment_round': interest_state.get('next_payment_round'),
+                'interest_destination': interest_state.get('destination', 'dividend')
+            }
+        )
+
 
 class BorrowRateProvider(BaseProvider):
     def generate_signal(self, round_number: int) -> InformationSignal:
         state = self.market_state
+        borrow_state = state['borrow']
+
+        return InformationSignal(
+            type=InformationType.BORROW_FEE,
+            value=borrow_state['rate'],
+            reliability=self.config.reliability,
+            metadata={
+                'round': round_number,
+                'payment_frequency': borrow_state['payment_frequency'],
+                'last_payment': borrow_state.get('last_payment'),
+                'next_payment_round': borrow_state.get('next_payment_round')
+            }
+        )
+
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """Generate signal using specific manager (multi-stock support)"""
+        state = manager.get_observable_state()
         borrow_state = state['borrow']
 
         return InformationSignal(
@@ -92,7 +144,23 @@ class OrderBookProvider(BaseProvider):
             metadata={
                 'best_bid': market_state['best_bid'],
                 'best_ask': market_state['best_ask'],
-                'depth_levels': len(market_state['order_book']['buy_levels']) + 
+                'depth_levels': len(market_state['order_book']['buy_levels']) +
+                              len(market_state['order_book']['sell_levels'])
+            }
+        )
+
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """Generate signal using specific manager (multi-stock support)"""
+        state = manager.get_observable_state()
+        market_state = state['market']
+        return InformationSignal(
+            type=InformationType.ORDER_BOOK,
+            value=market_state['order_book'],
+            reliability=self.config.reliability,
+            metadata={
+                'best_bid': market_state['best_bid'],
+                'best_ask': market_state['best_ask'],
+                'depth_levels': len(market_state['order_book']['buy_levels']) +
                               len(market_state['order_book']['sell_levels'])
             }
         )
@@ -109,6 +177,21 @@ class FundamentalProvider(BaseProvider):
                 'round': round_number,
                 'periods_remaining': fundamental_state['periods_remaining'],  # Access from fundamental state
                 'redemption_value': fundamental_state['redemption_value']  # Include redemption value
+            }
+        )
+
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """Generate signal using specific manager (multi-stock support)"""
+        state = manager.get_observable_state()
+        fundamental_state = state['fundamental']
+        return InformationSignal(
+            type=InformationType.FUNDAMENTAL,
+            value=fundamental_state['price'],
+            reliability=self.config.reliability,
+            metadata={
+                'round': round_number,
+                'periods_remaining': fundamental_state['periods_remaining'],
+                'redemption_value': fundamental_state['redemption_value']
             }
         )
 
@@ -153,9 +236,56 @@ class DividendProvider(BaseProvider):
             return 0
         return (dividend / price) * 100
 
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """Generate signal using specific manager (multi-stock support)"""
+        if not manager.dividend_service:
+            return None
+
+        state = manager.get_observable_state()
+        dividend_state = state['dividend']
+        current_price = manager.current_price
+        model = dividend_state['model']
+
+        return InformationSignal(
+            type=InformationType.DIVIDEND,
+            value=model.expected_dividend,
+            reliability=self.config.reliability,
+            metadata={
+                'yields': {
+                    'expected': self._calculate_yield(model.expected_dividend, current_price),
+                    'max': self._calculate_yield(model.max_dividend, current_price),
+                    'min': self._calculate_yield(model.min_dividend, current_price),
+                    'last': self._calculate_yield(dividend_state['last_paid_dividend'], current_price)
+                           if dividend_state['last_paid_dividend'] else None
+                },
+                'max_dividend': model.max_dividend,
+                'min_dividend': model.min_dividend,
+                'last_paid_dividend': dividend_state['last_paid_dividend'],
+                'next_payment_round': dividend_state['next_payment_round'],
+                'should_pay': dividend_state['should_pay'],
+                'variation': model.dividend_variation,
+                'probability': model.dividend_probability * 100,
+                'destination': dividend_state.get('destination', 'cash'),
+                'tradeable': dividend_state.get('tradeable', 'non-tradeable')
+            }
+        )
+
 class VolumeProvider(BaseProvider):
     def generate_signal(self, round_number: int) -> InformationSignal:
         state = self.market_state
+        return InformationSignal(
+            type=InformationType.VOLUME,
+            value=state['market']['volume'],
+            reliability=self.config.reliability,
+            metadata={
+                'round': round_number,
+                'trade_history': state['market']['trade_history']
+            }
+        )
+
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """Generate signal using specific manager (multi-stock support)"""
+        state = manager.get_observable_state()
         return InformationSignal(
             type=InformationType.VOLUME,
             value=state['market']['volume'],

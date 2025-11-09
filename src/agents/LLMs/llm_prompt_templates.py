@@ -25,8 +25,24 @@ Your decision must include:
     - quantity: number of shares
     - order_type: "market" or "limit"
     - price_limit: required for limit orders
+    - stock_id: required in multi-stock scenarios (e.g., "TECH_A", "TECH_B")
 - reasoning: brief explanation
 - replace_decision: "Add", "Cancel", or "Replace"
+
+IMPORTANT FOR MULTI-STOCK TRADING:
+- If multiple stocks are shown in the market information, you MUST specify stock_id for each order
+- You can place orders for different stocks in the same decision
+- Each order targets one specific stock identified by its stock_id
+
+Example multi-stock order format:
+{
+  "orders": [
+    {"decision": "Buy", "quantity": 100, "order_type": "market", "price_limit": null, "stock_id": "TECH_A"},
+    {"decision": "Sell", "quantity": 50, "order_type": "limit", "price_limit": 102.0, "stock_id": "TECH_B"}
+  ],
+  "replace_decision": "Add",
+  "reasoning": "Buying undervalued TECH_A and selling overvalued TECH_B"
+}
 """
 
 POSITION_INFO_TEMPLATE = """
@@ -70,6 +86,7 @@ Redemption Information:
 
 # Standard user prompt template for all agents
 STANDARD_USER_TEMPLATE = """{base_market_state}
+{multi_stock_info}
 {price_history}
 {dividend_info}
 {redemption_info}

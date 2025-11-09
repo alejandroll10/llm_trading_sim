@@ -46,8 +46,13 @@ class BaseAgent(ABC):
             type_id=self.__class__.__name__.lower(),  # Lowercase version as ID
         )
         self.dividend_cash = 0.0  # Separate account for dividends/interests
-        self.shares = initial_shares
-        self.borrowed_shares = 0  # Track borrowed shares for short selling
+
+        # Multi-stock positions: Dict[stock_id, shares]
+        # For backwards compatibility, convert single initial_shares to dict
+        self.positions = {"DEFAULT_STOCK": initial_shares}
+        self.committed_positions = {"DEFAULT_STOCK": 0}
+        self.borrowed_positions = {"DEFAULT_STOCK": 0}
+
         self.position_limit = position_limit
         self.allow_short_selling = allow_short_selling
         self.margin_requirement = margin_requirement  # Percentage of base required as margin
@@ -107,6 +112,37 @@ class BaseAgent(ABC):
             'borrow_fee': [],
             'other': []
         }
+
+    # Backwards compatibility properties for single-stock code
+    @property
+    def shares(self) -> int:
+        """Get shares for DEFAULT_STOCK (backwards compatibility)"""
+        return self.positions.get("DEFAULT_STOCK", 0)
+
+    @shares.setter
+    def shares(self, value: int):
+        """Set shares for DEFAULT_STOCK (backwards compatibility)"""
+        self.positions["DEFAULT_STOCK"] = value
+
+    @property
+    def committed_shares(self) -> int:
+        """Get committed shares for DEFAULT_STOCK (backwards compatibility)"""
+        return self.committed_positions.get("DEFAULT_STOCK", 0)
+
+    @committed_shares.setter
+    def committed_shares(self, value: int):
+        """Set committed shares for DEFAULT_STOCK (backwards compatibility)"""
+        self.committed_positions["DEFAULT_STOCK"] = value
+
+    @property
+    def borrowed_shares(self) -> int:
+        """Get borrowed shares for DEFAULT_STOCK (backwards compatibility)"""
+        return self.borrowed_positions.get("DEFAULT_STOCK", 0)
+
+    @borrowed_shares.setter
+    def borrowed_shares(self, value: int):
+        """Set borrowed shares for DEFAULT_STOCK (backwards compatibility)"""
+        self.borrowed_positions["DEFAULT_STOCK"] = value
 
     def get_last_round_messages(self, round_number: int):
         """Retrieve broadcast messages from the previous round."""
@@ -298,27 +334,31 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict()
         )
 
-    def commit_shares(self, quantity: float, round_number: int, current_price: float, debug: bool = False):
+    def commit_shares(self, quantity: float, round_number: int, current_price: float, debug: bool = False, stock_id: str = "DEFAULT_STOCK"):
         """Commit shares for a pending order, borrowing shares if allowed and necessary
-        
+
         Args:
             quantity: Number of shares to commit
             round_number: Current round number (for logging)
             current_price: Current market price (for margin calculations)
             debug: Whether to print debug information
+            stock_id: Which stock's shares to commit (for multi-stock mode)
         """
         # Log initial state
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
-            operation="committing shares",
+            operation=f"committing shares ({stock_id})",
             amount=quantity,
             agent_state=self._get_state_dict(),
             outstanding_orders=self.outstanding_orders
         )
-        
+
+        # Get current position for this specific stock
+        current_shares = self.positions.get(stock_id, 0)
+
         # Check if we need to borrow shares
         shares_to_borrow = 0
-        if quantity > self.shares:
+        if quantity > current_shares:
             # Agent is trying to sell more than they have
             if not self.allow_short_selling:
                 # Log error state
@@ -332,21 +372,21 @@ class BaseAgent(ABC):
                     print_to_terminal=debug,
                     is_error=True
                 )
-                
+
                 # Log validation error
                 LoggingService.log_validation_error(
                     round_number=round_number,
                     agent_id=self.agent_id,
                     agent_type=self.agent_type.name,
                     error_type="INSUFFICIENT_SHARES",
-                    details=f"Required: {quantity}, Available: {self.shares}",
+                    details=f"Required: {quantity}, Available: {current_shares} ({stock_id})",
                     attempted_action="COMMIT_SHARES"
                 )
-                
-                raise ValueError(f"Insufficient shares: required: {quantity} > available: {self.shares}")
+
+                raise ValueError(f"Insufficient shares: required: {quantity} > available: {current_shares}")
             else:
                 # Short selling is allowed, calculate shares to borrow
-                shares_to_borrow = quantity - self.shares
+                shares_to_borrow = quantity - current_shares
                 
                 # Check margin requirements
                 max_borrowable = self.get_max_borrowable_shares(current_price)
@@ -390,10 +430,25 @@ class BaseAgent(ABC):
                                    f"based on {self.margin_requirement:.2%} margin requirement")
                 
                 # All checks passed, borrow the shares
-                self.borrowed_shares += shares_to_borrow
-        
-        self.committed_shares += quantity
-        self.shares -= min(quantity, self.shares)  # Only reduce available shares by what we have
+                # Track borrowed shares per stock
+                current_borrowed = self.borrowed_positions.get(stock_id, 0)
+                self.borrowed_positions[stock_id] = current_borrowed + shares_to_borrow
+                # Also update global if not DEFAULT_STOCK (avoid double counting)
+                if stock_id != "DEFAULT_STOCK":
+                    self.borrowed_shares += shares_to_borrow
+
+        # Track committed shares per stock
+        current_committed = self.committed_positions.get(stock_id, 0)
+        self.committed_positions[stock_id] = current_committed + quantity
+        # Also update global if not DEFAULT_STOCK (avoid double counting)
+        if stock_id != "DEFAULT_STOCK":
+            self.committed_shares += quantity
+
+        # Decrement the correct stock's position
+        # Only reduce by what we actually have of this stock (not borrowed amount)
+        owned_shares = min(quantity, current_shares)
+        if owned_shares > 0:
+            self.positions[stock_id] = current_shares - owned_shares
 
         # Log final state
         LoggingService.log_agent_state(
@@ -402,7 +457,7 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict()
         )
 
-    def _release_shares(self, quantity: float, return_borrowed: bool = True):
+    def _release_shares(self, quantity: float, return_borrowed: bool = True, stock_id: str = "DEFAULT_STOCK"):
         """Release committed shares after order completion.
 
         Args:
@@ -411,10 +466,11 @@ class BaseAgent(ABC):
                 outstanding borrow. When ``False`` (used when a sell order is
                 filled), borrowed shares remain outstanding to represent the
                 short position.
+            stock_id: Which stock's shares to release (for multi-stock mode)
         """
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
-            operation="releasing shares",
+            operation=f"releasing shares ({stock_id})",
             amount=quantity,
             agent_state=self._get_state_dict(),
             outstanding_orders=self.outstanding_orders
@@ -425,18 +481,31 @@ class BaseAgent(ABC):
         if quantity - self.committed_shares > FLOAT_TOLERANCE:
             raise ValueError(f"Cannot release more than committed: {quantity} > {self.committed_shares}")
 
-        self.committed_shares = max(0, self.committed_shares - quantity)
+        # Release committed shares per stock
+        current_committed = self.committed_positions.get(stock_id, 0)
+        self.committed_positions[stock_id] = max(0, current_committed - quantity)
+        # Also update global if not DEFAULT_STOCK (avoid double counting)
+        if stock_id != "DEFAULT_STOCK":
+            self.committed_shares = max(0, self.committed_shares - quantity)
 
         if return_borrowed:
-            # If we've borrowed shares, return those first
-            if self.borrowed_shares > 0:
-                shares_to_return = min(quantity, self.borrowed_shares)
-                self.borrowed_shares -= shares_to_return
-                # Only add the remaining shares (if any) to available balance
-                self.shares += max(0, quantity - shares_to_return)
+            # If we've borrowed shares for this stock, return those first
+            current_borrowed = self.borrowed_positions.get(stock_id, 0)
+            if current_borrowed > 0:
+                shares_to_return = min(quantity, current_borrowed)
+                self.borrowed_positions[stock_id] = current_borrowed - shares_to_return
+                # Also update global if not DEFAULT_STOCK (avoid double counting)
+                if stock_id != "DEFAULT_STOCK":
+                    self.borrowed_shares -= shares_to_return
+                # Only add the remaining shares (if any) to available balance for this stock
+                shares_to_restore = max(0, quantity - shares_to_return)
+                if shares_to_restore > 0:
+                    current_position = self.positions.get(stock_id, 0)
+                    self.positions[stock_id] = current_position + shares_to_restore
             else:
-                # No borrowed shares, so just add everything back
-                self.shares += quantity
+                # No borrowed shares, so just add everything back to this stock
+                current_position = self.positions.get(stock_id, 0)
+                self.positions[stock_id] = current_position + quantity
 
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
@@ -456,20 +525,47 @@ class BaseAgent(ABC):
     
     @property
     def total_shares(self):
-        """Get total shares position (available + committed)"""
-        return self.shares + self.committed_shares
+        """Get total shares position (available + committed) across all stocks"""
+        total = 0
+        for stock_id in self.positions.keys():
+            total += self.positions[stock_id] + self.committed_positions.get(stock_id, 0)
+        return total
     
-    def update_wealth(self, current_price: float):
-        """Update agent's total wealth based on current price, accounting for borrowed shares"""
-        # Track the last price for margin requirement checks
-        self.last_price = current_price
+    def update_wealth(self, prices):
+        """Update agent's total wealth based on current prices, accounting for borrowed shares
 
-        # Net shares position (can be negative with short selling)
-        net_shares = self.total_shares - self.borrowed_shares
-        self.wealth = self.total_cash + (net_shares * current_price)
+        Args:
+            prices: Either a single float (for backwards compatibility with single-stock)
+                   or a Dict[stock_id, price] for multi-stock scenarios
+        """
+        # Handle both single price and multi-stock prices dict
+        if isinstance(prices, dict):
+            # Multi-stock: Calculate wealth across all positions
+            self.last_prices = prices  # Store for margin calls
 
-        # Automatically handle margin requirements after price update
-        self.handle_margin_call(current_price, self.last_update_round)
+            share_value = sum(
+                (self.positions.get(stock_id, 0) + self.committed_positions.get(stock_id, 0) -
+                 self.borrowed_positions.get(stock_id, 0)) * price
+                for stock_id, price in prices.items()
+            )
+            self.wealth = self.total_cash + share_value
+
+            # For backwards compatibility, set last_price to first stock's price
+            self.last_price = list(prices.values())[0] if prices else 0.0
+
+            # TODO: Implement multi-stock margin calls
+            # For now, skip margin calls in multi-stock scenarios
+        else:
+            # Single-stock: Original behavior (backwards compatible)
+            current_price = prices
+            self.last_price = current_price
+
+            # Net shares position (can be negative with short selling)
+            net_shares = self.total_shares - self.borrowed_shares
+            self.wealth = self.total_cash + (net_shares * current_price)
+
+            # Automatically handle margin requirements after price update
+            self.handle_margin_call(current_price, self.last_update_round)
 
     def handle_margin_call(self, current_price: float, round_number: int):
         """Force buy-to-cover when margin requirements are violated."""
@@ -783,8 +879,22 @@ class BaseAgent(ABC):
 
     def receive_information(self, signals: Dict[InformationType, InformationSignal]):
         """Receive, store and archive information signals"""
-        # Get round number from any signal (they all have same round)
-        round_number = next(iter(signals.values())).metadata.get('round', self.last_update_round + 1)
+        # Get round number from signals (handle both single-stock and multi-stock)
+        if isinstance(signals, dict) and signals.get('is_multi_stock'):
+            # Multi-stock: extract round from first stock's first signal
+            try:
+                first_stock_signals = next(iter(signals['multi_stock_signals'].values()))
+                round_number = next(iter(first_stock_signals.values())).metadata.get('round', self.last_update_round + 1)
+            except StopIteration:
+                # Empty signals - use last round + 1
+                round_number = self.last_update_round + 1
+        else:
+            # Single-stock: original behavior
+            try:
+                round_number = next(iter(signals.values())).metadata.get('round', self.last_update_round + 1)
+            except StopIteration:
+                # Empty signals - use last round + 1
+                round_number = self.last_update_round + 1
         
         # Log received signals
         self._log_information_state(
@@ -815,15 +925,29 @@ class BaseAgent(ABC):
             signals: Signal dictionary being logged
         """
         message = [f"\n========== Agent {self.agent_id} {operation} (Round {round_number}) =========="]
-        
-        for info_type, signal in signals.items():
-            message.extend([
-                f"\n{info_type.value}:",
-                f"\n - Value: {signal.value}",
-                f"\n - Reliability: {signal.reliability}",
-                f"\n - Metadata: {signal.metadata}"
-            ])
-        
+
+        # Handle multi-stock signal structure
+        if isinstance(signals, dict) and signals.get('is_multi_stock'):
+            message.append(f"\n[MULTI-STOCK MODE]")
+            for stock_id, stock_signals in signals.get('multi_stock_signals', {}).items():
+                message.append(f"\n\nStock: {stock_id}")
+                for info_type, signal in stock_signals.items():
+                    message.extend([
+                        f"\n  {info_type.value}:",
+                        f"\n   - Value: {signal.value}",
+                        f"\n   - Reliability: {signal.reliability}",
+                        f"\n   - Metadata: {signal.metadata}"
+                    ])
+        else:
+            # Single-stock: original behavior
+            for info_type, signal in signals.items():
+                message.extend([
+                    f"\n{info_type.value}:",
+                    f"\n - Value: {signal.value}",
+                    f"\n - Reliability: {signal.reliability}",
+                    f"\n - Metadata: {signal.metadata}"
+                ])
+
         full_message = ''.join(message)
         self.info_signals_logger.info(full_message)
     

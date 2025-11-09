@@ -33,7 +33,7 @@ class OrderHistoryEntry:
     notes: Optional[str] = None
 
 class Order:
-    def __init__(self, agent_id, order_type, side, quantity, round_placed,  price=None, timestamp=None, order_id=None, replace_decision = None):
+    def __init__(self, agent_id, order_type, side, quantity, round_placed, stock_id=None, price=None, timestamp=None, order_id=None, replace_decision = None):
         if side not in ['buy', 'sell']:
             raise ValueError(f"Invalid side: {side}. Must be 'buy' or 'sell'")
         if order_type not in ['market', 'limit']:
@@ -44,6 +44,7 @@ class Order:
             raise ValueError("Limit orders must specify a price")
 
         self.agent_id = agent_id
+        self.stock_id = stock_id or "DEFAULT_STOCK"  # Default for backwards compatibility
         self.order_type = order_type
         self.side = side
         self.quantity = quantity
@@ -146,6 +147,7 @@ class Order:
         price_str = f"${self.price:.2f}" if self.price is not None else "None"
         return (
             f"Order(id={self.order_id}, "
+            f"stock={self.stock_id}, "
             f"side={self.side}, "
             f"qty={self.quantity}@{price_str}, "
             f"agent={self.agent_id}, "

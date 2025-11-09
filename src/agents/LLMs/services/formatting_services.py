@@ -14,15 +14,20 @@ class AgentContext:
     """Agent's current state and context"""
     agent_id: str
     cash: float
-    shares: int
+    shares: int  # For single-stock backwards compatibility
     available_cash: float
-    available_shares: int
+    available_shares: int  # For single-stock backwards compatibility
     outstanding_orders: Dict[str, List[Dict[str, Any]]]
     signal_history: Dict[int, Dict[InformationType, InformationSignal]] = None  # Make it optional with default None
     trade_history: List[Trade] = None  # Add trade history
     dividend_cash: float = 0.0
     committed_cash: float = 0.0
-    committed_shares: int = 0
+    committed_shares: int = 0  # For single-stock backwards compatibility
+    # Multi-stock support
+    positions: Dict[str, int] = None  # Dict[stock_id, shares] for multi-stock
+    available_positions: Dict[str, int] = None  # Dict[stock_id, available_shares]
+    committed_positions: Dict[str, int] = None  # Dict[stock_id, committed_shares]
+    is_multi_stock: bool = False
 
 class MarketStateFormatter:
     """Formats market state information for LLM consumption"""
@@ -37,17 +42,39 @@ class MarketStateFormatter:
     def format_prompt_sections(
         agent_signals: Dict[InformationType, InformationSignal],
         agent_context: AgentContext,
-        signal_history: Dict[int, Dict[InformationType, InformationSignal]] = None
+        signal_history: Dict[int, Dict[InformationType, InformationSignal]] = None,
+        market_state: Dict = None
     ) -> Dict[str, str]:
         """Format all sections of the LLM prompt using information signals"""
         try:
-            # Extract basic signals
-            price_signal = agent_signals[InformationType.PRICE]
-            volume_signal = agent_signals[InformationType.VOLUME]
-            order_book_signal = agent_signals[InformationType.ORDER_BOOK]
-            fundamental_signal = agent_signals[InformationType.FUNDAMENTAL]
-            dividend_signal = agent_signals[InformationType.DIVIDEND]
-            interest_signal = agent_signals[InformationType.INTEREST]
+            # Handle multi-stock signals
+            if isinstance(agent_signals, dict) and agent_signals.get('is_multi_stock'):
+                # Extract signals for FIRST stock (for template compatibility)
+                first_stock_id = list(agent_signals['multi_stock_signals'].keys())[0]
+                first_stock_signals = agent_signals['multi_stock_signals'][first_stock_id]
+
+                # Use first stock's signals for base template variables
+                price_signal = first_stock_signals[InformationType.PRICE]
+                volume_signal = first_stock_signals[InformationType.VOLUME]
+                order_book_signal = first_stock_signals[InformationType.ORDER_BOOK]
+                fundamental_signal = first_stock_signals[InformationType.FUNDAMENTAL]
+                dividend_signal = first_stock_signals.get(InformationType.DIVIDEND)
+                interest_signal = first_stock_signals.get(InformationType.INTEREST)
+
+                # Format multi-stock info section using ALL stocks
+                multi_stock_info_from_signals = MarketStateFormatter._format_multi_stock_from_signals(
+                    agent_signals['multi_stock_signals']
+                )
+            else:
+                # Single stock: original behavior
+                # Extract basic signals
+                price_signal = agent_signals[InformationType.PRICE]
+                volume_signal = agent_signals[InformationType.VOLUME]
+                order_book_signal = agent_signals[InformationType.ORDER_BOOK]
+                fundamental_signal = agent_signals[InformationType.FUNDAMENTAL]
+                dividend_signal = agent_signals[InformationType.DIVIDEND]
+                interest_signal = agent_signals[InformationType.INTEREST]
+                multi_stock_info_from_signals = ""  # No multi-stock info for single stock
 
             periods_remaining = fundamental_signal.metadata['periods_remaining']
             if isinstance(periods_remaining, str):
@@ -58,12 +85,15 @@ class MarketStateFormatter:
             else:
                 num_rounds = "Infinite"
             
+            # Format position display (handles both single and multi-stock)
+            position_display = MarketStateFormatter._format_position_info(agent_context)
+
             context = {
                 # Market data from signals
                 'price': price_signal.value,
                 'round_number': price_signal.metadata['round'],
                 'num_rounds': num_rounds,
-                
+
                 # Agent data (already safe via dataclass)
                 'shares': agent_context.shares,
                 'cash': agent_context.cash,
@@ -71,6 +101,7 @@ class MarketStateFormatter:
                 'total_available_cash': agent_context.available_cash,
                 'committed_cash': agent_context.committed_cash,
                 'committed_shares': agent_context.committed_shares,
+                'position_display': position_display,  # Multi-stock aware display
                 
                 # Calculated display values
                 'volume_display': MarketStateFormatter._format_volume(volume_signal),
@@ -113,17 +144,27 @@ class MarketStateFormatter:
                 current_round=price_signal.metadata['round'],
                 lookback=5
             )
-            
+
+            # Format multi-stock market information
+            # Prefer signals-based formatting if available, otherwise use market_state
+            if multi_stock_info_from_signals:
+                multi_stock_info = multi_stock_info_from_signals
+            else:
+                multi_stock_info = MarketStateFormatter._format_multi_stock_market_info(market_state)
+
             # Use templates consistently
-            return {
+            sections = {
                 'base_market_state': BASE_MARKET_TEMPLATE.format(**context),
-                'position_info': POSITION_INFO_TEMPLATE.format(**context),
+                'position_info': position_display,  # Use pre-formatted multi-stock aware display
                 'price_history': PRICE_HISTORY_TEMPLATE.format(**context),
                 'dividend_info': DIVIDEND_INFO_TEMPLATE.format(**context),
                 'interest_info': INTEREST_INFO_TEMPLATE.format(**context),
                 'redemption_info': REDEMPTION_INFO_TEMPLATE.format(**context),
-                'trading_options': TRADING_OPTIONS_TEMPLATE
+                'trading_options': TRADING_OPTIONS_TEMPLATE,
+                'multi_stock_info': multi_stock_info  # From signals or market_state
             }
+
+            return sections
             
         except KeyError as e:
             raise ValueError(f"Missing required signal: {e}")
@@ -320,6 +361,34 @@ class MarketStateFormatter:
         return output
 
     @staticmethod
+    def _format_position_info(agent_context: AgentContext) -> str:
+        """Format position information (handles both single and multi-stock)"""
+        if agent_context.is_multi_stock and agent_context.positions:
+            # Multi-stock: Show positions for each stock
+            output = "Your Positions:\n"
+            for stock_id, shares in agent_context.positions.items():
+                available = agent_context.available_positions.get(stock_id, shares)
+                committed = agent_context.committed_positions.get(stock_id, 0)
+                output += f"  {stock_id}:\n"
+                output += f"    - Available: {available} shares\n"
+                output += f"    - In Orders: {committed} shares\n"
+                output += f"    - Total: {shares} shares\n"
+            output += f"\nCash:\n"
+            output += f"  - Main Cash: ${agent_context.cash:.2f}\n"
+            output += f"  - Dividend Cash: ${agent_context.dividend_cash:.2f}\n"
+            output += f"  - Available Cash: ${agent_context.available_cash:.2f}\n"
+            output += f"  - Cash in Orders: ${agent_context.committed_cash:.2f}"
+            return output
+        else:
+            # Single-stock: Original display
+            return f"""Available Shares: {agent_context.shares} shares
+Main Cash: ${agent_context.cash:.2f}
+Dividend Cash: ${agent_context.dividend_cash:.2f}
+Available Cash: ${agent_context.available_cash:.2f}
+Shares in Orders: {agent_context.committed_shares} shares
+Cash in Orders: ${agent_context.committed_cash:.2f}"""
+
+    @staticmethod
     def _format_percent(value: float) -> str:
         return MarketStateFormatter.PERCENT_FORMAT.format(value)
 
@@ -444,7 +513,7 @@ class MarketStateFormatter:
         """Prepare redemption information context"""
         redemption_value = fundamental_signal.metadata.get('redemption_value')
         periods_remaining = fundamental_signal.metadata.get('periods_remaining')
-        
+
         if periods_remaining == "Infinite" or periods_remaining is None:
             redemption_text = "This market has an infinite time horizon. Shares will not be redeemed."
         else:
@@ -452,12 +521,102 @@ class MarketStateFormatter:
             # Check if redemption_value is None and use fundamental value instead
             if redemption_value is None:
                 redemption_value = 0
-            
+
             if rounds_left > 0:
                 redemption_text = f"At the end of the final round (in {rounds_left} rounds), all shares will be redeemed at ${redemption_value:.2f} per share."
             else:
                 redemption_text = f"This is the final round. At the end of this round, all shares will be redeemed at ${redemption_value:.2f} per share."
-        
+
         return {
             'redemption_text': redemption_text
         }
+
+    @staticmethod
+    def _format_multi_stock_market_info(market_state: Dict) -> str:
+        """Format market information for all stocks in multi-stock scenario"""
+        if not market_state or not market_state.get('is_multi_stock'):
+            return ""
+
+        lines = ["=== MULTI-STOCK MARKET INFORMATION ===\n"]
+
+        for stock_id, stock_data in market_state['stocks'].items():
+            lines.append(f"\n{stock_id}:")
+            lines.append(f"  Current Price: ${stock_data['price']:.2f}")
+            lines.append(f"  Fundamental Value: ${stock_data['fundamental_price']:.2f}")
+
+            # Calculate and show price/fundamental ratio
+            ratio = stock_data['price'] / stock_data['fundamental_price'] if stock_data['fundamental_price'] else 0
+            if ratio > 1.0:
+                lines.append(f"  Status: OVERVALUED ({ratio:.2%} of fundamental)")
+            elif ratio < 1.0:
+                lines.append(f"  Status: UNDERVALUED ({ratio:.2%} of fundamental)")
+            else:
+                lines.append(f"  Status: At fundamental value")
+
+            # Show order book info if available
+            best_bid = stock_data.get('best_bid')
+            best_ask = stock_data.get('best_ask')
+            if best_bid:
+                lines.append(f"  Best Bid: ${best_bid:.2f}")
+            if best_ask:
+                lines.append(f"  Best Ask: ${best_ask:.2f}")
+
+            # Show order book depth
+            market_depth = stock_data.get('market_depth', {})
+            buy_orders = len(market_depth.get('buy_levels', []))
+            sell_orders = len(market_depth.get('sell_levels', []))
+            if buy_orders > 0 or sell_orders > 0:
+                lines.append(f"  Order Book: {buy_orders} buy levels, {sell_orders} sell levels")
+
+        lines.append("\n" + "="*45)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_multi_stock_from_signals(multi_stock_signals: Dict) -> str:
+        """Format market info from signal structure (multi-stock)"""
+        from market.information.information_types import InformationType
+
+        lines = ["=== MULTI-STOCK MARKET INFORMATION ===\n"]
+
+        for stock_id, signals in multi_stock_signals.items():
+            price_signal = signals.get(InformationType.PRICE)
+            fundamental_signal = signals.get(InformationType.FUNDAMENTAL)
+            order_book_signal = signals.get(InformationType.ORDER_BOOK)
+
+            # Skip if essential signals are missing or have None values
+            if not price_signal or price_signal.value is None:
+                continue
+            if not fundamental_signal or fundamental_signal.value is None:
+                continue
+
+            lines.append(f"\n{stock_id}:")
+            lines.append(f"  Current Price: ${price_signal.value:.2f}")
+            lines.append(f"  Fundamental Value: ${fundamental_signal.value:.2f}")
+
+            # Calculate and show price/fundamental ratio
+            ratio = price_signal.value / fundamental_signal.value if fundamental_signal.value else 0
+            if ratio > 1.0:
+                lines.append(f"  Status: OVERVALUED ({ratio:.2%} of fundamental)")
+            elif ratio < 1.0:
+                lines.append(f"  Status: UNDERVALUED ({ratio:.2%} of fundamental)")
+            else:
+                lines.append(f"  Status: At fundamental value")
+
+            # Show order book info from signals
+            best_bid = price_signal.metadata.get('best_bid')
+            best_ask = price_signal.metadata.get('best_ask')
+            if best_bid:
+                lines.append(f"  Best Bid: ${best_bid:.2f}")
+            if best_ask:
+                lines.append(f"  Best Ask: ${best_ask:.2f}")
+
+            # Show order book depth from order_book_signal
+            if order_book_signal:
+                order_book = order_book_signal.value
+                buy_orders = len(order_book.get('buy_levels', []))
+                sell_orders = len(order_book.get('sell_levels', []))
+                if buy_orders > 0 or sell_orders > 0:
+                    lines.append(f"  Order Book: {buy_orders} buy levels, {sell_orders} sell levels")
+
+        lines.append("\n" + "="*45)
+        return "\n".join(lines)

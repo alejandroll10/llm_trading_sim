@@ -40,19 +40,19 @@ class MarketStateManager:
         return self.context.current_price
 
 
-    def update(self, round_number: int, last_volume: float = 0, is_round_end: bool = False):
+    def update(self, round_number: int, last_volume: float = 0, is_round_end: bool = False, skip_distribution: bool = False):
         LoggingService.get_logger('simulation').info(f"Updating market state for round {round_number}, is_round_end: {is_round_end}")
         # 1. Update all market state components first
         self._update_market_components(round_number, last_volume)
-        
-        # 2. Then distribute information
-        if not is_round_end:
+
+        # 2. Then distribute information (unless explicitly skipped for multi-stock)
+        if not is_round_end and not skip_distribution:
             self._distribute_market_information(round_number)
-        
+
         # 3. Handle end-of-round if needed
         if is_round_end:
             self._process_end_of_round(round_number)
-        
+
         # 4. Return final state
         return self._get_current_market_state(round_number, last_volume)
 

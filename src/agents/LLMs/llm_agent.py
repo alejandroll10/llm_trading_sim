@@ -18,7 +18,10 @@ class LLMAgent(BaseAgent):
 
     def make_decision(self, market_state, history, round_number):
         try:
-            # Use signals instead of market_state
+            # Store market_state for multi-stock support
+            self.current_market_state = market_state
+
+            # Prepare context using signals + market_state
             context = self.prepare_context_llm()
 
             # Get last round messages for social feed context
@@ -75,10 +78,16 @@ Strategic Considerations:
             
             # Store replace_decision in the agent instance
             self.last_replace_decision = response.decision['replace_decision']
-            
-            # Get price signal for logging
-            price_signal = self.private_signals[InformationType.PRICE]
-            
+
+            # Get price signal for logging (handle multi-stock format)
+            if isinstance(self.private_signals, dict) and self.private_signals.get('is_multi_stock'):
+                # Multi-stock: get first stock's price signal
+                first_stock_signals = next(iter(self.private_signals['multi_stock_signals'].values()))
+                price_signal = first_stock_signals[InformationType.PRICE]
+            else:
+                # Single-stock: original behavior
+                price_signal = self.private_signals[InformationType.PRICE]
+
             # Create and log structured decision entries
             log_entries = DecisionLogEntry.from_decision(
                 decision=response.decision,
@@ -134,6 +143,11 @@ Strategic Considerations:
             )
         }
         
+        # Check if multi-stock (more than just DEFAULT_STOCK)
+        is_multi_stock = len(self.positions) > 1 or (
+            len(self.positions) == 1 and "DEFAULT_STOCK" not in self.positions
+        )
+
         return AgentContext(
             agent_id=self.agent_id,
             cash=self.cash,
@@ -145,14 +159,14 @@ Strategic Considerations:
                     {
                         'quantity': order.remaining_quantity,
                         'price': order.price
-                    } 
+                    }
                     for order in active_orders['buy']
                 ],
                 'sell': [
                     {
                         'quantity': order.remaining_quantity,
                         'price': order.price
-                    } 
+                    }
                     for order in active_orders['sell']
                 ]
             },
@@ -160,14 +174,25 @@ Strategic Considerations:
             trade_history=self.trade_history,
             dividend_cash=self.dividend_cash,
             committed_cash=self.committed_cash,
-            committed_shares=self.committed_shares
+            committed_shares=self.committed_shares,
+            # Multi-stock support
+            positions=self.positions.copy() if is_multi_stock else None,
+            available_positions={
+                stock_id: self.positions[stock_id] for stock_id in self.positions
+            } if is_multi_stock else None,
+            committed_positions=self.committed_positions.copy() if is_multi_stock else None,
+            is_multi_stock=is_multi_stock
         )
 
     def prepare_context_llm(self):
         """Prepare context for LLM prompt using signals"""
+        # Get market_state if available (for multi-stock support)
+        market_state = getattr(self, 'current_market_state', None)
+
         return self._formatter.format_prompt_sections(
             agent_signals=self.private_signals,
             agent_context=self.prepare_agent_context(),
-            signal_history=self.signal_history
+            signal_history=self.signal_history,
+            market_state=market_state
         )
  

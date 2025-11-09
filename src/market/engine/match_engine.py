@@ -9,7 +9,7 @@ from market.engine.services.trade_processing_service import TradeProcessingServi
 from services.logging_service import LoggingService
 
 class MatchingEngine:
-    def __init__(self, order_book, agent_manager, agent_repository, order_repository, context, order_state_manager = None, logger=None, trades_logger=None, trade_execution_service=None):
+    def __init__(self, order_book, agent_manager, agent_repository, order_repository, context, order_state_manager = None, logger=None, trades_logger=None, trade_execution_service=None, is_multi_stock=False):
         self.order_book = order_book
         self.agent_manager = agent_manager
         self.order_repository = order_repository
@@ -17,6 +17,7 @@ class MatchingEngine:
         self.agent_repository = agent_repository
         self.trade_execution_service = trade_execution_service
         self.context = context
+        self.is_multi_stock = is_multi_stock  # Flag to indicate multi-stock mode
         
         # Initialize services
         self.order_processing_service = OrderProcessingService(order_book)
@@ -102,9 +103,9 @@ class MatchingEngine:
         new_price = self.trade_processing_service.calculate_new_price(trades, current_price)
         
         # Update agent wealth and log final state
-        self.agent_repository.update_all_wealth(
-            current_price=new_price
-        )
+        # In multi-stock mode, wealth is updated centrally with all stock prices
+        if not self.is_multi_stock:
+            self.agent_repository.update_all_wealth(new_price)
         LoggingService.log_market_state(self.order_book, round_number, "End of Round State")
         
         return MarketResult(

@@ -31,7 +31,8 @@ def release_commitment_agent(agent_repository, logger, order: Order, amount: flo
             order.agent_id,
             cash_amount=amount if resource_type == 'cash' else 0,
             share_amount=amount if resource_type == 'shares' else 0,
-            return_borrowed=return_borrowed
+            return_borrowed=return_borrowed,
+            stock_id=order.stock_id  # Pass stock_id for multi-stock support
         )
         
         if not result.success:
@@ -69,14 +70,21 @@ def release_for_trade(trade: Trade, order_repository, agent_repository, commitme
 
 class CommitmentCalculator:
     """Handles all commitment-related calculations"""
-    def __init__(self, order_book=None):
+    def __init__(self, order_book=None, order_books=None):
+        """Initialize commitment calculator
+
+        Args:
+            order_book: Single order book (single-stock mode or backwards compatibility)
+            order_books: Dict of {stock_id: OrderBook} for multi-stock mode
+        """
         self.order_book = order_book
+        self.order_books = order_books  # For multi-stock support
 
     def calculate_required_commitment(self, order: Order, current_price: float) -> float:
         """Calculate initial commitment required"""
         if order.side == 'sell':
             return order.quantity
-            
+
         if order.order_type == 'market':
             return self._calculate_market_buy_commitment(order, current_price)
         else:
@@ -113,19 +121,38 @@ class CommitmentCalculator:
 
     def _calculate_market_buy_commitment(self, order: Order, current_price: float) -> float:
         """Dynamic market order commitment based on order book"""
-        if not self.order_book:
+        # Get the correct order book for this stock
+        order_book = self._get_order_book_for_stock(order.stock_id)
+
+        if not order_book:
             # Fallback if no order book available
             return order.quantity * (current_price * 1.1)  # 10% buffer
-            
-        total_cost, fillable_qty = self.order_book.estimate_market_order_cost(
+
+        total_cost, fillable_qty = order_book.estimate_market_order_cost(
             order.quantity, 'buy'
         )
-        
+
         if fillable_qty < order.quantity:
             unfilled = order.quantity - fillable_qty
             total_cost += unfilled * (current_price * 1.1)  # 10% buffer
-            
+
         return total_cost
+
+    def _get_order_book_for_stock(self, stock_id: str):
+        """Get the appropriate order book for a given stock
+
+        Args:
+            stock_id: Stock identifier (e.g., 'TECH_A' or 'DEFAULT_STOCK')
+
+        Returns:
+            OrderBook for the specified stock, or fallback order book
+        """
+        if self.order_books:
+            # Multi-stock mode: look up specific order book
+            return self.order_books.get(stock_id, self.order_book)
+        else:
+            # Single-stock mode: use the single order book
+            return self.order_book
 
     def calculate_sell_commitment(self, order: Order) -> float:
         """All sell orders commit full quantity"""

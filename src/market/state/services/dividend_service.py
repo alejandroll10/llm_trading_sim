@@ -60,8 +60,9 @@ class DividendCalculator:
 
 class DividendPaymentProcessor:
     """Handles all payment operations"""
-    def __init__(self, agent_repository, logger):
+    def __init__(self, agent_repository, logger, stock_id="DEFAULT_STOCK"):
         self.agent_repository = agent_repository
+        self.stock_id = stock_id  # Which stock this dividend service is for
 
     def _process_dividend_payment(self, dividend: float, destination: PaymentDestination, round_number: int) -> DividendPaymentResult:
         """Process actual payments"""
@@ -74,8 +75,13 @@ class DividendPaymentProcessor:
                 agent_id, self.agent_repository.context.current_price
             )
 
+            # Get shares for THIS specific stock only (multi-stock support)
+            shares_in_stock = agent.positions.get(self.stock_id, 0)
+            committed_shares_in_stock = agent.committed_positions.get(self.stock_id, 0)
+            borrowed_shares_in_stock = agent.borrowed_positions.get(self.stock_id, 0)
+
             # Net share position accounts for short holdings
-            net_position = agent.total_shares - agent.borrowed_shares
+            net_position = shares_in_stock + committed_shares_in_stock - borrowed_shares_in_stock
             if net_position == 0:
                 continue
 
@@ -112,19 +118,22 @@ class DividendPaymentProcessor:
         )
 
     def process_redemption(self, redemption_value: float, round_number: int) -> DividendPaymentResult:
-        """Process final redemption payment"""
-        LoggingService.get_logger('dividend').info(f"\n=== Final Round {round_number} Redemption Payment ===")
-        LoggingService.get_logger('dividend').info(f"Redeeming all shares at ${redemption_value:.2f} per share")
-        
+        """Process final redemption payment for this stock"""
+        LoggingService.get_logger('dividend').info(f"\n=== Final Round {round_number} Redemption Payment for {self.stock_id} ===")
+        LoggingService.get_logger('dividend').info(f"Redeeming {self.stock_id} shares at ${redemption_value:.2f} per share")
+
         total_shares = 0
         total_payment = 0
-        
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            state = self.agent_repository.get_agent_state_snapshot(
-                agent_id, self.agent_repository.context.current_price
-            )
 
-            net_position = state.net_shares
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+
+            # Get shares for THIS specific stock only (multi-stock support)
+            shares_in_stock = agent.positions.get(self.stock_id, 0)
+            committed_shares_in_stock = agent.committed_positions.get(self.stock_id, 0)
+            borrowed_shares_in_stock = agent.borrowed_positions.get(self.stock_id, 0)
+
+            net_position = shares_in_stock + committed_shares_in_stock - borrowed_shares_in_stock
             payment = 0
 
             if net_position != 0:
@@ -140,11 +149,14 @@ class DividendPaymentProcessor:
 
                 action = "Redeemed" if payment >= 0 else "Covered"
                 LoggingService.get_logger('dividend').info(
-                    f"{action} {abs(net_position)} shares for agent {agent_id} at ${redemption_value:.2f}"
+                    f"{action} {abs(net_position)} {self.stock_id} shares for agent {agent_id} at ${redemption_value:.2f}"
                 )
 
-            # Always clear shares and outstanding borrows
-            self.agent_repository.redeem_all_shares(agent_id)
+            # Clear shares for THIS stock only
+            agent.positions[self.stock_id] = 0
+            agent.committed_positions[self.stock_id] = 0
+            if self.stock_id in agent.borrowed_positions:
+                agent.borrowed_positions[self.stock_id] = 0
 
         # After all positions are cleared, ensure aggregate short interest
         # reflects the forced covering that occurred during redemption.
@@ -166,9 +178,10 @@ class DividendPaymentProcessor:
 
 class DividendService:
     """Coordinates dividend operations"""
-    def __init__(self, agent_repository, logger, dividend_params, redemption_value=None):
+    def __init__(self, agent_repository, logger, dividend_params, redemption_value=None, stock_id="DEFAULT_STOCK"):
         self.calculator = DividendCalculator(dividend_params)
-        self.payment_processor = DividendPaymentProcessor(agent_repository, logger)
+        self.payment_processor = DividendPaymentProcessor(agent_repository, logger, stock_id)
+        self.stock_id = stock_id
         self.dividend_history = []
         self.redemption_value = redemption_value
         self.current_round = 0

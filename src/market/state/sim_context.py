@@ -2,7 +2,7 @@ from market.orders.order import Order
 from dataclasses import dataclass
 from datetime import datetime
 from market.trade import Trade
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 @dataclass
 class MarketTruth:
@@ -170,3 +170,77 @@ class SimulationContext:
                 **self.public_info['last_trade']  # Preserve other fields
             }
         })
+
+
+class MultiStockContext:
+    """
+    Manages simulation context for multiple stocks.
+
+    Each stock has its own SimulationContext with independent:
+    - Prices (current, fundamental, redemption)
+    - Order books
+    - Trade history
+    - Dividend/interest parameters
+    """
+
+    def __init__(self, stock_configs: Optional[Dict[str, dict]] = None,
+                 single_stock_context: Optional[SimulationContext] = None):
+        """
+        Initialize multi-stock context.
+
+        Args:
+            stock_configs: Dict mapping stock_id -> config dict with keys:
+                - num_rounds
+                - initial_price
+                - fundamental_price
+                - redemption_value
+                - transaction_cost
+                - logger
+            single_stock_context: For backwards compatibility, wraps single stock
+        """
+        self.stocks: Dict[str, SimulationContext] = {}
+
+        if single_stock_context:
+            # Backwards compatibility: wrap single stock as DEFAULT_STOCK
+            self.stocks["DEFAULT_STOCK"] = single_stock_context
+        elif stock_configs:
+            # Multi-stock: create context for each stock
+            for stock_id, config in stock_configs.items():
+                self.stocks[stock_id] = SimulationContext(
+                    num_rounds=config['num_rounds'],
+                    initial_price=config['initial_price'],
+                    fundamental_price=config['fundamental_price'],
+                    redemption_value=config['redemption_value'],
+                    transaction_cost=config.get('transaction_cost', 0.0),
+                    logger=config.get('logger'),
+                    infinite_rounds=config.get('infinite_rounds', False)
+                )
+        else:
+            raise ValueError("Must provide either stock_configs or single_stock_context")
+
+    def get_stock_context(self, stock_id: str) -> SimulationContext:
+        """Get context for specific stock"""
+        if stock_id not in self.stocks:
+            raise KeyError(f"Unknown stock: {stock_id}")
+        return self.stocks[stock_id]
+
+    def get_all_prices(self) -> Dict[str, float]:
+        """Get current prices for all stocks"""
+        return {stock_id: ctx.current_price for stock_id, ctx in self.stocks.items()}
+
+    def get_all_fundamentals(self) -> Dict[str, float]:
+        """Get fundamental prices for all stocks"""
+        return {stock_id: ctx.fundamental_price for stock_id, ctx in self.stocks.items()}
+
+    @property
+    def stock_ids(self) -> List[str]:
+        """Get list of all stock IDs"""
+        return list(self.stocks.keys())
+
+    def __contains__(self, stock_id: str) -> bool:
+        """Check if stock exists"""
+        return stock_id in self.stocks
+
+    def __getitem__(self, stock_id: str) -> SimulationContext:
+        """Get stock context by ID"""
+        return self.get_stock_context(stock_id)
