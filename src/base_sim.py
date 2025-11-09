@@ -104,12 +104,18 @@ class BaseSimulation:
 
         # Initialize agents with explicit parameters
         agents = self.initialize_agents(self.agent_params)
+
+        # Get borrow configuration
+        borrow_model = self.agent_params.get('borrow_model', {})
+        allow_partial_borrows = borrow_model.get('allow_partial_borrows', True)
+
         self.agent_repository = AgentRepository(
             agents,
             logger=LoggingService.get_logger('agent_repository'),
             context=self.context,
             borrowing_repository=BorrowingRepository(
                 total_lendable=lendable_shares,
+                allow_partial_borrows=allow_partial_borrows,
                 logger=LoggingService.get_logger('borrowing')
             )
         )

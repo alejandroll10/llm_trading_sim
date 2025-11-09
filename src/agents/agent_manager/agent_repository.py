@@ -264,25 +264,67 @@ class AgentRepository:
         )
 
     def commit_shares(self, agent_id: str, share_amount: int) -> CommitmentResult:
-        """Commit shares for an agent, borrowing if necessary."""
+        """Commit shares for an agent, borrowing if necessary.
+
+        If partial borrows are enabled and insufficient shares are available to borrow,
+        the commitment will be reduced to the maximum fillable amount.
+        """
         agent = self.get_agent(agent_id)
         current_price = self.context.current_price
         round_number = self.context.round_number
 
+        # Save original request for tracking
+        original_requested = share_amount
+
         # Determine if we need to borrow shares
         shares_needed = max(0, share_amount - agent.shares)
+        allocated_shares = 0
+
         if shares_needed > 0:
-            if not self.borrowing_repository.allocate_shares(agent_id, shares_needed):
-                return CommitmentResult(False, f"Insufficient lendable shares: requested {shares_needed}")
+            # Try to allocate shares (respects allow_partial_borrows setting)
+            allocated_shares = self.borrowing_repository.allocate_shares(agent_id, shares_needed)
+
+            if allocated_shares == 0:
+                # No shares available and/or partial fills disabled
+                return CommitmentResult(
+                    success=False,
+                    message=f"Insufficient lendable shares: requested {shares_needed}, allocated {allocated_shares}",
+                    requested_amount=original_requested
+                )
+
+            # Calculate the actual fillable amount
+            fillable_shares = agent.shares + allocated_shares
+
+            # Check if this is a partial fill
+            is_partial = fillable_shares < share_amount
+
+            if is_partial:
+                # Adjust the commitment to what we can actually fill
+                share_amount = fillable_shares
+                LoggingService.get_logger('agents').info(
+                    f"Partial borrow fill for agent {agent_id}: "
+                    f"requested {original_requested}, "
+                    f"fillable {share_amount} (owned: {agent.shares}, borrowed: {allocated_shares})"
+                )
 
         try:
             agent.commit_shares(share_amount, round_number=round_number, current_price=current_price)
-            return CommitmentResult(True, "Shares committed successfully", share_amount)
+
+            # Determine if this was a partial fill
+            partial_fill = shares_needed > 0 and allocated_shares < shares_needed
+
+            return CommitmentResult(
+                success=True,
+                message="Shares committed successfully" + (" (partial fill)" if partial_fill else ""),
+                committed_amount=share_amount,
+                partial_fill=partial_fill,
+                requested_amount=original_requested
+            )
         except ValueError as e:
             # Roll back any allocated shares on failure
-            if shares_needed > 0:
-                self.borrowing_repository.release_shares(agent_id, shares_needed)
-            return CommitmentResult(False, str(e))
+            if allocated_shares > 0:
+                self.borrowing_repository.release_shares(agent_id, allocated_shares)
+            return CommitmentResult(False, str(e), requested_amount=original_requested)
     
     def commit_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0) -> CommitmentResult:
         """Commit agent resources with validation"""

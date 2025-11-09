@@ -26,6 +26,8 @@ class CommitmentResult:
     success: bool
     message: str
     committed_amount: float = 0
+    partial_fill: bool = False  # True if partial borrow fill occurred
+    requested_amount: float = 0  # Original amount requested (for reference)
 
 @dataclass
 class AgentStateSnapshot:

@@ -102,7 +102,8 @@ DEFAULT_PARAMS = {
         'margin_requirement': 0.5,
         'borrow_model': {
             'rate': 0.01,
-            'payment_frequency': 1
+            'payment_frequency': 1,
+            'allow_partial_borrows': True  # Allows partial share borrows (more realistic market behavior)
         },
         'position_limit': BASE_POSITION_LIMIT,
         'initial_cash': BASE_INITIAL_CASH,
@@ -803,6 +804,80 @@ SCENARIOS = {
                     'influencer': 1,        # 1 influencer
                     'herd_follower': 7,     # 7 herd followers (majority)
                     'value': 1,             # 1 rational agent
+                }
+            }
+        }
+    ),
+    "partial_borrow_test_disabled": SimulationScenario(
+        name="partial_borrow_test_disabled",
+        description="Test partial borrow fills feature - DISABLED (all-or-nothing behavior)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 28.0,
+            "LENDABLE_SHARES": 1000,  # Limited lending pool - only 1000 shares available
+            "AGENT_PARAMS": {
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.01,
+                    'payment_frequency': 1,
+                    'allow_partial_borrows': False  # DISABLED - all-or-nothing
+                },
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'short_sell_trader': 3,  # 3 short sellers, each trying to short 500 shares = 1500 total
+                    'buy_trader': 2,         # 2 buyers for liquidity
+                },
+                'type_specific_params': {
+                    'short_sell_trader': {
+                        'initial_cash': 3.0 * BASE_INITIAL_CASH,  # Lots of cash for margin
+                        'initial_shares': 0  # ZERO shares - MUST borrow to short!
+                    },
+                    'buy_trader': {
+                        'initial_cash': 5.0 * BASE_INITIAL_CASH,
+                        'initial_shares': 0
+                    }
+                }
+            }
+        }
+    ),
+    "partial_borrow_test_enabled": SimulationScenario(
+        name="partial_borrow_test_enabled",
+        description="Test partial borrow fills feature - ENABLED (partial fills allowed)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 28.0,
+            "LENDABLE_SHARES": 1000,  # Limited lending pool - only 1000 shares available
+            "AGENT_PARAMS": {
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.01,
+                    'payment_frequency': 1,
+                    'allow_partial_borrows': True  # ENABLED - allows partial fills
+                },
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'short_sell_trader': 3,  # 3 short sellers, each trying to short 500 shares = 1500 total
+                    'buy_trader': 2,         # 2 buyers for liquidity
+                },
+                'type_specific_params': {
+                    'short_sell_trader': {
+                        'initial_cash': 3.0 * BASE_INITIAL_CASH,  # Lots of cash for margin
+                        'initial_shares': 0  # ZERO shares - MUST borrow to short!
+                    },
+                    'buy_trader': {
+                        'initial_cash': 5.0 * BASE_INITIAL_CASH,
+                        'initial_shares': 0
+                    }
                 }
             }
         }

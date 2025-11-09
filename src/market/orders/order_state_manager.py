@@ -57,32 +57,47 @@ class OrderStateManager:
                 )
 
             if result.success:
+                # Handle partial fill if applicable
+                if result.partial_fill and order.side == 'sell':
+                    # Adjust order quantity to match what was actually committed
+                    original_quantity = order.quantity
+                    order.quantity = int(result.committed_amount)
+                    order.remaining_quantity = order.quantity
+                    self.logger.info(
+                        f"Order {order.order_id} quantity adjusted due to partial borrow fill: "
+                        f"{original_quantity} -> {order.quantity}"
+                    )
+
                 # Transition to VALIDATED state
                 self.order_repository.transition_state(
-                    order.order_id, 
+                    order.order_id,
                     OrderState.VALIDATED,
-                    notes=f"Passed validations"
+                    notes=f"Passed validations" + (" (partial fill)" if result.partial_fill else "")
                 )
                 # Update order commitments
                 if order.side == 'buy':
                     order.original_cash_commitment = required_cash
                     order.current_cash_commitment = required_cash
                 else:
-                    order.original_share_commitment = required_shares
-                    order.current_share_commitment = required_shares
-                
+                    # Use the committed amount (which may be less than requested for partial fills)
+                    order.original_share_commitment = result.committed_amount
+                    order.current_share_commitment = result.committed_amount
+
                 # Transition to COMMITTED state
                 self.order_repository.transition_state(
-                    order.order_id, 
+                    order.order_id,
                     OrderState.COMMITTED,
-                    notes=f"Committed: {result.committed_amount:.2f}"
-                )                    
+                    notes=f"Committed: {result.committed_amount:.2f}" + (" (partial)" if result.partial_fill else "")
+                )
 
                 self.logger.info(f"Order {order.order_id} validated and committed")
                 self.logger.info(f"Order {order.order_id} has history: {order.print_history()}")
                 self.sync_agent_orders(order.agent_id)
-                
-                return True, "Order validated and committed successfully"
+
+                success_msg = "Order validated and committed successfully"
+                if result.partial_fill:
+                    success_msg += f" (partial fill: {result.committed_amount} of {result.requested_amount} shares)"
+                return True, success_msg
             else:
                 # Failed validation - transition to CANCELLED
                 self.order_repository.transition_state(
