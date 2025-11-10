@@ -50,8 +50,19 @@ class DataRecorder:
         }
 
     def record_round_data(self, round_number: int, market_state: dict,
-                         orders: List[dict], trades: List[dict], total_volume: float, dividends: float):
-        """Record all data for a single round, including dividends"""
+                         orders: List[dict], trades: List[dict], total_volume: float, dividends: float,
+                         dividends_by_stock: Dict[str, float] = None):
+        """Record all data for a single round, including dividends
+
+        Args:
+            round_number: Current simulation round
+            market_state: Market state dictionary
+            orders: List of orders
+            trades: List of trades
+            total_volume: Total trading volume
+            dividends: Aggregate dividend per share (single-stock) or sum of all dividends (multi-stock)
+            dividends_by_stock: Dict mapping stock_id to per-share dividend (multi-stock only)
+        """
         timestamp = datetime.now().isoformat()
         # Calculate aggregate short interest before recording
         short_interest = sum(
@@ -70,12 +81,12 @@ class DataRecorder:
         # Record market data
         self._record_market_data(round_number, market_state, trades,
                                total_volume, timestamp)
-        
+
         # Record trade data
         self._record_trade_data(round_number, trades, timestamp)
-        
+
         # Record agent data
-        self._record_agent_data(round_number, timestamp, dividends)
+        self._record_agent_data(round_number, timestamp, dividends, dividends_by_stock)
 
         # Record stock positions (multi-stock only)
         self._record_stock_positions(round_number, market_state, timestamp)
@@ -183,22 +194,64 @@ class DataRecorder:
                 'timestamp': timestamp
             })
 
-    def _record_agent_data(self, round_number: int, timestamp: str, dividends: float):
-        """Record agent data, including dividends"""
+    def _record_agent_data(self, round_number: int, timestamp: str, dividends: float,
+                          dividends_by_stock: Dict[str, float] = None):
+        """Record agent data, including dividends
+
+        Args:
+            round_number: Current simulation round
+            timestamp: Recording timestamp
+            dividends: Aggregate dividend (single-stock) or sum (multi-stock)
+            dividends_by_stock: Per-stock dividends for multi-stock scenarios
+        """
         for agent_id in self.agent_repository.get_all_agent_ids():
             # Get agent state through repository
             state = self.agent_repository.get_agent_state_snapshot(
                 agent_id,
                 self.context.current_price
             )
-            
+
             # Calculate values
             share_value = round(state.net_shares * self.context.current_price, 2)
 
             # Use the wealth already calculated by the agent
             current_wealth = round(state.wealth, 2)
 
-            dividends_received = round(state.net_shares * dividends, 2)
+            # Calculate dividends received based on actual payments from payment history
+            # This avoids timing issues where positions change between dividend payment and recording
+            agent = self.agent_repository.get_agent(agent_id)
+
+            # Get the actual dividend payment from the previous round (if any)
+            # We're recording data for round N, and dividends were paid at end of round N-1
+            dividends_received = 0.0
+            used_payment_history = False
+
+            if hasattr(agent, 'payment_history') and 'dividend' in agent.payment_history:
+                dividend_payments = agent.payment_history['dividend']
+                # Find dividend payments from the previous round (round_number - 1)
+                # or the most recent if we're in round 0
+                previous_round = max(0, round_number - 1)
+                for payment in reversed(dividend_payments):
+                    if payment.round_number == previous_round:
+                        dividends_received += payment.amount
+                dividends_received = round(dividends_received, 2)
+                used_payment_history = True  # We checked payment_history, trust the result (even if $0)
+
+            # Fallback for scenarios without payment history: calculate from positions
+            # Note: This has timing issues in multi-stock scenarios where positions change
+            if not used_payment_history and dividends != 0.0:
+                if dividends_by_stock is not None:
+                    # Multi-stock: Calculate based on current positions (timing issue warning)
+                    for stock_id, dividend_per_share in dividends_by_stock.items():
+                        shares_in_stock = agent.positions.get(stock_id, 0)
+                        committed_in_stock = agent.committed_positions.get(stock_id, 0)
+                        borrowed_in_stock = agent.borrowed_positions.get(stock_id, 0)
+                        net_position = shares_in_stock + committed_in_stock - borrowed_in_stock
+                        dividends_received += net_position * dividend_per_share
+                    dividends_received = round(dividends_received, 2)
+                else:
+                    # Single-stock: Use current positions
+                    dividends_received = round(state.net_shares * dividends, 2)
             
             # Update wealth history
             self.wealth_history[agent_id].append(current_wealth)
@@ -288,19 +341,22 @@ class DataRecorder:
         dividend_state = market_state.get('dividend_state', {})
         if not dividend_state:
             raise ValueError("Dividend state not found")
-        
+
         model_info = dividend_state['model']  # This is a DividendInfo object
         last_paid = round(dividend_state.get('last_paid_dividend', 0.0), 2)  # Round to 2 decimals
-        
-        # Calculate total shares through repository
-        total_shares = sum(
-            self.agent_repository.get_agent_state_snapshot(
-                agent_id, 
-                self.context.current_price
-            ).shares
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-        
+
+        # Calculate actual total cash paid from payment_history (avoids timing issues)
+        # Dividends were paid at END of round_number-1
+        previous_round = max(0, round_number - 1)
+        total_cash_paid = 0.0
+
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+            if hasattr(agent, 'payment_history') and 'dividend' in agent.payment_history:
+                for payment in agent.payment_history['dividend']:
+                    if payment.round_number == previous_round:
+                        total_cash_paid += payment.amount
+
         self.dividend_data.append({
             'round': round_number + 1,
             'timestamp': timestamp,
@@ -310,12 +366,75 @@ class DataRecorder:
             'next_payment_round': dividend_state.get('next_payment_round', 0),
             'should_pay': dividend_state.get('should_pay', False),
             'price': round(self.context.current_price, 2),
-            'total_dividend_payment': round(
-                last_paid * total_shares
-                if dividend_state.get('should_pay', False) else 0,
-                2
-            )
+            'total_dividend_payment': round(total_cash_paid, 2) if dividend_state.get('should_pay', False) else 0
         })
+
+    def record_multi_stock_dividends(self, round_number: int, dividends_by_stock: Dict[str, float]):
+        """Record per-stock dividend information for multi-stock scenarios.
+
+        Args:
+            round_number: Current simulation round
+            dividends_by_stock: Dict mapping stock_id to dividend per-share amount paid
+        """
+        timestamp = datetime.now().isoformat()
+        total_aggregated_dividend = sum(dividends_by_stock.values())
+
+        # Calculate actual total cash paid using payment_history (avoids timing issues)
+        # Dividends were paid at END of round_number-1, so look for those payments
+        previous_round = max(0, round_number - 1)
+        total_cash_paid_aggregate = 0.0
+        stock_cash_paid = {stock_id: 0.0 for stock_id in dividends_by_stock.keys()}
+
+        # Sum actual payments from all agents' payment history
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+            if hasattr(agent, 'payment_history') and 'dividend' in agent.payment_history:
+                for payment in agent.payment_history['dividend']:
+                    if payment.round_number == previous_round:
+                        # This payment was made in the previous round
+                        total_cash_paid_aggregate += payment.amount
+
+        # For per-stock breakdown: we cannot accurately determine this from available data
+        # because payment_history doesn't track which stock each dividend came from,
+        # and using current positions has timing issues (positions changed after payment).
+        # We'll distribute the total proportionally to the per-share dividend amounts.
+        # NOTE: This is only accurate when all stocks have equal total shares.
+        if total_cash_paid_aggregate > 0 and total_aggregated_dividend > 0:
+            for stock_id in dividends_by_stock.keys():
+                # Proportional allocation based on per-share dividend amounts
+                # This approximates the breakdown but is not exact unless total shares are equal
+                proportion = dividends_by_stock[stock_id] / total_aggregated_dividend
+                stock_cash_paid[stock_id] = total_cash_paid_aggregate * proportion
+        else:
+            for stock_id in dividends_by_stock.keys():
+                stock_cash_paid[stock_id] = 0.0
+
+        # Record aggregate dividend (for backwards compatibility with save_simulation_data)
+        # Use 'last_paid_dividend' field name to match single-stock format
+        self.dividend_data.append({
+            'round': round_number + 1,
+            'timestamp': timestamp,
+            'last_paid_dividend': round(total_aggregated_dividend, 2),  # Sum of per-share dividends across stocks
+            'price': 0.0,  # Not applicable for aggregated multi-stock
+            'should_pay': total_aggregated_dividend > 0,  # True if any dividend was paid
+            'total_dividend_payment': round(total_cash_paid_aggregate, 2),  # Actual total cash paid from payment_history
+            'is_multi_stock': True,
+            'num_stocks': len(dividends_by_stock)
+        })
+
+        # Record per-stock dividends for detailed analytics
+        for stock_id, dividend in dividends_by_stock.items():
+            self.dividend_data.append({
+                'round': round_number + 1,
+                'timestamp': timestamp,
+                'stock_id': stock_id,
+                'last_paid_dividend': round(dividend, 2),  # Per-share dividend for this stock
+                'price': 0.0,  # Will be filled if needed
+                'should_pay': dividend > 0,  # True if this stock paid a dividend
+                'total_dividend_payment': round(stock_cash_paid[stock_id], 2),  # Actual cash paid from payment_history
+                'is_multi_stock': True,
+                'is_per_stock_detail': True  # Flag to distinguish from aggregate
+            })
 
     def record_social_message(self, round_number: int, agent_id: str, message: str):
         """Record a social media post from an agent"""

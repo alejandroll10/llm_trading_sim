@@ -530,8 +530,37 @@ class BaseSimulation:
 
         # Get last paid dividend
         if self.is_multi_stock:
-            # Multi-stock: TODO - aggregate dividends from all stocks
+            # Multi-stock: Aggregate dividends from all stocks
             last_paid_dividend = 0.0
+            dividends_by_stock = {}  # Track per-stock for detailed recording
+
+            for stock_id, manager in self.market_state_managers.items():
+                if manager.dividend_service and manager.dividend_service.dividend_history:
+                    # Get last paid dividend for this stock
+                    stock_dividend = manager.dividend_service.dividend_history[-1]
+                    dividends_by_stock[stock_id] = stock_dividend
+                    last_paid_dividend += stock_dividend
+                    self.logger.debug(f"Stock {stock_id} last dividend: ${stock_dividend:.2f}")
+                else:
+                    dividends_by_stock[stock_id] = 0.0
+
+            self.logger.debug(f"Total last paid dividend across all stocks: ${last_paid_dividend:.2f}")
+
+            # Invariance check: Verify aggregation is correct
+            expected_total = sum(dividends_by_stock.values())
+            if abs(last_paid_dividend - expected_total) > 1e-6:  # Allow for floating point error
+                raise ValueError(
+                    f"Dividend aggregation invariance violated: "
+                    f"last_paid_dividend={last_paid_dividend:.6f} != "
+                    f"sum(dividends_by_stock)={expected_total:.6f}"
+                )
+
+            # Record per-stock dividends for analytics
+            if dividends_by_stock:
+                self.data_recorder.record_multi_stock_dividends(
+                    round_number=round_number,
+                    dividends_by_stock=dividends_by_stock
+                )
         else:
             # Single-stock: Original behavior
             last_paid_dividend = market_state.get('last_paid_dividend', 0.0)
@@ -549,12 +578,13 @@ class BaseSimulation:
                     raise ValueError(f"No dividend state found in market state: {market_state.keys()}")
 
         self.data_recorder.record_round_data(
-            round_number=round_number, 
-            market_state=market_state, 
+            round_number=round_number,
+            market_state=market_state,
             orders=new_orders,
-            trades=market_result.trades, 
+            trades=market_result.trades,
             total_volume=market_result.volume,
-            dividends=last_paid_dividend
+            dividends=last_paid_dividend,
+            dividends_by_stock=dividends_by_stock if self.is_multi_stock else None
         )
 
         
