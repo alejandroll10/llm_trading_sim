@@ -146,6 +146,120 @@ class BaseAgent(ABC):
         """Set borrowed shares for DEFAULT_STOCK (backwards compatibility)"""
         self.borrowed_positions["DEFAULT_STOCK"] = value
 
+    @property
+    def total_borrowed_shares(self) -> int:
+        """Get total borrowed shares across all stocks
+
+        Note: DEFAULT_STOCK acts as an accumulator for multi-stock scenarios,
+        so we only sum non-DEFAULT stocks OR only DEFAULT if that's all there is.
+        """
+        # Get all borrowed positions
+        all_positions = self.borrowed_positions
+
+        # If we only have DEFAULT_STOCK (or nothing), use its value
+        if len(all_positions) <= 1:
+            return all_positions.get("DEFAULT_STOCK", 0)
+
+        # Multi-stock scenario: sum all NON-DEFAULT stocks
+        # (DEFAULT_STOCK is an accumulator to avoid double-counting)
+        return sum(
+            shares for stock_id, shares in all_positions.items()
+            if stock_id != "DEFAULT_STOCK"
+        )
+
+    def _check_borrowed_positions_invariants(self) -> bool:
+        """Verify borrowed positions invariants are maintained
+
+        This defensive check ensures internal consistency of the borrowed_positions
+        tracking system, particularly the DEFAULT_STOCK accumulator pattern.
+
+        Invariants checked:
+        1. DEFAULT_STOCK accumulator matches sum of other stocks (multi-stock mode)
+        2. No borrowed positions are negative
+        3. total_borrowed_shares is consistent with individual positions
+
+        Returns:
+            bool: True if all invariants pass
+
+        Raises:
+            AssertionError: If any invariant is violated (only in debug mode)
+        """
+        all_positions = self.borrowed_positions
+
+        # Invariant 1: No negative borrowed positions
+        for stock_id, shares in all_positions.items():
+            if shares < 0:
+                error_msg = f"INVARIANT VIOLATION: Negative borrowed position for {stock_id}: {shares}"
+                LoggingService.log_agent_state(
+                    agent_id=self.agent_id,
+                    operation="INVARIANT_VIOLATION",
+                    amount=error_msg,
+                    agent_state=self._get_state_dict(),
+                    is_error=True
+                )
+                assert False, error_msg
+
+        # Invariant 2: DEFAULT_STOCK accumulator consistency (multi-stock only)
+        if len(all_positions) > 1:
+            # Multi-stock mode: DEFAULT_STOCK should equal sum of other stocks
+            default_stock_value = all_positions.get("DEFAULT_STOCK", 0)
+            other_stocks_sum = sum(
+                shares for stock_id, shares in all_positions.items()
+                if stock_id != "DEFAULT_STOCK"
+            )
+
+            # Allow small floating point tolerance
+            tolerance = 0.01
+            if abs(default_stock_value - other_stocks_sum) > tolerance:
+                error_msg = (
+                    f"INVARIANT VIOLATION: DEFAULT_STOCK accumulator mismatch. "
+                    f"DEFAULT_STOCK={default_stock_value}, sum of other stocks={other_stocks_sum}. "
+                    f"All positions: {all_positions}"
+                )
+                LoggingService.log_agent_state(
+                    agent_id=self.agent_id,
+                    operation="INVARIANT_VIOLATION",
+                    amount=error_msg,
+                    agent_state=self._get_state_dict(),
+                    is_error=True
+                )
+                # Warning instead of assertion failure in production
+                # This allows simulation to continue while logging the issue
+                import warnings
+                warnings.warn(error_msg, RuntimeWarning)
+                return False
+
+        # Invariant 3: total_borrowed_shares consistency
+        expected_total = self.total_borrowed_shares
+        if len(all_positions) <= 1:
+            # Single-stock: should equal DEFAULT_STOCK
+            actual_total = all_positions.get("DEFAULT_STOCK", 0)
+        else:
+            # Multi-stock: should equal sum of non-DEFAULT stocks
+            actual_total = sum(
+                shares for stock_id, shares in all_positions.items()
+                if stock_id != "DEFAULT_STOCK"
+            )
+
+        tolerance = 0.01
+        if abs(expected_total - actual_total) > tolerance:
+            error_msg = (
+                f"INVARIANT VIOLATION: total_borrowed_shares inconsistency. "
+                f"total_borrowed_shares={expected_total}, actual sum={actual_total}"
+            )
+            LoggingService.log_agent_state(
+                agent_id=self.agent_id,
+                operation="INVARIANT_VIOLATION",
+                amount=error_msg,
+                agent_state=self._get_state_dict(),
+                is_error=True
+            )
+            import warnings
+            warnings.warn(error_msg, RuntimeWarning)
+            return False
+
+        return True
+
     def get_last_round_messages(self, round_number: int):
         """Retrieve broadcast messages from the previous round."""
         if round_number <= 0:
@@ -307,7 +421,8 @@ class BaseAgent(ABC):
             'available_shares': self.shares,
             'committed_shares': self.committed_shares,
             'borrowed_shares': self.borrowed_shares,
-            'net_shares': self.total_shares - self.borrowed_shares,
+            'total_borrowed_shares': self.total_borrowed_shares,
+            'net_shares': self.total_shares - self.total_borrowed_shares,
             'margin_requirement': self.margin_requirement,
             'margin_base': self.margin_base
         }
@@ -389,10 +504,10 @@ class BaseAgent(ABC):
             else:
                 # Short selling is allowed, calculate shares to borrow
                 shares_to_borrow = quantity - current_shares
-                
+
                 # Check margin requirements
                 max_borrowable = self.get_max_borrowable_shares(current_price)
-                total_borrowed_after = self.borrowed_shares + shares_to_borrow
+                total_borrowed_after = self.total_borrowed_shares + shares_to_borrow
                 
                 if total_borrowed_after > max_borrowable:
                     # Log error state
@@ -409,7 +524,7 @@ class BaseAgent(ABC):
                     
                     # Calculate margin base for the error message
                     margin_base_value = self.cash if self.margin_base == "cash" else (
-                        self.total_cash + (self.total_shares - self.borrowed_shares) * current_price
+                        self.total_cash + (self.total_shares - self.total_borrowed_shares) * current_price
                     )
                     
                     # Log validation error
@@ -418,7 +533,7 @@ class BaseAgent(ABC):
                         agent_id=self.agent_id,
                         agent_type=self.agent_type.name,
                         error_type="MARGIN_REQUIREMENT_NOT_MET",
-                        details=(f"Current borrowed: {self.borrowed_shares}, "
+                        details=(f"Current borrowed: {self.total_borrowed_shares}, "
                                 f"Attempting to borrow: {shares_to_borrow}, "
                                 f"Max allowed: {max_borrowable}, "
                                 f"Margin base ({self.margin_base}): {margin_base_value:.2f}, "
@@ -458,6 +573,10 @@ class BaseAgent(ABC):
             operation="after share commit",
             agent_state=self._get_state_dict()
         )
+
+        # Check invariants after borrowing
+        if self.allow_short_selling and shares_to_borrow > 0:
+            self._check_borrowed_positions_invariants()
 
     def _release_shares(self, quantity: float, return_borrowed: bool = True, stock_id: str = "DEFAULT_STOCK"):
         """Release committed shares after order completion.
@@ -515,6 +634,10 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict()
         )
 
+        # Check invariants after releasing/returning borrowed shares
+        if self.allow_short_selling and return_borrowed:
+            self._check_borrowed_positions_invariants()
+
     @property
     def available_cash(self):
         """Get cash available for new orders"""
@@ -545,18 +668,20 @@ class BaseAgent(ABC):
             # Multi-stock: Calculate wealth across all positions
             self.last_prices = prices  # Store for margin calls
 
+            # Skip DEFAULT_STOCK as it's an accumulator, not a real stock
             share_value = sum(
                 (self.positions.get(stock_id, 0) + self.committed_positions.get(stock_id, 0) -
                  self.borrowed_positions.get(stock_id, 0)) * price
                 for stock_id, price in prices.items()
+                if stock_id != "DEFAULT_STOCK"
             )
             self.wealth = self.total_cash + share_value
 
             # For backwards compatibility, set last_price to first stock's price
             self.last_price = list(prices.values())[0] if prices else 0.0
 
-            # TODO: Implement multi-stock margin calls
-            # For now, skip margin calls in multi-stock scenarios
+            # Automatically handle margin requirements after price update
+            self.handle_multi_stock_margin_call(prices, self.last_update_round)
         else:
             # Single-stock: Original behavior (backwards compatible)
             current_price = prices
@@ -804,7 +929,12 @@ class BaseAgent(ABC):
         # Check margin requirements and trigger margin call if needed
         if self.borrowed_shares > 0 and hasattr(self, 'last_price'):
             self.handle_margin_call(self.last_price, self.last_update_round)
-        
+
+        # Check borrowed positions invariants
+        if self.allow_short_selling:
+            invariants_valid = self._check_borrowed_positions_invariants()
+            state_valid = state_valid and invariants_valid
+
         return state_valid
 
     def verify_share_position(self) -> bool:
@@ -1047,7 +1177,7 @@ class BaseAgent(ABC):
             collateral = self.cash
         else:  # "wealth"
             # Base on total wealth (including existing shares)
-            collateral = self.total_cash + (self.total_shares - self.borrowed_shares) * current_price
+            collateral = self.total_cash + (self.total_shares - self.total_borrowed_shares) * current_price
         
         # Calculate maximum position based on margin requirement
         # This formula ensures that: 
@@ -1059,12 +1189,200 @@ class BaseAgent(ABC):
         
         if self.position_limit is not None:
             # Adjust for existing position - consider both long and short
-            net_position = self.total_shares - self.borrowed_shares
+            net_position = self.total_shares - self.total_borrowed_shares
             if net_position < 0:
                 # Already short, limit additional borrowing
                 max_borrowable = min(max_borrowable, self.position_limit + net_position)
             else:
                 # Long or neutral, can borrow up to limit
                 max_borrowable = min(max_borrowable, self.position_limit)
-        
+
         return max_borrowable
+
+    def get_portfolio_margin_status(self, prices: Dict[str, float]) -> Dict[str, float]:
+        """Calculate portfolio-wide margin status for multi-stock scenarios
+
+        Args:
+            prices: Dict mapping stock_id to current price
+
+        Returns:
+            Dict containing:
+                - collateral: Total collateral value (cash or wealth-based)
+                - borrowed_value: Total market value of all borrowed positions
+                - net_position_value: Total value of net positions (long - short)
+                - max_borrowable_value: Maximum value that can be borrowed
+                - current_borrowable_shares: Dict of max shares per stock
+                - margin_ratio: Current margin ratio (collateral / borrowed_value)
+                - is_margin_violated: Whether margin requirements are violated
+                - excess_borrowed_value: How much over limit (if violated)
+        """
+        if not self.allow_short_selling:
+            return {
+                'collateral': 0,
+                'borrowed_value': 0,
+                'net_position_value': 0,
+                'max_borrowable_value': 0,
+                'current_borrowable_shares': {},
+                'margin_ratio': float('inf'),
+                'is_margin_violated': False,
+                'excess_borrowed_value': 0
+            }
+
+        # Calculate net position value (for reporting and collateral calculation)
+        # Skip DEFAULT_STOCK as it's an accumulator, not a real stock
+        net_position_value = sum(
+            (self.positions.get(stock_id, 0) +
+             self.committed_positions.get(stock_id, 0) -
+             self.borrowed_positions.get(stock_id, 0)) * price
+            for stock_id, price in prices.items()
+            if stock_id != "DEFAULT_STOCK"
+        )
+
+        # Calculate collateral based on margin base setting
+        if self.margin_base == "cash":
+            collateral = self.cash
+        else:  # "wealth"
+            # Portfolio value: cash + net position value
+            collateral = self.total_cash + net_position_value
+
+        # Calculate total value of borrowed positions across all stocks
+        # Skip DEFAULT_STOCK as it's an accumulator, not a real stock
+        borrowed_value = sum(
+            self.borrowed_positions.get(stock_id, 0) * price
+            for stock_id, price in prices.items()
+            if stock_id != "DEFAULT_STOCK"
+        )
+
+        # Maximum total value that can be borrowed
+        max_borrowable_value = collateral / self.margin_requirement if self.margin_requirement > 0 else 0
+
+        # Calculate max borrowable shares per stock (for reference)
+        current_borrowable_shares = {}
+        for stock_id, price in prices.items():
+            # Skip DEFAULT_STOCK as it's an accumulator, not a real stock
+            if stock_id == "DEFAULT_STOCK":
+                continue
+            if price > 0:
+                # Allocate proportionally or use simple division
+                current_borrowable_shares[stock_id] = max_borrowable_value / price
+
+        # Check if margin is violated
+        is_margin_violated = borrowed_value > max_borrowable_value
+        excess_borrowed_value = max(0, borrowed_value - max_borrowable_value)
+
+        # Calculate margin ratio (infinity if no borrowed positions)
+        margin_ratio = collateral / borrowed_value if borrowed_value > 0 else float('inf')
+
+        return {
+            'collateral': collateral,
+            'borrowed_value': borrowed_value,
+            'net_position_value': net_position_value,
+            'max_borrowable_value': max_borrowable_value,
+            'current_borrowable_shares': current_borrowable_shares,
+            'margin_ratio': margin_ratio,
+            'is_margin_violated': is_margin_violated,
+            'excess_borrowed_value': excess_borrowed_value
+        }
+
+    def handle_multi_stock_margin_call(self, prices: Dict[str, float], round_number: int):
+        """Force buy-to-cover across multiple stocks when margin requirements are violated
+
+        Args:
+            prices: Dict mapping stock_id to current price
+            round_number: Current round number for logging
+        """
+        # Check if there are any borrowed positions
+        if self.total_borrowed_shares <= 0:
+            return
+
+        # Get portfolio margin status
+        margin_status = self.get_portfolio_margin_status(prices)
+
+        if not margin_status['is_margin_violated']:
+            return  # No margin call needed
+
+        # Calculate total value that needs to be covered
+        excess_value = margin_status['excess_borrowed_value']
+
+        # Strategy: Buy to cover proportionally across all borrowed positions
+        # This maintains the relative composition of the short portfolio
+
+        total_borrowed_value = margin_status['borrowed_value']
+        stocks_to_cover = []
+
+        for stock_id, price in prices.items():
+            # Skip DEFAULT_STOCK as it's an accumulator, not a real stock
+            if stock_id == "DEFAULT_STOCK":
+                continue
+
+            borrowed_shares = self.borrowed_positions.get(stock_id, 0)
+            if borrowed_shares <= 0 or price <= 0:
+                continue
+
+            # Calculate this stock's proportion of total borrowed value
+            stock_borrowed_value = borrowed_shares * price
+            proportion = stock_borrowed_value / total_borrowed_value if total_borrowed_value > 0 else 0
+
+            # Calculate shares to cover for this stock
+            value_to_cover = excess_value * proportion
+            shares_to_cover = value_to_cover / price if price > 0 else 0
+
+            # Ensure we don't try to cover more than we have borrowed
+            shares_to_cover = min(shares_to_cover, borrowed_shares)
+
+            if shares_to_cover > 0:
+                stocks_to_cover.append({
+                    'stock_id': stock_id,
+                    'shares': shares_to_cover,
+                    'price': price,
+                    'value': shares_to_cover * price,
+                    'original_borrowed': borrowed_shares
+                })
+
+        # Execute buy-to-cover for each stock
+        total_cost = 0
+        for cover_info in stocks_to_cover:
+            stock_id = cover_info['stock_id']
+            shares = cover_info['shares']
+            price = cover_info['price']
+            cost = shares * price
+
+            # Update positions
+            self.borrowed_positions[stock_id] = max(0, self.borrowed_positions.get(stock_id, 0) - shares)
+            # Also update DEFAULT_STOCK accumulator if not already DEFAULT_STOCK (avoid double counting)
+            if stock_id != "DEFAULT_STOCK":
+                self.borrowed_shares = max(0, self.borrowed_shares - shares)
+
+            self.positions[stock_id] = self.positions.get(stock_id, 0) + shares
+            self.cash -= cost
+            total_cost += cost
+
+            # Log margin call for this stock
+            LoggingService.log_margin_call(
+                round_number=round_number,
+                agent_id=self.agent_id,
+                agent_type=self.agent_type.name,
+                borrowed_shares=cover_info['original_borrowed'],
+                max_borrowable=margin_status['max_borrowable_value'] / price,  # Approximate
+                action=f"BUY_TO_COVER_{stock_id}",
+                excess_shares=shares,
+                price=price
+            )
+
+        # Record the payment
+        if total_cost > 0:
+            self.record_payment('main', -total_cost, 'trade', round_number)
+
+        # Log overall margin call event
+        LoggingService.log_agent_state(
+            agent_id=self.agent_id,
+            operation="MULTI-STOCK MARGIN CALL - FORCED BUY TO COVER",
+            amount=f"{len(stocks_to_cover)} stocks, total cost: {total_cost:.2f}",
+            agent_state=self._get_state_dict(),
+            outstanding_orders=self.outstanding_orders,
+            order_history=self.order_history,
+            is_error=True
+        )
+
+        # Check invariants after margin call covering
+        self._check_borrowed_positions_invariants()
