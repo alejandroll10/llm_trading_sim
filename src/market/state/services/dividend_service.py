@@ -95,7 +95,8 @@ class DividendPaymentProcessor:
                 amount=payment,
                 account_type=account_type,
                 payment_type="dividend",
-                round_number=round_number
+                round_number=round_number,
+                stock_id=self.stock_id
             )
 
             action = "Paid" if payment >= 0 else "Deducted"
@@ -144,7 +145,10 @@ class DividendPaymentProcessor:
                 self.agent_repository.update_account_balance(
                     agent_id=agent_id,
                     amount=payment,
-                    account_type="main"
+                    account_type="main",
+                    payment_type="redemption",
+                    round_number=round_number,
+                    stock_id=self.stock_id
                 )
 
                 action = "Redeemed" if payment >= 0 else "Covered"

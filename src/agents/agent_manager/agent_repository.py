@@ -85,25 +85,26 @@ class AgentRepository:
                 )
         return all_valid
     
-    def update_account_balance(self, agent_id: str, amount: float, account_type: str, 
-                             payment_type: str = None, round_number: int = None):
+    def update_account_balance(self, agent_id: str, amount: float, account_type: str,
+                             payment_type: str = None, round_number: int = None, stock_id: str = None):
         """Update specific account balance and record payment history if applicable
-        
+
         Args:
             agent_id: ID of the agent
             amount: Amount to update
             account_type: Type of account ('main' or 'dividend')
             payment_type: Type of payment ('interest', 'dividend', etc.)
             round_number: Current round number for history tracking
+            stock_id: Optional stock identifier for multi-stock scenarios
         """
         LoggingService.get_logger('agents').info(
             f"Updating account balance for agent {agent_id}, "
             f"amount: {amount}, account_type: {account_type}, "
-            f"payment_type: {payment_type}"
+            f"payment_type: {payment_type}, stock_id: {stock_id}"
         )
 
         agent = self.get_agent(agent_id)
-        
+
 
         # Update balance as before
         if account_type == "main":
@@ -112,10 +113,10 @@ class AgentRepository:
             agent.dividend_cash += amount
         else:
             raise ValueError(f"Unknown account type: {account_type}")
-        
+
         # Record payment history if payment_type is provided
         if payment_type and round_number is not None:
-            agent.record_payment(account=account_type, amount=amount, payment_type=payment_type, round_number=round_number)
+            agent.record_payment(account=account_type, amount=amount, payment_type=payment_type, round_number=round_number, stock_id=stock_id)
 
         LoggingService.get_logger('agents').info(
             f"Updated account balance for agent {agent_id}, "

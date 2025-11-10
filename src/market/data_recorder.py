@@ -385,7 +385,7 @@ class DataRecorder:
         total_cash_paid_aggregate = 0.0
         stock_cash_paid = {stock_id: 0.0 for stock_id in dividends_by_stock.keys()}
 
-        # Sum actual payments from all agents' payment history
+        # Sum actual payments from all agents' payment history, tracking per-stock breakdown
         for agent_id in self.agent_repository.get_all_agent_ids():
             agent = self.agent_repository.get_agent(agent_id)
             if hasattr(agent, 'payment_history') and 'dividend' in agent.payment_history:
@@ -394,20 +394,9 @@ class DataRecorder:
                         # This payment was made in the previous round
                         total_cash_paid_aggregate += payment.amount
 
-        # For per-stock breakdown: we cannot accurately determine this from available data
-        # because payment_history doesn't track which stock each dividend came from,
-        # and using current positions has timing issues (positions changed after payment).
-        # We'll distribute the total proportionally to the per-share dividend amounts.
-        # NOTE: This is only accurate when all stocks have equal total shares.
-        if total_cash_paid_aggregate > 0 and total_aggregated_dividend > 0:
-            for stock_id in dividends_by_stock.keys():
-                # Proportional allocation based on per-share dividend amounts
-                # This approximates the breakdown but is not exact unless total shares are equal
-                proportion = dividends_by_stock[stock_id] / total_aggregated_dividend
-                stock_cash_paid[stock_id] = total_cash_paid_aggregate * proportion
-        else:
-            for stock_id in dividends_by_stock.keys():
-                stock_cash_paid[stock_id] = 0.0
+                        # Track per-stock breakdown using stock_id from payment
+                        if payment.stock_id and payment.stock_id in stock_cash_paid:
+                            stock_cash_paid[payment.stock_id] += payment.amount
 
         # Record aggregate dividend (for backwards compatibility with save_simulation_data)
         # Use 'last_paid_dividend' field name to match single-stock format

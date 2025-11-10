@@ -21,7 +21,8 @@ class Payment:
     round_number: int
     amount: float
     account: str
-    payment_type: Literal['interest', 'dividend', 'trade', 'borrow_fee', 'other']
+    payment_type: Literal['interest', 'dividend', 'trade', 'borrow_fee', 'redemption', 'other']
+    stock_id: Optional[str] = None  # Optional stock identifier for multi-stock scenarios
 
 class BaseAgent(ABC):
     """Base agent with core functionality"""
@@ -110,6 +111,7 @@ class BaseAgent(ABC):
             'dividend': [],
             'trade': [],
             'borrow_fee': [],
+            'redemption': [],
             'other': []
         }
 
@@ -1001,8 +1003,9 @@ class BaseAgent(ABC):
         self,
         account: str,
         amount: float,
-        payment_type: Literal['interest', 'dividend', 'trade', 'borrow_fee', 'other'],
+        payment_type: Literal['interest', 'dividend', 'trade', 'borrow_fee', 'redemption', 'other'],
         round_number: int,
+        stock_id: Optional[str] = None,
     ) -> None:
         """Record a payment in the agent's history.
 
@@ -1012,12 +1015,14 @@ class BaseAgent(ABC):
                 such as dividend obligations on short positions.
             payment_type: Type of payment.
             round_number: Simulation round when the payment occurred.
+            stock_id: Optional stock identifier for multi-stock scenarios.
         """
         payment = Payment(
             round_number=round_number,
             amount=amount,
             account=account,
             payment_type=payment_type,
+            stock_id=stock_id,
         )
 
         if payment_type not in self.payment_history:
