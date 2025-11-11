@@ -98,6 +98,79 @@ The simulation operates in discrete rounds. The following steps occur in each ro
 
 This lifecycle is orchestrated by the `execute_round` method in `src/base_sim.py`.
 
+## Key Features
+
+### Core Trading Mechanics
+- **Order Book:** Persistent order book with market and limit orders
+- **Price Discovery:** Dynamic price formation through order matching
+- **Partial Fills:** Orders can be partially executed
+- **Dividends:** Configurable dividend payments
+- **Multi-Stock Support:** Trade multiple securities simultaneously
+
+### Advanced Features
+
+#### Leverage Trading (Margin Trading)
+Agents can borrow cash to amplify their long positions, enabling research on leveraged trading strategies and risk management.
+
+**Configuration:**
+```python
+scenario = {
+    "leverage_enabled": True,
+    "AGENT_PARAMS": {
+        'deterministic_params': {
+            'momentum_trader': {
+                'leverage_ratio': 2.0,        # Allow 2x leverage
+                'initial_margin': 0.5,        # 50% down payment required
+                'maintenance_margin': 0.25,   # 25% minimum margin (liquidation threshold)
+            }
+        }
+    },
+    "leverage_interest_rate": 0.05,  # 5% annual interest on borrowed cash
+    "cash_lending_pool": 1000000,    # Optional: limit available lending pool
+}
+```
+
+**Features:**
+- Automatic borrowing when placing orders beyond available cash
+- Margin calls with forced liquidation when positions fall below maintenance margin
+- Per-round interest charges on borrowed cash
+- Full visibility for LLM agents (leverage metrics included in observations)
+
+**Example Scenarios:**
+- `test_leverage` - Deterministic agents with 2x leverage
+- `test_leverage_llm` - LLM agents using leverage strategically
+
+See `docs/LEVERAGE.md` for comprehensive documentation.
+
+#### Short Selling
+Agents can borrow shares to sell short, enabling research on bearish strategies and market dynamics.
+
+**Configuration:**
+```python
+scenario = {
+    "AGENT_PARAMS": {
+        'allow_short_selling': True,
+        'margin_requirement': 0.5,  # 50% margin for shorts
+    },
+    "LENDABLE_SHARES": 10000,  # Total shares available to borrow
+}
+```
+
+**Features:**
+- Borrow shares from lending pool to sell short
+- Margin calls when short positions become underwater
+- Per-round borrowing fees
+- Works with both single and multi-stock scenarios
+
+### Agent Types
+The simulation supports multiple agent types with different trading strategies:
+- **LLM Agents:** Use language models to make trading decisions with natural language reasoning
+- **Momentum Traders:** Follow price trends
+- **Value Investors:** Buy undervalued assets
+- **Market Makers:** Provide liquidity
+- **Mean Reversion Traders:** Bet on price reversions
+- **Custom Agents:** Define your own strategies
+
 ## Adding New Scenarios
 
 You can define custom scenarios by adding new `SimulationScenario` objects to the `SCENARIOS` dictionary in `src/scenarios.py`.
