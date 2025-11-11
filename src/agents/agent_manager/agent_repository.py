@@ -16,14 +16,43 @@ from agents.agent_manager.services.borrowing_repository import BorrowingReposito
 
 class AgentRepository:
     """Manages a collection of agents"""
-    def __init__(self, agents: List[BaseAgent], logger, context, borrowing_repository: Optional[BorrowingRepository] = None):
+    def __init__(self, agents: List[BaseAgent], logger, context,
+                 borrowing_repository: Optional[BorrowingRepository] = None,
+                 borrowing_repositories: Optional[Dict[str, BorrowingRepository]] = None):
         self._agents: Dict[str, BaseAgent] = {
             agent.agent_id: agent for agent in agents
         }
         self._info_profiles: Dict[str, AgentInfoProfile] = {}
         self.context = context
-        self.borrowing_repository = borrowing_repository or BorrowingRepository(logger=LoggingService.get_logger('borrowing'))
-    
+
+        # Support both single repository (single-stock) and multiple repositories (multi-stock)
+        if borrowing_repositories is not None:
+            # Multi-stock mode: dict of repositories
+            self.borrowing_repositories = borrowing_repositories
+            self.borrowing_repository = list(borrowing_repositories.values())[0] if borrowing_repositories else None
+            self.is_multi_stock = True
+        else:
+            # Single-stock mode: single repository
+            self.borrowing_repository = borrowing_repository or BorrowingRepository(logger=LoggingService.get_logger('borrowing'))
+            self.borrowing_repositories = None
+            self.is_multi_stock = False
+
+    def _get_borrowing_repo(self, stock_id: str = "DEFAULT_STOCK") -> BorrowingRepository:
+        """Get the appropriate borrowing repository for a given stock.
+
+        Args:
+            stock_id: The stock identifier
+
+        Returns:
+            BorrowingRepository for the specified stock
+        """
+        if self.is_multi_stock:
+            if stock_id not in self.borrowing_repositories:
+                raise KeyError(f"No borrowing repository found for stock: {stock_id}")
+            return self.borrowing_repositories[stock_id]
+        else:
+            return self.borrowing_repository
+
     def get_agent(self, agent_id: str) -> Optional[BaseAgent]:
         """Get agent by ID"""
         agent = self._agents.get(agent_id)
@@ -141,7 +170,9 @@ class AgentRepository:
             agent.borrowed_positions[stock_id] = current_borrowed - cover
             agent.positions[stock_id] = current_shares + (amount - cover)
             if cover > 0:
-                self.borrowing_repository.release_shares(agent_id, cover)
+                # Release shares to the correct stock's borrowing repository
+                borrowing_repo = self._get_borrowing_repo(stock_id)
+                borrowing_repo.release_shares(agent_id, cover)
         else:
             agent.positions[stock_id] = current_shares + amount
 
@@ -303,8 +334,11 @@ class AgentRepository:
         allocated_shares = 0
 
         if shares_needed > 0:
+            # Get the correct borrowing repository for this stock
+            borrowing_repo = self._get_borrowing_repo(stock_id)
+
             # Try to allocate shares (respects allow_partial_borrows setting)
-            allocated_shares = self.borrowing_repository.allocate_shares(agent_id, shares_needed)
+            allocated_shares = borrowing_repo.allocate_shares(agent_id, shares_needed)
 
             if allocated_shares == 0:
                 # No shares available and/or partial fills disabled
@@ -345,7 +379,8 @@ class AgentRepository:
         except ValueError as e:
             # Roll back any allocated shares on failure
             if allocated_shares > 0:
-                self.borrowing_repository.release_shares(agent_id, allocated_shares)
+                borrowing_repo = self._get_borrowing_repo(stock_id)
+                borrowing_repo.release_shares(agent_id, allocated_shares)
             return CommitmentResult(False, str(e), requested_amount=original_requested)
     
     def commit_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0, stock_id: str = "DEFAULT_STOCK", prices: Optional[Dict[str, float]] = None) -> CommitmentResult:
@@ -401,7 +436,9 @@ class AgentRepository:
                 borrowed_after = agent.borrowed_positions.get(stock_id, 0)
                 returned = borrowed_before - borrowed_after
                 if returned > 0:
-                    self.borrowing_repository.release_shares(agent_id, returned)
+                    # Return shares to the correct stock's borrowing repository
+                    borrowing_repo = self._get_borrowing_repo(stock_id)
+                    borrowing_repo.release_shares(agent_id, returned)
 
             if results:
                 return CommitmentResult(True, "; ".join(results))
@@ -499,7 +536,9 @@ class AgentRepository:
             if stock_id in agent.borrowed_positions and agent.borrowed_positions[stock_id] > 0:
                 borrowed = agent.borrowed_positions[stock_id]
                 agent.borrowed_positions[stock_id] = 0
-                self.borrowing_repository.release_shares(agent_id, borrowed)
+                # Return shares to the correct stock's borrowing repository
+                borrowing_repo = self._get_borrowing_repo(stock_id)
+                borrowing_repo.release_shares(agent_id, borrowed)
 
         LoggingService.get_logger('agents').info(
             f"Redeemed all shares for agent {agent_id}, "

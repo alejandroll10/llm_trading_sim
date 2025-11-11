@@ -137,16 +137,41 @@ class BaseSimulation:
         borrow_model = self.agent_params.get('borrow_model', {})
         allow_partial_borrows = borrow_model.get('allow_partial_borrows', True)
 
-        self.agent_repository = AgentRepository(
-            agents,
-            logger=LoggingService.get_logger('agent_repository'),
-            context=self.context,
-            borrowing_repository=BorrowingRepository(
+        # Initialize borrowing repository/repositories (for short selling)
+        if self.is_multi_stock:
+            # Multi-stock: Create borrowing repository for each stock (FOR LOOP!)
+            self.borrowing_repositories = {}
+            for stock_id, config in stock_configs.items():
+                lendable = config.get('LENDABLE_SHARES', 0)
+                self.borrowing_repositories[stock_id] = BorrowingRepository(
+                    total_lendable=lendable,
+                    allow_partial_borrows=allow_partial_borrows,
+                    logger=LoggingService.get_logger(f'borrowing_{stock_id}')
+                )
+            # For backwards compatibility, expose first stock's repo
+            self.borrowing_repository = list(self.borrowing_repositories.values())[0] if self.borrowing_repositories else None
+
+            # Pass dict of borrowing repositories to AgentRepository
+            self.agent_repository = AgentRepository(
+                agents,
+                logger=LoggingService.get_logger('agent_repository'),
+                context=self.context,
+                borrowing_repositories=self.borrowing_repositories
+            )
+        else:
+            # Single stock: Original behavior (backwards compatible)
+            self.borrowing_repository = BorrowingRepository(
                 total_lendable=lendable_shares,
                 allow_partial_borrows=allow_partial_borrows,
                 logger=LoggingService.get_logger('borrowing')
             )
-        )
+
+            self.agent_repository = AgentRepository(
+                agents,
+                logger=LoggingService.get_logger('agent_repository'),
+                context=self.context,
+                borrowing_repository=self.borrowing_repository
+            )
         # Initialize components in correct order
         if self.is_multi_stock:
             # Multi-stock: Create order books for each stock (FOR LOOP!)
