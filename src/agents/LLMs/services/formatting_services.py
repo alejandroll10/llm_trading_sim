@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from market.information.information_types import InformationType, InformationSignal
 from market.trade import Trade
 from agents.LLMs.llm_prompt_templates import (
-    TRADING_OPTIONS_TEMPLATE, BASE_MARKET_TEMPLATE, 
-    POSITION_INFO_TEMPLATE, DIVIDEND_INFO_TEMPLATE, 
+    TRADING_OPTIONS_TEMPLATE, BASE_MARKET_TEMPLATE,
+    POSITION_INFO_TEMPLATE, DIVIDEND_INFO_TEMPLATE,
     INTEREST_INFO_TEMPLATE, PRICE_HISTORY_TEMPLATE,
-    REDEMPTION_INFO_TEMPLATE
+    REDEMPTION_INFO_TEMPLATE, LEVERAGE_INFO_TEMPLATE
 )
 
 @dataclass
@@ -28,6 +28,16 @@ class AgentContext:
     available_positions: Dict[str, int] = None  # Dict[stock_id, available_shares]
     committed_positions: Dict[str, int] = None  # Dict[stock_id, committed_shares]
     is_multi_stock: bool = False
+    # Leverage support
+    borrowed_cash: float = 0.0
+    leverage_ratio: float = 1.0
+    leverage_interest_paid: float = 0.0
+    # Calculated leverage metrics (computed from prices if leverage enabled)
+    equity: float = None
+    gross_position_value: float = None
+    leverage_margin_ratio: float = None
+    available_borrowing_power: float = None
+    maintenance_margin: float = None
 
 class MarketStateFormatter:
     """Formats market state information for LLM consumption"""
@@ -88,6 +98,12 @@ class MarketStateFormatter:
             # Format position display (handles both single and multi-stock)
             position_display = MarketStateFormatter._format_position_info(agent_context)
 
+            # Determine leverage note for position template
+            if agent_context.leverage_ratio > 1.0:
+                leverage_note = f" (Leverage enabled: up to {agent_context.leverage_ratio:.1f}x)"
+            else:
+                leverage_note = " (Cash borrowing is not allowed)"
+
             context = {
                 # Market data from signals
                 'price': price_signal.value,
@@ -102,7 +118,8 @@ class MarketStateFormatter:
                 'committed_cash': agent_context.committed_cash,
                 'committed_shares': agent_context.committed_shares,
                 'position_display': position_display,  # Multi-stock aware display
-                
+                'leverage_note': leverage_note,  # NEW: Leverage information
+
                 # Calculated display values
                 'volume_display': MarketStateFormatter._format_volume(volume_signal),
                 'fundamental_display': MarketStateFormatter._format_fundamental(fundamental_signal),
@@ -113,14 +130,14 @@ class MarketStateFormatter:
                 'pf_ratio_display': MarketStateFormatter._format_pf_ratio(
                     price_signal, fundamental_signal
                 ),
-                
+
                 # Dividend and interest data
                 **MarketStateFormatter._prepare_dividend_context(dividend_signal),
                 **MarketStateFormatter._prepare_interest_context(interest_signal),
-                
+
                 # Add redemption context
                 **MarketStateFormatter._prepare_redemption_context(fundamental_signal),
-                
+
                 # Add final round message
                 'final_round_message': "\nIn the final round, all shares are redeemed at the fundamental value." if num_rounds != "Infinite" else ""
             }
@@ -152,10 +169,37 @@ class MarketStateFormatter:
             else:
                 multi_stock_info = MarketStateFormatter._format_multi_stock_market_info(market_state)
 
+            # Format leverage information if enabled
+            leverage_info = ""
+            if agent_context.leverage_ratio > 1.0 and agent_context.equity is not None:
+                # Determine margin status
+                if agent_context.leverage_margin_ratio is not None and agent_context.maintenance_margin is not None:
+                    if agent_context.leverage_margin_ratio < agent_context.maintenance_margin:
+                        margin_status = "⚠️ MARGIN CALL - Below maintenance margin! Liquidation imminent"
+                    elif agent_context.leverage_margin_ratio < agent_context.maintenance_margin * 1.5:
+                        margin_status = "⚠️ WARNING - Approaching margin call threshold"
+                    else:
+                        margin_status = "✓ Healthy - Above maintenance margin"
+                else:
+                    margin_status = "N/A"
+
+                leverage_info = LEVERAGE_INFO_TEMPLATE.format(
+                    leverage_ratio=agent_context.leverage_ratio,
+                    borrowed_cash=agent_context.borrowed_cash,
+                    leverage_interest_paid=agent_context.leverage_interest_paid,
+                    equity=agent_context.equity,
+                    gross_position_value=agent_context.gross_position_value,
+                    leverage_margin_ratio=agent_context.leverage_margin_ratio or 0,
+                    maintenance_margin=agent_context.maintenance_margin or 0,
+                    available_borrowing_power=agent_context.available_borrowing_power or 0,
+                    margin_status=margin_status
+                )
+
             # Use templates consistently
             sections = {
                 'base_market_state': BASE_MARKET_TEMPLATE.format(**context),
                 'position_info': position_display,  # Use pre-formatted multi-stock aware display
+                'leverage_info': leverage_info,  # NEW: Leverage information
                 'price_history': PRICE_HISTORY_TEMPLATE.format(**context),
                 'dividend_info': DIVIDEND_INFO_TEMPLATE.format(**context),
                 'interest_info': INTEREST_INFO_TEMPLATE.format(**context),

@@ -41,6 +41,8 @@ class AgentStateSnapshot:
     total_shares: int
     borrowed_shares: int
     net_shares: int
+    borrowed_cash: float  # Cash borrowed via leverage
+    leverage_interest_paid: float  # Cumulative interest on borrowed cash
     wealth: float
     orders_by_state: dict
     trade_summary: dict

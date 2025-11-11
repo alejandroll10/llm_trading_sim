@@ -267,6 +267,8 @@ class DataRecorder:
                 'total_shares': state.total_shares,  # available_shares + committed_shares
                 'borrowed_shares': state.borrowed_shares,  # Shares borrowed from lending pool
                 'net_shares': state.net_shares,  # total_shares - borrowed_shares (economic position)
+                'borrowed_cash': round(state.borrowed_cash, 2),  # Cash borrowed via leverage
+                'leverage_interest_paid': round(state.leverage_interest_paid, 2),  # Cumulative interest on borrowed cash
                 'price': round(self.context.current_price, 2),
                 'share_value': share_value,
                 'total_value': current_wealth,

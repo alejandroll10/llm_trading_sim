@@ -50,9 +50,22 @@ Your Position:
 - Available Shares: {shares} shares (negative indicates a short position)
 - Main Cash Account: ${cash:.2f}
 - Dividend Cash Account (not available for trading): ${dividend_cash:.2f}
-- Total Available Cash: ${total_available_cash:.2f} (Cash borrowing is not allowed)
+- Total Available Cash: ${total_available_cash:.2f}{leverage_note}
 - Shares in Orders: {committed_shares} shares
 - Cash in Orders: ${committed_cash:.2f}
+"""
+
+LEVERAGE_INFO_TEMPLATE = """
+Leverage Information:
+- Leverage Enabled: {leverage_ratio:.1f}x maximum
+- Borrowed Cash: ${borrowed_cash:.2f}
+- Interest Paid on Leverage: ${leverage_interest_paid:.2f}
+- Equity (Net Worth): ${equity:.2f}
+- Gross Position Value: ${gross_position_value:.2f}
+- Current Margin Ratio: {leverage_margin_ratio:.2%}
+- Maintenance Margin Threshold: {maintenance_margin:.2%} (forced liquidation below this)
+- Available Borrowing Power: ${available_borrowing_power:.2f}
+- Status: {margin_status}
 """
 
 DIVIDEND_INFO_TEMPLATE = """
@@ -93,6 +106,7 @@ STANDARD_USER_TEMPLATE = """{base_market_state}
 {interest_info}
 {trading_options}
 {position_info}
+{leverage_info}
 
 Consider carefully the trade-offs between:
 The execution uncertainty of limit orders and potential opportunity costs of holding an overvalued asset and missing on the interest rate or holding cash and missing on the dividend of an undervalued asset.

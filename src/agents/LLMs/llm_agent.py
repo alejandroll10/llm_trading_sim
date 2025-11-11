@@ -148,6 +148,21 @@ Strategic Considerations:
             len(self.positions) == 1 and "DEFAULT_STOCK" not in self.positions
         )
 
+        # Calculate leverage metrics if leverage is enabled
+        leverage_metrics = {}
+        if self.leverage_ratio > 1.0 and hasattr(self, 'last_prices') and self.last_prices:
+            try:
+                leverage_metrics = {
+                    'equity': self.get_equity(self.last_prices),
+                    'gross_position_value': self.get_gross_position_value(self.last_prices),
+                    'leverage_margin_ratio': self.get_leverage_margin_ratio(self.last_prices),
+                    'available_borrowing_power': self.get_available_borrowing_power(self.last_prices),
+                    'maintenance_margin': self.maintenance_margin
+                }
+            except:
+                # If calculation fails, leave metrics as None
+                pass
+
         return AgentContext(
             agent_id=self.agent_id,
             cash=self.cash,
@@ -181,7 +196,12 @@ Strategic Considerations:
                 stock_id: self.positions[stock_id] for stock_id in self.positions
             } if is_multi_stock else None,
             committed_positions=self.committed_positions.copy() if is_multi_stock else None,
-            is_multi_stock=is_multi_stock
+            is_multi_stock=is_multi_stock,
+            # Leverage support
+            borrowed_cash=self.borrowed_cash,
+            leverage_ratio=self.leverage_ratio,
+            leverage_interest_paid=self.leverage_interest_paid,
+            **leverage_metrics  # Include calculated metrics if available
         )
 
     def prepare_context_llm(self):
