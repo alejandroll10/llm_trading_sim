@@ -41,21 +41,32 @@ class OrderStateManager:
         """Handle new order validation, commitment, and initial state transition"""
         try:
             # Calculate required commitment
-            required_cash = order.quantity * current_price if order.side == 'buy' else 0
-            required_shares = order.quantity if order.side == 'sell' else 0
-            
+            # For limit orders, use limit price; for market orders, use current price
+            if order.side == 'buy':
+                commitment_price = order.price if order.order_type == 'limit' else current_price
+                required_cash = order.quantity * commitment_price
+                required_shares = 0
+            else:
+                required_cash = 0
+                required_shares = order.quantity
+
+            # Prepare prices dict for validation (needed for leverage calculations)
+            prices = {order.stock_id: current_price}
+
             # Commit resources through repository
             if order.side == 'buy':
                 result = self.agent_repository.commit_resources(
                     order.agent_id,
                     cash_amount=required_cash,
-                    stock_id=order.stock_id
+                    stock_id=order.stock_id,
+                    prices=prices
                 )
             else:
                 result = self.agent_repository.commit_resources(
                     order.agent_id,
                     share_amount=required_shares,
-                    stock_id=order.stock_id
+                    stock_id=order.stock_id,
+                    prices=prices
                 )
 
             if result.success:

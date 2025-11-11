@@ -16,12 +16,14 @@ from agents.agent_manager.agent_repository import AgentRepository
 from typing import Dict
 from market.state.services.interest_service import InterestService
 from market.state.services.borrow_service import BorrowService
+from market.state.services.leverage_interest_service import LeverageInterestService
 from agents.agent_manager.services.agent_decision_service import AgentDecisionService
 from market.orders.order_service_factory import OrderServiceFactory
 from services.shared_service_factory import SharedServiceFactory
 from market.information.base_information_services import InformationService
 from services.logging_service import LoggingService
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
+from agents.agent_manager.services.cash_lending_repository import CashLendingRepository
 import random
 import warnings
 from wordcloud import WordCloud
@@ -225,6 +227,39 @@ class BaseSimulation:
                 'payment_frequency': default_borrow_model.get('payment_frequency', 1)
             }
         )
+
+        # NEW: Initialize leverage (cash lending) services
+        leverage_params = agent_params.get('leverage_params', {})
+        self.leverage_enabled = leverage_params.get('enabled', False)
+
+        if self.leverage_enabled:
+            # Cash lending pool for leveraged trading
+            cash_lending_pool = leverage_params.get('cash_lending_pool', float('inf'))
+            allow_partial_cash_borrows = leverage_params.get('allow_partial_borrows', False)
+
+            self.cash_lending_repo = CashLendingRepository(
+                total_lendable_cash=cash_lending_pool,
+                allow_partial_borrows=allow_partial_cash_borrows,
+                logger=LoggingService.get_logger('cash_lending')
+            )
+
+            # Leverage interest service
+            self.leverage_interest_service = LeverageInterestService(
+                annual_interest_rate=leverage_params.get('interest_rate', 0.05)
+            )
+
+            # Assign cash_lending_repo to all agents
+            for agent in self.agent_repository.get_all_agents():
+                agent.cash_lending_repo = self.cash_lending_repo
+
+            self.logger.info(
+                f"Leverage trading enabled: pool=${cash_lending_pool if cash_lending_pool != float('inf') else 'unlimited'}, "
+                f"interest={leverage_params.get('interest_rate', 0.05):.2%}"
+            )
+        else:
+            self.cash_lending_repo = None
+            self.leverage_interest_service = None
+
         # Create market state manager(s) - one per stock in multi-stock mode
         if self.is_multi_stock:
             # Multi-stock: Create market state manager for each stock (FOR LOOP!)
@@ -630,6 +665,20 @@ class BaseSimulation:
             self.market_state_manager.update_market_depth()
 
         self.logger.info(f"Dividends paid last round: {last_paid_dividend}")
+
+        # NEW: Charge interest on borrowed cash for leverage (after market state updates)
+        if self.leverage_enabled and self.leverage_interest_service:
+            interest_charged = self.leverage_interest_service.charge_interest(
+                self.agent_repository.get_all_agents(),
+                rounds_per_year=252  # Daily trading
+            )
+            if interest_charged:
+                total_leverage_interest = sum(interest_charged.values())
+                self.logger.info(
+                    f"Leverage interest charged this round: ${total_leverage_interest:.2f} "
+                    f"({len(interest_charged)} agents)"
+                )
+
         # Verify final states
         self._verify_round_end_states(pre_round_states)
 
@@ -646,6 +695,9 @@ class BaseSimulation:
             # Single-stock: use initial_shares
             initial_shares_value = type_specific_params.get('initial_shares', agent_params['initial_shares'])
 
+        # NEW: Get leverage parameters
+        leverage_params = agent_params.get('leverage_params', {})
+
         base_params = {
             'agent_id': agent_id,
             'initial_cash': type_specific_params.get('initial_cash', agent_params['initial_cash']),
@@ -654,7 +706,11 @@ class BaseSimulation:
             'allow_short_selling': type_specific_params.get('allow_short_selling', agent_params['allow_short_selling']),
             'logger': LoggingService.get_logger('decisions'),
             'info_signals_logger': LoggingService.get_logger('info_signals'),
-            'initial_price': self.initial_price
+            'initial_price': self.initial_price,
+            # NEW: Leverage parameters
+            'leverage_ratio': type_specific_params.get('leverage_ratio', leverage_params.get('max_leverage_ratio', 1.0)),
+            'initial_margin': type_specific_params.get('initial_margin', leverage_params.get('initial_margin', 0.5)),
+            'maintenance_margin': type_specific_params.get('maintenance_margin', leverage_params.get('maintenance_margin', 0.25)),
         }
 
         # Check if it's a deterministic agent
@@ -1061,7 +1117,7 @@ class BaseSimulation:
 
         # Get all active orders
         from market.orders.order import OrderState
-        active_states = {OrderState.PENDING, OrderState.PARTIALLY_FILLED}
+        active_states = {OrderState.ACTIVE, OrderState.COMMITTED, OrderState.PENDING, OrderState.PARTIALLY_FILLED}
 
         # Calculate expected commitments from orders
         expected_committed_cash = 0
@@ -1107,11 +1163,13 @@ class BaseSimulation:
 
         # Allow for small floating point differences
         if abs(expected_committed_cash - actual_committed_cash) > 0.1:
-            msg = f"Commitment-order mismatch for cash:\n"
+            msg = f"CRITICAL ERROR - Commitment-order mismatch for cash:\n"
             msg += f"Expected (from orders): ${expected_committed_cash:.2f}\n"
             msg += f"Actual (from agents): ${actual_committed_cash:.2f}\n"
-            msg += f"Difference: ${abs(expected_committed_cash - actual_committed_cash):.2f}"
-            logger.warning(msg)  # Warning instead of error for now
+            msg += f"Difference: ${abs(expected_committed_cash - actual_committed_cash):.2f}\n"
+            msg += f"This indicates broken bookkeeping - cannot trust simulation results."
+            logger.error(msg)
+            raise ValueError(msg)
 
         # Check per-stock share commitments
         all_stock_ids = set(expected_committed_shares_per_stock.keys()) | set(actual_committed_shares_per_stock.keys())
@@ -1122,11 +1180,13 @@ class BaseSimulation:
             self.logger.info(f"{stock_id}: Expected committed shares: {expected}, Actual: {actual}")
 
             if abs(expected - actual) > 0.01:
-                msg = f"Commitment-order mismatch for {stock_id} shares:\n"
+                msg = f"CRITICAL ERROR - Commitment-order mismatch for {stock_id} shares:\n"
                 msg += f"Expected (from orders): {expected}\n"
                 msg += f"Actual (from agents): {actual}\n"
-                msg += f"Difference: {abs(expected - actual)}"
-                logger.warning(msg)  # Warning for now
+                msg += f"Difference: {abs(expected - actual)}\n"
+                msg += f"This indicates broken bookkeeping - cannot trust simulation results."
+                logger.error(msg)
+                raise ValueError(msg)
 
         self.logger.info("✓ Commitment-order matching verified")
 
@@ -1279,9 +1339,9 @@ class BaseSimulation:
                     raise ValueError(msg)
                 self.logger.info(f"✓ No crossed market (bid {best_bid} <= ask {best_ask})")
 
-            # Invariant 2: All orders in book should be PENDING or PARTIALLY_FILLED
+            # Invariant 2: All orders in book should be ACTIVE, PENDING or PARTIALLY_FILLED
             from market.orders.order import OrderState
-            valid_book_states = {OrderState.PENDING, OrderState.PARTIALLY_FILLED}
+            valid_book_states = {OrderState.ACTIVE, OrderState.PENDING, OrderState.PARTIALLY_FILLED}
 
             invalid_orders = []
             for side_name, heap in [('buy', order_book.buy_orders), ('sell', order_book.sell_orders)]:
@@ -1295,10 +1355,12 @@ class BaseSimulation:
                         })
 
             if invalid_orders:
-                msg = f"Invalid order states in {stock_id} order book:\n"
+                msg = f"CRITICAL ERROR - Invalid order states in {stock_id} order book:\n"
                 for order_info in invalid_orders:
                     msg += f"  Order {order_info['order_id']} ({order_info['side']}): {order_info['state']}\n"
-                logger.warning(msg)  # Warning for now
+                msg += f"Order book contains orders in invalid states - corrupted state."
+                logger.error(msg)
+                raise ValueError(msg)
 
             # Invariant 3: Order book quantities match order remaining quantities
             book_buy_quantity = sum(entry.order.remaining_quantity for entry in order_book.buy_orders)
@@ -1435,8 +1497,11 @@ class BaseSimulation:
         compound_freq = interest_service.interest_model.get('compound_frequency', 'per_round')
         valid_frequencies = ['per_round', 'annual', 'semi_annual', 'quarterly', 'monthly']
         if compound_freq not in valid_frequencies:
-            msg = f"Invalid compound frequency: {compound_freq}"
-            logger.warning(msg)
+            msg = f"CRITICAL ERROR - Invalid compound frequency: {compound_freq}\n"
+            msg += f"Valid frequencies are: {', '.join(valid_frequencies)}\n"
+            msg += f"This is a configuration error that will produce incorrect results."
+            logger.error(msg)
+            raise ValueError(msg)
 
         self.logger.info("✓ Interest calculations verified")
 

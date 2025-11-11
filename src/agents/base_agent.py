@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Literal, Any
+from typing import Optional, List, Dict, Literal, Any, Tuple
 import numpy as np
 from market.trade import Trade
 from market.information.information_types import InformationType, InformationSignal, InfoCapability
@@ -26,11 +26,14 @@ class Payment:
 
 class BaseAgent(ABC):
     """Base agent with core functionality"""
-    def __init__(self, agent_id: str, initial_cash: float = 0, 
-                 initial_shares: int = 0, position_limit: int = None, 
-                 allow_short_selling: bool = False, 
+    def __init__(self, agent_id: str, initial_cash: float = 0,
+                 initial_shares: int = 0, position_limit: int = None,
+                 allow_short_selling: bool = False,
                  margin_requirement: float = 0.5,  # 50% margin requirement by default
                  margin_base: str = "cash",  # "cash" or "wealth"
+                 leverage_ratio: float = 1.0,  # 1.0 = no leverage, 2.0 = 2x leverage
+                 initial_margin: float = 0.5,  # 50% down payment required
+                 maintenance_margin: float = 0.25,  # 25% minimum margin (liquidation threshold)
                  logger=None, info_signals_logger=None, initial_price: float = np.nan):
         self.agent_id = agent_id
         # Store initial values
@@ -58,6 +61,15 @@ class BaseAgent(ABC):
         self.allow_short_selling = allow_short_selling
         self.margin_requirement = margin_requirement  # Percentage of base required as margin
         self.margin_base = margin_base  # "cash" or "wealth"
+
+        # Leverage fields (for long position leverage via cash borrowing)
+        self.leverage_ratio = leverage_ratio  # Maximum leverage allowed (1.0 = no leverage)
+        self.initial_margin = initial_margin  # Required down payment for leveraged positions
+        self.maintenance_margin = maintenance_margin  # Minimum margin ratio before liquidation
+        self.borrowed_cash: float = 0.0  # Cash borrowed for leverage
+        self.leverage_interest_paid: float = 0.0  # Cumulative interest paid on borrowed cash
+        self.cash_lending_repo = None  # Set during simulation initialization
+
         self.order_history = []
         self.decision_history = []
         self.trade_history: List[Trade] = []
@@ -364,8 +376,60 @@ class BaseAgent(ABC):
         if print_to_terminal:
             print(full_message)
 
-    def commit_cash(self, amount: float, debug: bool = False):
-        """Commit cash for a trade"""
+    def can_commit_cash(self, amount: float, prices: Dict[str, float]) -> Tuple[bool, str]:
+        """Check if cash commitment is feasible without modifying state.
+
+        This validation method checks whether the agent can commit the requested
+        amount of cash, either from available cash or by borrowing (if leverage enabled).
+        Unlike commit_cash(), this method does NOT modify any state - it only validates.
+
+        Args:
+            amount: Amount of cash to potentially commit
+            prices: Dict mapping stock_id to current price (needed for borrowing power calculation)
+
+        Returns:
+            Tuple of (success: bool, error_message: str)
+            If success=True, error_message is empty
+            If success=False, error_message contains the reason for failure
+        """
+        # Case 1: Have enough cash - commitment is feasible
+        if amount <= self.cash:
+            return (True, "")
+
+        # Case 2: Insufficient cash - check if we can borrow
+        shortage = amount - self.cash
+
+        # No leverage enabled or no lending repo - cannot proceed
+        if self.leverage_ratio <= 1.0 or self.cash_lending_repo is None:
+            return (False, f"Insufficient cash: need ${amount:.2f}, have ${self.cash:.2f}, no leverage available")
+
+        # Calculate borrowing power using provided prices
+        borrowing_power = self.get_available_borrowing_power(prices)
+
+        # Check if we can borrow enough
+        if shortage > borrowing_power:
+            return (False,
+                   f"Insufficient buying power: need ${amount:.2f}, "
+                   f"have ${self.cash:.2f} cash + ${borrowing_power:.2f} borrowing power = "
+                   f"${self.cash + borrowing_power:.2f} total")
+
+        # All checks passed - commitment is feasible
+        return (True, "")
+
+    def commit_cash(self, amount: float, debug: bool = False, prices: Optional[Dict[str, float]] = None):
+        """Commit cash for a trade, auto-borrowing if leverage enabled and needed.
+
+        If the agent has leverage enabled and insufficient cash, this method will
+        automatically borrow the required amount from the cash lending repository.
+
+        Args:
+            amount: Amount of cash to commit
+            debug: If True, print detailed debug information
+            prices: Current prices dict (required for leverage calculations if last_prices not set)
+
+        Raises:
+            ValueError: If insufficient cash/borrowing power
+        """
         # Log initial state
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
@@ -374,35 +438,81 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict(),
             outstanding_orders=self.outstanding_orders
         )
-        
+
+        # NEW: Check if we need to borrow
         if amount > self.cash:
-            # Log error state
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="commit cash failed",
-                amount=amount,
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                print_to_terminal=debug,
-                is_error=True
-            )
-            
-            # Log validation error
-            LoggingService.log_validation_error(
-                round_number=self.last_update_round,
-                agent_id=self.agent_id,
-                agent_type=self.agent_type.name,
-                error_type="INSUFFICIENT_CASH",
-                details=f"Required: {amount:.2f}, Available: {self.cash:.2f}",
-                attempted_action="COMMIT_CASH"
-            )
-            
-            raise ValueError(f"Insufficient cash: {amount} > {self.cash}")
-            
+            if self.leverage_ratio <= 1.0 or self.cash_lending_repo is None:
+                # No leverage or no lending repo - fail as before
+                LoggingService.log_agent_state(
+                    agent_id=self.agent_id,
+                    operation="commit cash failed",
+                    amount=amount,
+                    agent_state=self._get_state_dict(),
+                    outstanding_orders=self.outstanding_orders,
+                    order_history=self.order_history,
+                    print_to_terminal=debug,
+                    is_error=True
+                )
+
+                LoggingService.log_validation_error(
+                    round_number=self.last_update_round,
+                    agent_id=self.agent_id,
+                    agent_type=self.agent_type.name,
+                    error_type="INSUFFICIENT_CASH",
+                    details=f"Required: {amount:.2f}, Available: {self.cash:.2f}",
+                    attempted_action="COMMIT_CASH"
+                )
+
+                raise ValueError(f"Insufficient cash: {amount} > {self.cash}")
+
+            # NEW: Leverage enabled - try to borrow
+            shortage = amount - self.cash
+
+            # Check if we have borrowing power
+            # Use provided prices if available, otherwise fall back to last_prices
+            prices_to_use = prices if prices is not None else getattr(self, 'last_prices', None)
+            if prices_to_use is None:
+                raise ValueError("Cannot compute borrowing power without current prices")
+
+            borrowing_power = self.get_available_borrowing_power(prices_to_use)
+
+            if shortage > borrowing_power:
+                LoggingService.log_validation_error(
+                    round_number=self.last_update_round,
+                    agent_id=self.agent_id,
+                    agent_type=self.agent_type.name,
+                    error_type="INSUFFICIENT_BORROWING_POWER",
+                    details=f"Need ${shortage:.2f}, have ${borrowing_power:.2f} borrowing power",
+                    attempted_action="COMMIT_CASH_WITH_LEVERAGE"
+                )
+                raise ValueError(
+                    f"Insufficient buying power: need ${amount:.2f}, "
+                    f"have ${self.cash:.2f} cash + ${borrowing_power:.2f} borrowing power"
+                )
+
+            # Borrow the shortage
+            actual_borrowed = self.cash_lending_repo.allocate_cash(self.agent_id, shortage)
+            if actual_borrowed < shortage - 1e-10:  # Small tolerance for floating point
+                raise ValueError(
+                    f"Lending pool has insufficient cash: requested ${shortage:.2f}, got ${actual_borrowed:.2f}"
+                )
+
+            self.borrowed_cash += actual_borrowed
+            self.cash += actual_borrowed
+
+            if self.logger:
+                self.logger.info(
+                    f"Agent {self.agent_id} borrowed ${actual_borrowed:.2f} cash for leverage. "
+                    f"Total borrowed cash: ${self.borrowed_cash:.2f}"
+                )
+
+            # Check invariants after borrowing
+            self._check_leverage_invariants(prices_to_use)
+
+        # Original logic: commit the cash
         self.committed_cash += amount
         self.cash -= amount
-        
+
         # Log final state
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
@@ -424,7 +534,11 @@ class BaseAgent(ABC):
             'total_borrowed_shares': self.total_borrowed_shares,
             'net_shares': self.total_shares - self.total_borrowed_shares,
             'margin_requirement': self.margin_requirement,
-            'margin_base': self.margin_base
+            'margin_base': self.margin_base,
+            # Leverage fields
+            'borrowed_cash': self.borrowed_cash,
+            'leverage_ratio': self.leverage_ratio,
+            'leverage_interest_paid': self.leverage_interest_paid,
         }
 
     def _release_cash(self, amount: float):
@@ -657,7 +771,7 @@ class BaseAgent(ABC):
         return total
     
     def update_wealth(self, prices):
-        """Update agent's total wealth based on current prices, accounting for borrowed shares
+        """Update agent's total wealth based on current prices, accounting for borrowed shares and borrowed cash
 
         Args:
             prices: Either a single float (for backwards compatibility with single-stock)
@@ -675,13 +789,19 @@ class BaseAgent(ABC):
                 for stock_id, price in prices.items()
                 if stock_id != "DEFAULT_STOCK"
             )
-            self.wealth = self.total_cash + share_value
+            # MODIFIED: Subtract borrowed cash from wealth (liability)
+            self.wealth = self.total_cash + share_value - self.borrowed_cash
 
             # For backwards compatibility, set last_price to first stock's price
             self.last_price = list(prices.values())[0] if prices else 0.0
 
             # Automatically handle margin requirements after price update
+            # First handle short position margin calls
             self.handle_multi_stock_margin_call(prices, self.last_update_round)
+
+            # NEW: Check leverage margin requirements (for long positions with borrowed cash)
+            if self.borrowed_cash > 0:
+                self.handle_leverage_margin_call(prices, self.last_update_round)
         else:
             # Single-stock: Original behavior (backwards compatible)
             current_price = prices
@@ -689,10 +809,15 @@ class BaseAgent(ABC):
 
             # Net shares position (can be negative with short selling)
             net_shares = self.total_shares - self.borrowed_shares
-            self.wealth = self.total_cash + (net_shares * current_price)
+            # MODIFIED: Subtract borrowed cash
+            self.wealth = self.total_cash + (net_shares * current_price) - self.borrowed_cash
 
             # Automatically handle margin requirements after price update
             self.handle_margin_call(current_price, self.last_update_round)
+
+            # NEW: Check leverage for single stock
+            if self.borrowed_cash > 0:
+                self.handle_leverage_margin_call({"DEFAULT_STOCK": current_price}, self.last_update_round)
 
     def handle_margin_call(self, current_price: float, round_number: int):
         """Force buy-to-cover when margin requirements are violated."""
@@ -978,7 +1103,7 @@ class BaseAgent(ABC):
         # Start with initial positions
         expected_main_cash = self.initial_cash
         expected_dividend_cash = self.initial_dividend_cash
-        
+
         # Add up all payments from history
         for payment_type in ['interest', 'dividend', 'trade', 'other']:
             for payment in self.payment_history[payment_type]:
@@ -987,18 +1112,24 @@ class BaseAgent(ABC):
                 elif payment.account == "dividend":
                     expected_dividend_cash += payment.amount
 
+        # Account for borrowed cash (leverage)
+        # Borrowed cash increases available cash but is a liability, not income
+        # So it's not in payment history but affects self.cash
+        expected_main_cash += self.borrowed_cash
+
         # Use small tolerance for float comparison
         FLOAT_TOLERANCE = 0.01
-        
+
         # Check if current positions match expected positions
         main_cash_matches = abs(expected_main_cash - self.cash) <= FLOAT_TOLERANCE
         dividend_cash_matches = abs(expected_dividend_cash - self.dividend_cash) <= FLOAT_TOLERANCE
-        
+
         if not (main_cash_matches and dividend_cash_matches):
             LoggingService.log_agent_state(
                 agent_id=self.agent_id,
                 operation="CASH POSITION MISMATCH",
-                amount=(f"Main Cash - Expected: {expected_main_cash:.2f}, Actual: {self.cash:.2f}\n"
+                amount=(f"Main Cash - Expected: {expected_main_cash:.2f} (including ${self.borrowed_cash:.2f} borrowed), "
+                       f"Actual: {self.cash:.2f}\n"
                        f"Dividend Cash - Expected: {expected_dividend_cash:.2f}, Actual: {self.dividend_cash:.2f}"),
                 agent_state=self._get_state_dict(),
                 outstanding_orders=self.outstanding_orders,
@@ -1006,7 +1137,7 @@ class BaseAgent(ABC):
                 is_error=True
             )
             return False
-        
+
         return True
 
     def receive_information(self, signals: Dict[InformationType, InformationSignal]):
@@ -1386,3 +1517,370 @@ class BaseAgent(ABC):
 
         # Check invariants after margin call covering
         self._check_borrowed_positions_invariants()
+
+    # ========== LEVERAGE HELPER METHODS ==========
+    # These methods support leverage trading (borrowing cash for long positions)
+
+    def get_equity(self, prices: Dict[str, float]) -> float:
+        """Calculate equity (wealth) accounting for borrowed cash.
+
+        Equity = Total Cash + Net Share Value - Borrowed Cash
+
+        Args:
+            prices: Dict mapping stock_id to current price
+
+        Returns:
+            Agent's equity value
+        """
+        total_cash = self.total_cash
+
+        # Calculate net share value across all stocks
+        share_value = sum(
+            (self.positions.get(stock_id, 0) + self.committed_positions.get(stock_id, 0) -
+             self.borrowed_positions.get(stock_id, 0)) * price
+            for stock_id, price in prices.items()
+            if stock_id != "DEFAULT_STOCK"
+        )
+
+        return total_cash + share_value - self.borrowed_cash
+
+    def get_gross_position_value(self, prices: Dict[str, float]) -> float:
+        """Get total market value of all long positions (gross, not net).
+
+        This is the sum of all positive positions, not accounting for short positions.
+        Used to calculate leverage margin ratio. Includes committed positions (shares in orders)
+        to be consistent with equity calculation.
+
+        Args:
+            prices: Dict mapping stock_id to current price
+
+        Returns:
+            Total value of long positions (including committed)
+        """
+        return sum(
+            (self.positions.get(stock_id, 0) + self.committed_positions.get(stock_id, 0)) * price
+            for stock_id, price in prices.items()
+            if stock_id != "DEFAULT_STOCK"
+        )
+
+    def get_leverage_margin_ratio(self, prices: Dict[str, float]) -> float:
+        """Calculate current margin ratio for leverage (equity / gross_position_value).
+
+        A lower ratio means more leverage is being used. When this falls below
+        maintenance_margin, a margin call is triggered.
+
+        Args:
+            prices: Dict mapping stock_id to current price
+
+        Returns:
+            Margin ratio (0.0 to infinity). Returns infinity if no positions held.
+        """
+        position_value = self.get_gross_position_value(prices)
+        if position_value == 0:
+            return float('inf')
+        return self.get_equity(prices) / position_value
+
+    def get_available_borrowing_power(self, prices: Dict[str, float]) -> float:
+        """Calculate additional cash that can be borrowed for long positions.
+
+        This is based on the agent's equity and maximum allowed leverage ratio.
+        Borrowing power = (Equity * Leverage_Ratio) - Current_Position_Value
+
+        Args:
+            prices: Dict mapping stock_id to current price
+
+        Returns:
+            Amount of additional cash that can be borrowed
+        """
+        if self.leverage_ratio <= 1.0:
+            return 0.0
+
+        equity = self.get_equity(prices)
+        gross_position_value = self.get_gross_position_value(prices)
+
+        # Max position value allowed: equity * leverage_ratio
+        max_position_value = equity * self.leverage_ratio
+
+        # Available borrowing = (max allowed - current position value)
+        available = max(0, max_position_value - gross_position_value)
+        return available
+
+    def is_under_leverage_margin(self, prices: Dict[str, float]) -> bool:
+        """Check if agent is below maintenance margin for leverage.
+
+        Returns True if the agent's margin ratio has fallen below the maintenance
+        margin threshold, triggering a margin call.
+
+        Args:
+            prices: Dict mapping stock_id to current price
+
+        Returns:
+            True if margin call required, False otherwise
+        """
+        if self.borrowed_cash <= 0:
+            return False
+        margin_ratio = self.get_leverage_margin_ratio(prices)
+        return margin_ratio < self.maintenance_margin
+
+    def _check_leverage_invariants(self, prices: Dict[str, float] = None) -> bool:
+        """Verify leverage invariants are maintained.
+
+        This defensive check ensures internal consistency of the leverage trading system,
+        particularly cash borrowing and margin calculations.
+
+        Invariants checked:
+        1. borrowed_cash is never negative
+        2. borrowed_cash matches CashLendingRepository records (if repo exists)
+        3. If borrowed_cash > 0, agent must have leverage_ratio > 1.0
+        4. If borrowed_cash > 0, cash_lending_repo must be set
+        5. leverage_interest_paid is never negative
+        6. If prices provided, equity calculation is consistent
+
+        Args:
+            prices: Optional price dict for equity consistency checks
+
+        Returns:
+            bool: True if all invariants pass
+
+        Raises:
+            AssertionError: If any critical invariant is violated
+        """
+        # Invariant 1: No negative borrowed cash
+        if self.borrowed_cash < -1e-10:  # Small tolerance for floating point
+            error_msg = f"INVARIANT VIOLATION: Negative borrowed cash: ${self.borrowed_cash:.2f}"
+            LoggingService.log_agent_state(
+                agent_id=self.agent_id,
+                operation="LEVERAGE_INVARIANT_VIOLATION",
+                amount=error_msg,
+                agent_state=self._get_state_dict(),
+                is_error=True
+            )
+            assert False, error_msg
+
+        # Invariant 2: Repository consistency
+        if self.cash_lending_repo and self.borrowed_cash > 0:
+            repo_borrowed = self.cash_lending_repo.get_borrowed(self.agent_id)
+            tolerance = 1e-6  # Very small tolerance for floating point
+            if abs(self.borrowed_cash - repo_borrowed) > tolerance:
+                error_msg = (
+                    f"INVARIANT VIOLATION: Borrowed cash mismatch. "
+                    f"Agent tracking: ${self.borrowed_cash:.2f}, "
+                    f"Repository tracking: ${repo_borrowed:.2f}"
+                )
+                LoggingService.log_agent_state(
+                    agent_id=self.agent_id,
+                    operation="LEVERAGE_INVARIANT_VIOLATION",
+                    amount=error_msg,
+                    agent_state=self._get_state_dict(),
+                    is_error=True
+                )
+                import warnings
+                warnings.warn(error_msg, RuntimeWarning)
+                return False
+
+        # Invariant 3: Borrowed cash requires leverage enabled
+        if self.borrowed_cash > 1e-6 and self.leverage_ratio <= 1.0:
+            error_msg = (
+                f"INVARIANT VIOLATION: Agent has borrowed cash (${self.borrowed_cash:.2f}) "
+                f"but leverage_ratio is {self.leverage_ratio:.2f} (should be > 1.0)"
+            )
+            LoggingService.log_agent_state(
+                agent_id=self.agent_id,
+                operation="LEVERAGE_INVARIANT_VIOLATION",
+                amount=error_msg,
+                agent_state=self._get_state_dict(),
+                is_error=True
+            )
+            import warnings
+            warnings.warn(error_msg, RuntimeWarning)
+            return False
+
+        # Invariant 4: Borrowed cash requires repository
+        if self.borrowed_cash > 1e-6 and self.cash_lending_repo is None:
+            error_msg = (
+                f"INVARIANT VIOLATION: Agent has borrowed cash (${self.borrowed_cash:.2f}) "
+                f"but cash_lending_repo is None"
+            )
+            LoggingService.log_agent_state(
+                agent_id=self.agent_id,
+                operation="LEVERAGE_INVARIANT_VIOLATION",
+                amount=error_msg,
+                agent_state=self._get_state_dict(),
+                is_error=True
+            )
+            import warnings
+            warnings.warn(error_msg, RuntimeWarning)
+            return False
+
+        # Invariant 5: No negative interest paid
+        if self.leverage_interest_paid < -1e-10:
+            error_msg = f"INVARIANT VIOLATION: Negative interest paid: ${self.leverage_interest_paid:.2f}"
+            LoggingService.log_agent_state(
+                agent_id=self.agent_id,
+                operation="LEVERAGE_INVARIANT_VIOLATION",
+                amount=error_msg,
+                agent_state=self._get_state_dict(),
+                is_error=True
+            )
+            import warnings
+            warnings.warn(error_msg, RuntimeWarning)
+            return False
+
+        # Invariant 6: Equity consistency (if prices provided)
+        if prices and self.borrowed_cash > 0:
+            try:
+                # Equity should equal wealth (which already subtracts borrowed_cash)
+                calculated_equity = self.get_equity(prices)
+                # Wealth should be consistent
+                share_value = sum(
+                    (self.positions.get(stock_id, 0) + self.committed_positions.get(stock_id, 0) -
+                     self.borrowed_positions.get(stock_id, 0)) * price
+                    for stock_id, price in prices.items()
+                    if stock_id != "DEFAULT_STOCK"
+                )
+                expected_wealth = self.total_cash + share_value - self.borrowed_cash
+
+                tolerance = 0.01
+                if abs(calculated_equity - expected_wealth) > tolerance:
+                    error_msg = (
+                        f"INVARIANT VIOLATION: Equity calculation inconsistency. "
+                        f"Calculated equity: ${calculated_equity:.2f}, "
+                        f"Expected (from components): ${expected_wealth:.2f}"
+                    )
+                    LoggingService.log_agent_state(
+                        agent_id=self.agent_id,
+                        operation="LEVERAGE_INVARIANT_VIOLATION",
+                        amount=error_msg,
+                        agent_state=self._get_state_dict(),
+                        is_error=True
+                    )
+                    import warnings
+                    warnings.warn(error_msg, RuntimeWarning)
+                    return False
+            except Exception as e:
+                # Don't fail if calculation has issues, just log it
+                import warnings
+                warnings.warn(f"Could not verify equity invariant: {e}", RuntimeWarning)
+
+        return True
+
+    def handle_leverage_margin_call(self, prices: Dict[str, float], round_number: int):
+        """Force sell positions when leverage margin requirements violated.
+
+        This handles margin calls for LONG leverage (borrowed cash).
+        When an agent's equity falls below the maintenance margin threshold,
+        positions are liquidated proportionally to restore margin to the initial margin level.
+
+        Args:
+            prices: Dict mapping stock_id to current price
+            round_number: Current round number for logging
+        """
+        # Check invariants before processing margin call
+        self._check_leverage_invariants(prices)
+
+        # Check if there is borrowed cash
+        if self.borrowed_cash <= 0:
+            return
+
+        # Check if under-margined
+        if not self.is_under_leverage_margin(prices):
+            return  # No margin call needed
+
+        # Calculate how much we need to liquidate
+        equity = self.get_equity(prices)
+        gross_position_value = self.get_gross_position_value(prices)
+
+        # Edge case: If equity is negative or very small, liquidate everything
+        if equity <= 0.01:  # Essentially bankrupt
+            target_position_value = 0
+            value_to_liquidate = gross_position_value
+        else:
+            # Target: restore to initial margin (more conservative than maintenance)
+            target_position_value = equity / self.initial_margin if self.initial_margin > 0 else 0
+            value_to_liquidate = gross_position_value - target_position_value
+
+        if value_to_liquidate <= 0:
+            return
+
+        # Strategy: Liquidate proportionally across all long positions
+        # This maintains the relative composition of the portfolio
+        stocks_to_liquidate = []
+
+        for stock_id, price in prices.items():
+            if stock_id == "DEFAULT_STOCK":
+                continue
+
+            position_shares = self.positions.get(stock_id, 0)
+            if position_shares <= 0 or price <= 0:
+                continue
+
+            # Calculate this stock's proportion
+            stock_value = position_shares * price
+            proportion = stock_value / gross_position_value if gross_position_value > 0 else 0
+
+            # Shares to sell
+            value_to_sell = value_to_liquidate * proportion
+            shares_to_sell = value_to_sell / price if price > 0 else 0
+            shares_to_sell = min(shares_to_sell, position_shares)  # Can't sell more than we have
+
+            if shares_to_sell > 0:
+                stocks_to_liquidate.append({
+                    'stock_id': stock_id,
+                    'shares': shares_to_sell,
+                    'price': price,
+                    'value': shares_to_sell * price,
+                    'original_position': position_shares
+                })
+
+        # Execute forced liquidation
+        total_proceeds = 0
+        repayment = 0
+
+        for liquidate_info in stocks_to_liquidate:
+            stock_id = liquidate_info['stock_id']
+            shares = liquidate_info['shares']
+            price = liquidate_info['price']
+            proceeds = shares * price
+
+            # Update positions - sell the shares
+            self.positions[stock_id] = max(0, self.positions.get(stock_id, 0) - shares)
+            self.cash += proceeds
+            total_proceeds += proceeds
+
+            # Log margin call for this stock
+            LoggingService.log_margin_call(
+                round_number=round_number,
+                agent_id=self.agent_id,
+                agent_type=self.agent_type.name,
+                borrowed_shares=liquidate_info['original_position'],  # Using for tracking
+                max_borrowable=0,  # Not applicable for leverage margin calls
+                action=f"FORCED_SELL_{stock_id}_LEVERAGE",
+                excess_shares=shares,
+                price=price
+            )
+
+        # Use proceeds to repay borrowed cash
+        if total_proceeds > 0 and self.borrowed_cash > 0:
+            repayment = min(total_proceeds, self.borrowed_cash)
+            self.cash -= repayment
+            self.borrowed_cash -= repayment
+            if self.cash_lending_repo:
+                self.cash_lending_repo.release_cash(self.agent_id, repayment)
+
+        # Record payment
+        if total_proceeds > 0:
+            self.record_payment('main', total_proceeds, 'trade', round_number)
+
+        # Log overall event
+        LoggingService.log_agent_state(
+            agent_id=self.agent_id,
+            operation="LEVERAGE MARGIN CALL - FORCED LIQUIDATION",
+            amount=f"{len(stocks_to_liquidate)} stocks, total proceeds: ${total_proceeds:.2f}, repaid: ${repayment:.2f}",
+            agent_state=self._get_state_dict(),
+            outstanding_orders=self.outstanding_orders,
+            order_history=self.order_history,
+            is_error=True
+        )
+
+        # Check invariants after margin call liquidation
+        self._check_leverage_invariants(prices)

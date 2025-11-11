@@ -128,7 +128,7 @@ DEFAULT_PARAMS = {
     # Interest model parameters
     "INTEREST_MODEL": {
         'rate': 0.05,
-        'compound_frequency': 1,
+        'compound_frequency': 'per_round',
         'destination': 'dividend'
     },
 

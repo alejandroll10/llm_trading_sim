@@ -343,7 +343,7 @@ class AgentRepository:
                 self.borrowing_repository.release_shares(agent_id, allocated_shares)
             return CommitmentResult(False, str(e), requested_amount=original_requested)
     
-    def commit_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0, stock_id: str = "DEFAULT_STOCK") -> CommitmentResult:
+    def commit_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0, stock_id: str = "DEFAULT_STOCK", prices: Optional[Dict[str, float]] = None) -> CommitmentResult:
         """Commit agent resources with validation
 
         Args:
@@ -351,11 +351,18 @@ class AgentRepository:
             cash_amount: Amount of cash to commit
             share_amount: Number of shares to commit
             stock_id: Which stock's shares to commit (for multi-stock mode)
+            prices: Current prices dict for validation (required for leverage validation)
         """
         agent = self.get_agent(agent_id)
         try:
             if cash_amount > 0:
-                agent.commit_cash(cash_amount)
+                # NEW: Validate cash commitment feasibility before attempting it
+                if prices is not None:
+                    can_commit, error_msg = agent.can_commit_cash(cash_amount, prices)
+                    if not can_commit:
+                        return CommitmentResult(False, error_msg)
+
+                agent.commit_cash(cash_amount, prices=prices)
                 return CommitmentResult(True, "Cash committed successfully", cash_amount)
             elif share_amount > 0:  # Changed from if to elif to avoid potential double commits
                 return self.commit_shares(agent_id, share_amount, stock_id=stock_id)
@@ -416,6 +423,8 @@ class AgentRepository:
             total_shares=agent.total_shares,
             borrowed_shares=agent.borrowed_shares,
             net_shares=agent.total_shares - agent.borrowed_shares,
+            borrowed_cash=agent.borrowed_cash,
+            leverage_interest_paid=agent.leverage_interest_paid,
             wealth=agent.wealth,
             orders_by_state=agent.orders,
             trade_summary=agent.get_trade_summary()
