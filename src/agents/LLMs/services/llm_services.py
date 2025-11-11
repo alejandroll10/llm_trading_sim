@@ -20,9 +20,10 @@ class TradeDecisionSchema(BaseModel):
     valuation: float = Field(..., description="Agent's estimated fundamental value")
     price_target_reasoning: str = Field(..., description="Specific reasoning of expected price next round")
     price_target: float = Field(..., description="Agent's predicted price in near future")
+    reasoning: str = Field(..., description="Your strategy and reasoning for this trade - decide BEFORE specifying orders")
     orders: List[OrderSchema] = Field(..., description="List of orders to execute")
     replace_decision: str = Field(..., description="Add, Cancel, or Replace")
-    reasoning: str = Field(..., description="Explanation for the trading decisions")
+    message_reasoning: Optional[str] = Field(None, description="Your reasoning for this social media message - what effect do you want it to have on other agents?")
     post_message: Optional[str] = Field(None, description="Optional: Post a message to the social feed visible to other agents next round")
     
 
@@ -105,10 +106,13 @@ class LLMService:
                 reasoning=parsed_response.reasoning
             ).model_dump()
             decision["agent_id"] = request.agent_id
+            # Add optional message_reasoning if provided
+            if parsed_response.message_reasoning:
+                decision["message_reasoning"] = parsed_response.message_reasoning
             # Add optional post_message if provided
             if parsed_response.post_message:
                 decision["post_message"] = parsed_response.post_message
-            
+
             return LLMResponse(
                 raw_response=raw_response,
                 decision=decision

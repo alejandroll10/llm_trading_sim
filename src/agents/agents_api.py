@@ -39,18 +39,20 @@ class OrderDetails(BaseModel):
 
 class TradeDecision(BaseModel):
     """Decision model for trading actions.
-    
+
     Fields:
         valuation_reasoning: Explanation of valuation analysis (separate from trade reasoning)
         valuation: Agent's estimated fundamental value of the asset
         price_target_reasoning: Explanation for the price target
         price_target: Agent's predicted price in the next round
-        reasoning: Explanation for the trading decision
+        reasoning: Explanation for the trading decision (comes before orders for better chain-of-thought)
         orders: List of individual orders
         replace_decision: How to handle existing orders
             - "Add": Place new orders alongside existing ones
             - "Cancel": Cancels all existing orders
             - "Replace": Cancels all existing orders and places new orders
+        message_reasoning: Reasoning for the social media message (what effect do you want it to have?)
+        post_message: Optional message to post to social feed
     """
     valuation_reasoning: str
     valuation: float
@@ -59,6 +61,8 @@ class TradeDecision(BaseModel):
     reasoning: str
     orders: List[OrderDetails] = []
     replace_decision: Literal["Cancel", "Replace", "Add"] = "Replace"
+    message_reasoning: str | None = None
+    post_message: str | None = None
 
     @model_validator(mode='after')
     def validate_order_api(self):

@@ -29,13 +29,15 @@ class LLMAgent(BaseAgent):
 
             strategic_instructions = """
 You can optionally post a message visible to all agents next round using the 'post_message' field.
+Before posting, explain your intent in 'message_reasoning' - what effect do you want your message to have?
 
 Strategic Considerations:
 - Messages can influence other agents' beliefs and decisions
 - You may share information to shape market sentiment
 - You may withhold information for competitive advantage
 - You may signal confidence, uncertainty, or specific views to move prices
-- Consider: What do you want other agents to believe?"""
+- Consider: What do you want other agents to believe?
+- Be explicit about your messaging strategy in 'message_reasoning'"""
 
             if last_messages:
                 formatted_messages = "\n".join(
@@ -103,11 +105,13 @@ Strategic Considerations:
 
             # Optional: Broadcast message if agent chose to post
             post_message = response.decision.get('post_message')
+            message_reasoning = response.decision.get('message_reasoning')
             if post_message:
                 self.broadcast_message(round_number, post_message)
+                reasoning_text = f"\nMessage Reasoning: {message_reasoning}" if message_reasoning else ""
                 LoggingService.log_decision(
                     f"\n========== Agent {self.agent_id} Posted to Social Feed ==========\n"
-                    f"{post_message}"
+                    f"{post_message}{reasoning_text}"
                 )
 
             return response.decision
