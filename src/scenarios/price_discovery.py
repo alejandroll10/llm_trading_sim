@@ -18,7 +18,7 @@ SCENARIOS = {
         description="Testing price discovery with initial mispricing",
         parameters={
             **DEFAULT_PARAMS,  # Include defaults
-            "NUM_ROUNDS": 20, #BASE_NUM_ROUNDS,
+            "NUM_ROUNDS": 5,  # Reduced for faster testing
             "INITIAL_PRICE": round(FUNDAMENTAL_WITH_DEFAULT_PARAMS*1.25, 2),  # Start above fundamental
             # Fundamental will be calculated as E(d)/r = 1.4*0.5/0.05 = 14
             "AGENT_PARAMS": {
@@ -66,7 +66,7 @@ SCENARIOS = {
         description="Testing price discovery with initial mispricing",
         parameters={
             **DEFAULT_PARAMS,  # Include defaults
-            "NUM_ROUNDS": 20, #BASE_NUM_ROUNDS,
+            "NUM_ROUNDS": 5,  # Reduced for faster testing
             "INITIAL_PRICE": round(FUNDAMENTAL_WITH_DEFAULT_PARAMS*0.75, 2),  # Start below fundamental
             # Fundamental will be calculated as E(d)/r = 1.4*0.5/0.05 = 14
             "AGENT_PARAMS": {

@@ -146,6 +146,11 @@ class BaseAgent(ABC):
     @committed_shares.setter
     def committed_shares(self, value: int):
         """Set committed shares for DEFAULT_STOCK (backwards compatibility)"""
+        # DEBUG
+        import traceback
+        if self.committed_positions.get("DEFAULT_STOCK", 0) > 0 and value == 0:
+            print(f"[DEBUG SETTER] Agent {self.agent_id}: committed_positions[DEFAULT_STOCK] being set to 0!")
+            traceback.print_stack(limit=10)
         self.committed_positions["DEFAULT_STOCK"] = value
 
     @property
@@ -664,16 +669,19 @@ class BaseAgent(ABC):
                 # Track borrowed shares per stock
                 current_borrowed = self.borrowed_positions.get(stock_id, 0)
                 self.borrowed_positions[stock_id] = current_borrowed + shares_to_borrow
-                # Also update global if not DEFAULT_STOCK (avoid double counting)
-                if stock_id != "DEFAULT_STOCK":
-                    self.borrowed_shares += shares_to_borrow
+                # Note: Don't update borrowed_shares property for non-DEFAULT_STOCK stocks
+                # The property is for backward compatibility with single-stock mode only
 
         # Track committed shares per stock
         current_committed = self.committed_positions.get(stock_id, 0)
         self.committed_positions[stock_id] = current_committed + quantity
-        # Also update global if not DEFAULT_STOCK (avoid double counting)
-        if stock_id != "DEFAULT_STOCK":
-            self.committed_shares += quantity
+        # Note: Don't update committed_shares property for non-DEFAULT_STOCK stocks
+        # The property is for backward compatibility with single-stock mode only
+
+        # DEBUG
+        if stock_id == "DEFAULT_STOCK":
+            dict_id = id(self.committed_positions)
+            print(f"[DEBUG commit_shares] Agent {self.agent_id}: dict_id={dict_id}, committed_positions[DEFAULT_STOCK] = {self.committed_positions['DEFAULT_STOCK']}")
 
         # Decrement the correct stock's position
         # Only reduce by what we actually have of this stock (not borrowed amount)
@@ -713,15 +721,24 @@ class BaseAgent(ABC):
 
         FLOAT_TOLERANCE = 1e-10  # tolerance for floating point comparisons
 
-        if quantity - self.committed_shares > FLOAT_TOLERANCE:
-            raise ValueError(f"Cannot release more than committed: {quantity} > {self.committed_shares}")
+        # Check against per-stock commitment (not global, which may not be updated for DEFAULT_STOCK)
+        current_committed = self.committed_positions.get(stock_id, 0)
+        if quantity - current_committed > FLOAT_TOLERANCE:
+            raise ValueError(f"Cannot release more than committed for {stock_id}: {quantity} > {current_committed}")
 
         # Release committed shares per stock
-        current_committed = self.committed_positions.get(stock_id, 0)
-        self.committed_positions[stock_id] = max(0, current_committed - quantity)
-        # Also update global if not DEFAULT_STOCK (avoid double counting)
-        if stock_id != "DEFAULT_STOCK":
-            self.committed_shares = max(0, self.committed_shares - quantity)
+        new_value = max(0, current_committed - quantity)
+        self.committed_positions[stock_id] = new_value
+        # Note: Don't update committed_shares property for non-DEFAULT_STOCK stocks
+        # The property is for backward compatibility with single-stock mode only
+
+        # DEBUG
+        if stock_id == "DEFAULT_STOCK":
+            print(f"[DEBUG release_shares] Agent {self.agent_id}: released {quantity}, new_value={new_value}, committed_positions[DEFAULT_STOCK] = {self.committed_positions['DEFAULT_STOCK']}")
+            if new_value == 0 and current_committed > 0:
+                import traceback
+                print("[DEBUG] Commitment went to 0, traceback:")
+                traceback.print_stack(limit=15)
 
         if return_borrowed:
             # If we've borrowed shares for this stock, return those first
@@ -729,9 +746,8 @@ class BaseAgent(ABC):
             if current_borrowed > 0:
                 shares_to_return = min(quantity, current_borrowed)
                 self.borrowed_positions[stock_id] = current_borrowed - shares_to_return
-                # Also update global if not DEFAULT_STOCK (avoid double counting)
-                if stock_id != "DEFAULT_STOCK":
-                    self.borrowed_shares -= shares_to_return
+                # Note: Don't update borrowed_shares property for non-DEFAULT_STOCK stocks
+                # The property is for backward compatibility with single-stock mode only
                 # Only add the remaining shares (if any) to available balance for this stock
                 shares_to_restore = max(0, quantity - shares_to_return)
                 if shares_to_restore > 0:
@@ -1480,9 +1496,8 @@ class BaseAgent(ABC):
 
             # Update positions
             self.borrowed_positions[stock_id] = max(0, self.borrowed_positions.get(stock_id, 0) - shares)
-            # Also update DEFAULT_STOCK accumulator if not already DEFAULT_STOCK (avoid double counting)
-            if stock_id != "DEFAULT_STOCK":
-                self.borrowed_shares = max(0, self.borrowed_shares - shares)
+            # Note: Don't update borrowed_shares property for non-DEFAULT_STOCK stocks
+            # The property is for backward compatibility with single-stock mode only
 
             self.positions[stock_id] = self.positions.get(stock_id, 0) + shares
             self.cash -= cost

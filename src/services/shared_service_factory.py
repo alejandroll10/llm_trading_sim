@@ -52,6 +52,21 @@ class SharedServiceFactory:
         return cls._position_calculator
     
     @classmethod
+    def get_order_book_for_stock(cls, stock_id: str):
+        """Get the order book for a specific stock (multi-stock support)
+
+        Args:
+            stock_id: The stock identifier
+
+        Returns:
+            The order book for the specified stock, or the single order book if not multi-stock
+        """
+        if cls._order_books is not None and stock_id in cls._order_books:
+            return cls._order_books[stock_id]
+        # Fallback to single order book
+        return cls._order_book
+
+    @classmethod
     def reset(cls) -> None:
         """Reset all shared services"""
         cls._commitment_calculator = None

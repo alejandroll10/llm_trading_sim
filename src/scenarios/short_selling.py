@@ -76,7 +76,7 @@ SCENARIOS = {
         description="Force aggressive short selling with extreme overpricing and low dividends",
         parameters={
             **DEFAULT_PARAMS,
-            "NUM_ROUNDS": 10,
+            "NUM_ROUNDS": 5,
             "INITIAL_PRICE": 45.0,  # 60% above fundamental ($28)!
             "LENDABLE_SHARES": 50000,  # Plenty of shares to borrow
             "DIVIDEND_PARAMS": {
@@ -120,7 +120,7 @@ SCENARIOS = {
         description="Test partial borrow fills feature - DISABLED (all-or-nothing behavior)",
         parameters={
             **DEFAULT_PARAMS,
-            "NUM_ROUNDS": 10,
+            "NUM_ROUNDS": 5,
             "INITIAL_PRICE": 28.0,
             "LENDABLE_SHARES": 1000,  # Limited lending pool - only 1000 shares available
             "AGENT_PARAMS": {
@@ -157,7 +157,7 @@ SCENARIOS = {
         description="Test partial borrow fills feature - ENABLED (partial fills allowed)",
         parameters={
             **DEFAULT_PARAMS,
-            "NUM_ROUNDS": 10,
+            "NUM_ROUNDS": 5,
             "INITIAL_PRICE": 28.0,
             "LENDABLE_SHARES": 1000,  # Limited lending pool - only 1000 shares available
             "AGENT_PARAMS": {

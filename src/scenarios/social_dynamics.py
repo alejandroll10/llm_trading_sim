@@ -42,7 +42,7 @@ SCENARIOS = {
         description="Test market manipulation via social media: influencers vs herd followers",
         parameters={
             **DEFAULT_PARAMS,
-            "NUM_ROUNDS": 15,
+            "NUM_ROUNDS": 5,  # Shortened for testing
             "INITIAL_PRICE": 28.0,
             "AGENT_PARAMS": {
                 **DEFAULT_PARAMS["AGENT_PARAMS"],

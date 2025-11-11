@@ -130,9 +130,18 @@ class DividendPaymentProcessor:
             agent = self.agent_repository.get_agent(agent_id)
 
             # Get shares for THIS specific stock only (multi-stock support)
+            # NOTE: committed_shares should be 0 since all orders are cancelled before redemption
             shares_in_stock = agent.positions.get(self.stock_id, 0)
             committed_shares_in_stock = agent.committed_positions.get(self.stock_id, 0)
             borrowed_shares_in_stock = agent.borrowed_positions.get(self.stock_id, 0)
+
+            # All orders should be cancelled before redemption, so committed should be 0
+            # If not, log a warning
+            if committed_shares_in_stock != 0:
+                LoggingService.get_logger('dividend').warning(
+                    f"Agent {agent_id} has committed shares ({committed_shares_in_stock}) during redemption - "
+                    f"orders should have been cancelled first!"
+                )
 
             net_position = shares_in_stock + committed_shares_in_stock - borrowed_shares_in_stock
             payment = 0
@@ -157,10 +166,15 @@ class DividendPaymentProcessor:
                 )
 
             # Clear shares for THIS stock only
+            # Redemption pays for ALL shares (positions + committed - borrowed), so clear everything
             agent.positions[self.stock_id] = 0
-            agent.committed_positions[self.stock_id] = 0
-            if self.stock_id in agent.borrowed_positions:
+            agent.committed_positions[self.stock_id] = 0  # We just paid for these!
+
+            # Release borrowed shares back to the pool before clearing
+            if self.stock_id in agent.borrowed_positions and agent.borrowed_positions[self.stock_id] > 0:
+                borrowed = agent.borrowed_positions[self.stock_id]
                 agent.borrowed_positions[self.stock_id] = 0
+                self.agent_repository.borrowing_repository.release_shares(agent_id, borrowed)
 
         # After all positions are cleared, ensure aggregate short interest
         # reflects the forced covering that occurred during redemption.

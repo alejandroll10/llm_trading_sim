@@ -144,7 +144,7 @@ SCENARIOS = {
         description="Testing market with agents having different beliefs about fundamental value",
         parameters={
             **DEFAULT_PARAMS,
-            "NUM_ROUNDS": BASE_NUM_ROUNDS,
+            "NUM_ROUNDS": 5,  # Shortened for testing
             "HIDE_FUNDAMENTAL_PRICE": True,  # Hide actual fundamental
             "INITIAL_PRICE": 2*FUNDAMENTAL_WITH_DEFAULT_PARAMS,
             # Fundamental calculated as E(d)/r

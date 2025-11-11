@@ -58,7 +58,8 @@ class OrderBookModifiers:
     
     def remove_agent_orders(self, agent_id: str) -> tuple[List[OrderEntry], List[OrderEntry]]:
         """Remove all orders for a specific agent with state updates"""
-        self.logger.info(f"Removing orders for Agent {agent_id}")
+        if self.logger:
+            self.logger.info(f"Removing orders for Agent {agent_id}")
         
         # Store existing orders before removal
         existing_buys = [entry for entry in self.buy_orders if entry.agent_id == agent_id]

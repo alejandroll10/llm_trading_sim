@@ -168,16 +168,19 @@ class AgentRepository:
         
         # Calculate total commitments using active orders
         total_cash_committed = sum(
-            order.current_cash_commitment 
-            for order in active_orders 
+            order.current_cash_commitment
+            for order in active_orders
             if order.side == 'buy'
         )
-        total_shares_committed = sum(
-            order.current_share_commitment 
-            for order in active_orders 
-            if order.side == 'sell'
-        )
-        
+
+        # Calculate per-stock share commitments
+        shares_committed_per_stock = {}
+        for order in active_orders:
+            if order.side == 'sell':
+                stock_id = order.stock_id
+                shares_committed_per_stock[stock_id] = \
+                    shares_committed_per_stock.get(stock_id, 0) + order.current_share_commitment
+
         # Verify commitments match agent state
         FLOAT_TOLERANCE = 1e-5
         if abs(total_cash_committed - agent.committed_cash) > FLOAT_TOLERANCE:
@@ -191,28 +194,30 @@ class AgentRepository:
                 f"Committed Shares: {agent.committed_shares}",
                 f"\nActive Orders ({len(active_orders)}):"
             ]
-            
+
             for order in active_orders:
                 error_msg.append(f"\n{order}\nHistory:\n{order.print_history()}")
-            
+
             raise ValueError("\n".join(error_msg))
-        
-        if total_shares_committed != agent.committed_shares:
-            error_msg = [
-                f"\nShare commitment mismatch for agent {agent_id}:",
-                f"Orders total: {total_shares_committed}, Agent state: {agent.committed_shares}",
-                f"\nAgent State:",
-                f"Cash: {agent.cash:.2f}",
-                f"Shares: {agent.shares}",
-                f"Committed Cash: {agent.committed_cash:.2f}",
-                f"Committed Shares: {agent.committed_shares}",
-                f"\nActive Orders ({len(active_orders)}):"
-            ]
-            
-            for order in active_orders:
-                error_msg.append(f"\n{order}\nHistory:\n{order.print_history()}")
-            
-            raise ValueError("\n".join(error_msg))
+
+        # Check per-stock share commitments (not global committed_shares which may be 0 for DEFAULT_STOCK)
+        for stock_id, expected in shares_committed_per_stock.items():
+            actual = agent.committed_positions.get(stock_id, 0)
+            if abs(expected - actual) > FLOAT_TOLERANCE:
+                error_msg = [
+                    f"\nShare commitment mismatch for agent {agent_id}, stock {stock_id}:",
+                    f"Orders total: {expected}, Agent state: {actual}",
+                    f"\nAgent State:",
+                    f"Cash: {agent.cash:.2f}",
+                    f"Committed positions: {agent.committed_positions}",
+                    f"\nActive Orders ({len(active_orders)}):"
+                ]
+
+                for order in active_orders:
+                    if order.side == 'sell' and order.stock_id == stock_id:
+                        error_msg.append(f"\n{order}\nHistory:\n{order.print_history()}")
+
+                raise ValueError("\n".join(error_msg))
         
         # Update orders
         agent.sync_orders(orders)
@@ -389,10 +394,12 @@ class AgentRepository:
                 agent._release_cash(cash_amount)
                 results.append(f"Cash released: {cash_amount}")
             if share_amount > 0:
-                borrowed_before = agent.borrowed_shares
+                # Track per-stock borrowed shares (not global property which only tracks DEFAULT_STOCK)
+                borrowed_before = agent.borrowed_positions.get(stock_id, 0)
                 agent._release_shares(share_amount, return_borrowed=return_borrowed, stock_id=stock_id)
                 results.append(f"Shares released: {share_amount} ({stock_id})")
-                returned = borrowed_before - agent.borrowed_shares
+                borrowed_after = agent.borrowed_positions.get(stock_id, 0)
+                returned = borrowed_before - borrowed_after
                 if returned > 0:
                     self.borrowing_repository.release_shares(agent_id, returned)
 
@@ -485,7 +492,8 @@ class AgentRepository:
         # Clear positions for ALL stocks (multi-stock support)
         for stock_id in list(agent.positions.keys()):
             agent.positions[stock_id] = 0
-            agent.committed_positions[stock_id] = 0
+            # NOTE: Don't clear committed_positions - agents may still have active orders!
+            # Commitments should only be released when orders are cancelled/filled.
 
             # Release borrowed shares if any
             if stock_id in agent.borrowed_positions and agent.borrowed_positions[stock_id] > 0:

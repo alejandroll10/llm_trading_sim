@@ -1,6 +1,7 @@
 from datetime import datetime
 import traceback
 from market.orders.order_book import OrderBook
+from market.orders.order import OrderState
 from agents.agent_types import *
 from agents.agents_api import *
 from market.engine.match_engine import MatchingEngine
@@ -630,12 +631,21 @@ class BaseSimulation:
         self.order_book.log_order_book_state(f"End of Round {round_number}")
 
         # 5. FINAL END-OF-ROUND UPDATES (including interest/dividend payments)
+        # Check if this is final redemption round
+        is_final_round = round_number == self.context._num_rounds - 1 and not self.infinite_rounds
+
         if self.is_multi_stock:
             # Multi-stock: Let each manager handle end-of-round processing
             # Managers will process dividends/redemption through their _process_end_of_round() method
             total_payments = 0.0
 
             for stock_id, manager in self.market_state_managers.items():
+                # If final round with redemption, cancel all orders for this stock BEFORE redemption
+                # This releases commitments properly back to positions
+                if is_final_round and self.contexts[stock_id].redemption_value is not None:
+                    self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
+                    self._cancel_all_orders_for_stock(stock_id)
+
                 # Manager.update() with is_round_end=True handles all end-of-round processing
                 # Pass THIS stock's volume, not the aggregated total
                 stock_volume = stock_market_results[stock_id].volume
@@ -657,6 +667,12 @@ class BaseSimulation:
             self.logger.info(f"Total payments across all stocks: ${total_payments:.2f}")
         else:
             # Single stock: Original behavior
+            # If final round with redemption, cancel all orders BEFORE redemption
+            if is_final_round and self.context.redemption_value is not None:
+                stock_id = self.dividend_service.stock_id if self.dividend_service else "DEFAULT_STOCK"
+                self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
+                self._cancel_all_orders_for_stock(stock_id)
+
             self.market_state_manager.update(
                 round_number=round_number,
                 last_volume=market_result.volume,
@@ -1117,7 +1133,9 @@ class BaseSimulation:
 
         # Get all active orders
         from market.orders.order import OrderState
-        active_states = {OrderState.ACTIVE, OrderState.COMMITTED, OrderState.PENDING, OrderState.PARTIALLY_FILLED}
+        # Check orders that should have commitments: ACTIVE, PENDING, and PARTIALLY_FILLED
+        # COMMITTED orders are transitioning (commitments made but not yet in book)
+        active_states = {OrderState.ACTIVE, OrderState.PENDING, OrderState.PARTIALLY_FILLED}
 
         # Calculate expected commitments from orders
         expected_committed_cash = 0
@@ -1126,23 +1144,14 @@ class BaseSimulation:
         for order in self.order_repository.orders.values():
             if order.state in active_states:
                 if order.side == 'buy':
-                    # Buy orders commit cash
-                    # For limit orders, commitment is quantity * limit_price
-                    # For market orders, we use current price (already committed at that price)
-                    if order.order_type == 'limit':
-                        expected_committed_cash += order.remaining_quantity * order.price
-                    else:
-                        # Market order - committed at current price
-                        if self.is_multi_stock:
-                            price = self.contexts[order.stock_id].current_price
-                        else:
-                            price = self.context.current_price
-                        expected_committed_cash += order.remaining_quantity * price
+                    # Buy orders commit cash - use current_cash_commitment which tracks actual commitment
+                    expected_committed_cash += order.current_cash_commitment
                 elif order.side == 'sell':
-                    # Sell orders commit shares
+                    # Sell orders commit shares - use current_share_commitment not remaining_quantity
+                    # because commitment tracks what's actually committed (not filled)
                     stock_id = order.stock_id
                     expected_committed_shares_per_stock[stock_id] = \
-                        expected_committed_shares_per_stock.get(stock_id, 0) + order.remaining_quantity
+                        expected_committed_shares_per_stock.get(stock_id, 0) + order.current_share_commitment
 
         # Calculate actual commitments
         actual_committed_cash = sum(
@@ -1163,11 +1172,22 @@ class BaseSimulation:
 
         # Allow for small floating point differences
         if abs(expected_committed_cash - actual_committed_cash) > 0.1:
+            # Debug: Print all order states
             msg = f"CRITICAL ERROR - Commitment-order mismatch for cash:\n"
             msg += f"Expected (from orders): ${expected_committed_cash:.2f}\n"
             msg += f"Actual (from agents): ${actual_committed_cash:.2f}\n"
             msg += f"Difference: ${abs(expected_committed_cash - actual_committed_cash):.2f}\n"
-            msg += f"This indicates broken bookkeeping - cannot trust simulation results."
+            msg += f"\n=== DEBUG: ALL ORDERS ===\n"
+            for order_id, order in self.order_repository.orders.items():
+                price_str = f"${order.price:.2f}" if order.price is not None else "market"
+                msg += f"{order_id[:8]}: {order.state.value} - {order.side} {order.quantity} @ {price_str}\n"
+                msg += f"  cash_commit=${order.current_cash_commitment:.2f}, share_commit={order.current_share_commitment}\n"
+            msg += f"\n=== DEBUG: AGENT COMMITMENTS ===\n"
+            for agent_id in self.agent_repository.get_all_agent_ids():
+                agent = self.agent_repository.get_agent(agent_id)
+                if agent.committed_cash > 0.01:
+                    msg += f"Agent {agent_id}: committed_cash=${agent.committed_cash:.2f}\n"
+            msg += f"\nThis indicates broken bookkeeping - cannot trust simulation results."
             logger.error(msg)
             raise ValueError(msg)
 
@@ -1184,11 +1204,52 @@ class BaseSimulation:
                 msg += f"Expected (from orders): {expected}\n"
                 msg += f"Actual (from agents): {actual}\n"
                 msg += f"Difference: {abs(expected - actual)}\n"
-                msg += f"This indicates broken bookkeeping - cannot trust simulation results."
+                msg += f"\n=== DEBUG: SELL ORDERS ===\n"
+                for order_id, order in self.order_repository.orders.items():
+                    if order.side == 'sell' and order.state in active_states:
+                        price_str = f"${order.price:.2f}" if order.price is not None else "market"
+                        msg += f"{order_id[:8]}: {order.state.value} - sell {order.quantity} @ {price_str}\n"
+                        msg += f"  share_commit={order.current_share_commitment}\n"
+                msg += f"\n=== DEBUG: AGENT SHARE COMMITMENTS ===\n"
+                for agent_id in self.agent_repository.get_all_agent_ids():
+                    agent = self.agent_repository.get_agent(agent_id)
+                    total_committed = sum(agent.committed_positions.values())
+                    dict_id = id(agent.committed_positions)
+                    msg += f"Agent {agent_id}: dict_id={dict_id}, committed_positions={agent.committed_positions}, committed_shares={agent.committed_shares}, total={total_committed}\n"
+                msg += f"\nThis indicates broken bookkeeping - cannot trust simulation results."
                 logger.error(msg)
                 raise ValueError(msg)
 
         self.logger.info("✓ Commitment-order matching verified")
+
+    def _cancel_all_orders_for_stock(self, stock_id: str):
+        """Cancel all orders for a specific stock (used during final redemption)"""
+        # Get the correct order book for this stock
+        if self.is_multi_stock:
+            order_book = self.order_books[stock_id]
+        else:
+            order_book = self.order_book
+
+        # Get all agents and cancel their orders for this stock
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent_orders = order_book.get_agent_orders(agent_id)
+
+            # Get orders for this stock
+            stock_orders = [
+                order for order in agent_orders.get('buy', []) + agent_orders.get('sell', [])
+                if order.stock_id == stock_id and order.state in [OrderState.ACTIVE, OrderState.PARTIALLY_FILLED, OrderState.PENDING]
+            ]
+
+            if stock_orders:
+                self.logger.info(f"Cancelling {len(stock_orders)} orders for agent {agent_id} on stock {stock_id}")
+                # Use the centralized cancellation handler to release commitments and transition state
+                self.order_state_manager.handle_agent_all_orders_cancellation(
+                    agent_id=agent_id,
+                    orders=stock_orders,
+                    message="Final redemption"
+                )
+                # Remove from order book
+                order_book.remove_agent_orders(agent_id)
 
     def _verify_borrowing_pool_consistency(self, logger):
         """Verify borrowing pool accounting is consistent"""

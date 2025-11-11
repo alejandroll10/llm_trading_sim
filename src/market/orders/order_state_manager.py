@@ -4,6 +4,7 @@ from market.orders.order_repository import OrderRepository
 import logging
 from dataclasses import dataclass, field
 from agents.agent_manager.services.commitment_services import CommitmentCalculator, release_for_cancellation
+from services.shared_service_factory import SharedServiceFactory
 
 @dataclass
 class StateTransitionResult:
@@ -114,7 +115,7 @@ class OrderStateManager:
             else:
                 # Failed validation - transition to CANCELLED
                 self.order_repository.transition_state(
-                    order.order_id, 
+                    order.order_id,
                     OrderState.CANCELLED,
                     notes=f"Validation failed: {result.message}"
                 )
@@ -148,14 +149,20 @@ class OrderStateManager:
     
         # Release commitments
         release_for_cancellation(
-            agent_repository=self.agent_repository, 
-            logger=self.logger, 
+            agent_repository=self.agent_repository,
+            logger=self.logger,
             order=order
         )
 
-        # Remove from book
-        self.order_book._remove_order_from_book(order)
-        
+        # Remove from the CORRECT order book (important for multi-stock!)
+        # Get the order book for this order's stock
+        order_book = SharedServiceFactory.get_order_book_for_stock(order.stock_id)
+        if order_book:
+            order_book._remove_order_from_book(order)
+        else:
+            # Fallback to self.order_book
+            self.order_book._remove_order_from_book(order)
+
         if not skip_sync:
             self.sync_agent_orders(order.agent_id)
 
