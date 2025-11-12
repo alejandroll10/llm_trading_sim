@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 
+from services.short_interest_calculator import calculate_short_interest
+
 @dataclass
 class AgentRecordData:
     agent_id: str
@@ -65,12 +67,9 @@ class DataRecorder:
         """
         timestamp = datetime.now().isoformat()
         # Calculate aggregate short interest before recording
-        short_interest = sum(
-            self.agent_repository.get_agent_state_snapshot(
-                agent_id,
-                self.context.current_price
-            ).borrowed_shares
-            for agent_id in self.agent_repository.get_all_agent_ids()
+        short_interest = calculate_short_interest(
+            self.agent_repository,
+            self.context.current_price
         )
         self.context.update_short_interest(short_interest)
 
