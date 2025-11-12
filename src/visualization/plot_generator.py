@@ -4,6 +4,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict
 
+from utils.csv_loader import load_csv
 from visualization.plot_utils import clean_data, save_plot
 from visualization.plots import price_plots, agent_plots, trading_plots, decision_plots, valuation_plots, order_plots
 
@@ -99,13 +100,8 @@ class PlotGenerator:
             print("  Processing agent data...")
             agent_data_path = self.data_dir / 'agent_data.csv'
 
-            if not agent_data_path.exists():
-                print(f"  Agent data file not found: {agent_data_path}")
-                return
-
-            agent_df = pd.read_csv(agent_data_path)
-            if agent_df.empty:
-                print("  Agent data file is empty")
+            agent_df = load_csv(agent_data_path, "agent data")
+            if agent_df is None:
                 return
 
             # Calculate initial values
@@ -189,24 +185,14 @@ class PlotGenerator:
         """Generate trading flow plots."""
         try:
             trade_data_path = self.data_dir / 'trade_data.csv'
-
-            if not trade_data_path.exists():
-                return
-
-            trade_df = pd.read_csv(trade_data_path)
-            if trade_df.empty:
-                print("  Trade data file exists but is empty")
+            trade_df = load_csv(trade_data_path, "trade data", silent=True)
+            if trade_df is None:
                 return
 
             # Load agent data for type mapping
             agent_data_path = self.data_dir / 'agent_data.csv'
-            if not agent_data_path.exists():
-                print("  Agent data file not found, cannot map agent types")
-                return
-
-            agent_df = pd.read_csv(agent_data_path)
-            if agent_df.empty:
-                print("  Agent data file is empty, cannot map agent types")
+            agent_df = load_csv(agent_data_path, "agent data (for type mapping)")
+            if agent_df is None:
                 return
 
             agent_type_map = agent_df.groupby('agent_id')['agent_type'].first().to_dict()
@@ -228,13 +214,8 @@ class PlotGenerator:
         """Generate decision analysis plots."""
         try:
             decisions_path = self.simulation.run_dir / 'structured_decisions.csv'
-
-            if not decisions_path.exists():
-                return
-
-            decisions_df = pd.read_csv(decisions_path)
-            if decisions_df.empty:
-                print("  Decision data file exists but is empty")
+            decisions_df = load_csv(decisions_path, "decision data", silent=True)
+            if decisions_df is None:
                 return
 
             # Decision heatmap
@@ -264,12 +245,8 @@ class PlotGenerator:
         """Generate valuation analysis plots."""
         try:
             decisions_path = self.simulation.run_dir / 'structured_decisions.csv'
-
-            if not decisions_path.exists():
-                return
-
-            decisions_df = pd.read_csv(decisions_path)
-            if decisions_df.empty:
+            decisions_df = load_csv(decisions_path, "decision data", silent=True)
+            if decisions_df is None:
                 return
 
             # Skip if no valuation data
@@ -316,24 +293,14 @@ class PlotGenerator:
         """Generate order flow plots."""
         try:
             order_data_path = self.data_dir / 'order_data.csv'
-
-            if not order_data_path.exists():
-                return
-
-            order_df = pd.read_csv(order_data_path)
-            if order_df.empty:
-                print("  Order data file exists but is empty")
+            order_df = load_csv(order_data_path, "order data", silent=True)
+            if order_df is None:
                 return
 
             # Load agent data for type mapping
             agent_data_path = self.data_dir / 'agent_data.csv'
-            if not agent_data_path.exists():
-                print("  Agent data file not found, cannot map agent types")
-                return
-
-            agent_df = pd.read_csv(agent_data_path)
-            if agent_df.empty:
-                print("  Agent data file is empty, cannot map agent types")
+            agent_df = load_csv(agent_data_path, "agent data (for type mapping)")
+            if agent_df is None:
                 return
 
             agent_type_map = agent_df.groupby('agent_id')['agent_type'].first().to_dict()
