@@ -736,7 +736,7 @@ class BaseSimulation:
             # Single-stock: use initial_shares
             initial_shares_value = type_specific_params.get('initial_shares', agent_params['initial_shares'])
 
-        # NEW: Get leverage parameters
+        # Get leverage parameters with centralized defaults
         leverage_params = agent_params.get('leverage_params', {})
 
         base_params = {
@@ -745,10 +745,13 @@ class BaseSimulation:
             'initial_shares': initial_shares_value,
             'position_limit': type_specific_params.get('position_limit', agent_params['position_limit']),
             'allow_short_selling': type_specific_params.get('allow_short_selling', agent_params['allow_short_selling']),
+            # Margin parameters (for short selling)
+            'margin_requirement': type_specific_params.get('margin_requirement', agent_params.get('margin_requirement', 0.5)),
+            'margin_base': type_specific_params.get('margin_base', agent_params.get('margin_base', 'cash')),
             'logger': LoggingService.get_logger('decisions'),
             'info_signals_logger': LoggingService.get_logger('info_signals'),
             'initial_price': self.initial_price,
-            # NEW: Leverage parameters
+            # Leverage parameters (for leveraged long positions)
             'leverage_ratio': type_specific_params.get('leverage_ratio', leverage_params.get('max_leverage_ratio', 1.0)),
             'initial_margin': type_specific_params.get('initial_margin', leverage_params.get('initial_margin', 0.5)),
             'maintenance_margin': type_specific_params.get('maintenance_margin', leverage_params.get('maintenance_margin', 0.25)),

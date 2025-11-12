@@ -102,10 +102,20 @@ DEFAULT_PARAMS = {
     "AGENT_PARAMS": {
         'allow_short_selling': False,
         'margin_requirement': 0.5,
+        'margin_base': 'cash',  # "cash" or "wealth" - base for margin calculations
         'borrow_model': {
             'rate': 0.01,
             'payment_frequency': 1,
             'allow_partial_borrows': True  # Allows partial share borrows (more realistic market behavior)
+        },
+        'leverage_params': {
+            'max_leverage_ratio': 1.0,  # 1.0 = no leverage by default
+            'initial_margin': 0.5,  # 50% down payment required for leveraged positions
+            'maintenance_margin': 0.25,  # 25% minimum margin (liquidation threshold)
+            'interest_rate': 0.05,  # 5% annual interest on borrowed cash
+            'cash_lending_pool': float('inf'),  # Unlimited lending pool by default
+            'allow_partial_borrows': True,
+            'enabled': False  # Leverage disabled by default
         },
         'position_limit': BASE_POSITION_LIMIT,
         'initial_cash': BASE_INITIAL_CASH,
