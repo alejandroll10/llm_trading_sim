@@ -37,5 +37,11 @@ WORDCLOUD_HEIGHT = 800
 WORDCLOUD_BACKGROUND = 'white'
 WORDCLOUD_MIN_FONT = 10
 
+# Heatmap parameters
+HEATMAP_COLORMAP = 'RdYlGn'
+HEATMAP_VMIN = -1
+HEATMAP_VMAX = 1
+HEATMAP_INTERPOLATION = 'nearest'
+
 # Risk-free rate for excess return calculations
 PER_ROUND_RISK_FREE_RATE = 0.001  # 0.1% per round

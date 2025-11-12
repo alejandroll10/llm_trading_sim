@@ -11,6 +11,10 @@ from tqdm import tqdm
 from agents.LLMs.llm_agent import LLMAgent
 from agents.LLMs.analysis.signal_generator import MarketScenario
 from agents.LLMs.analysis.price_fundamental_analysis import PriceFundamentalAnalyzer
+from scenarios.base import (
+    BASE_INITIAL_CASH, BASE_INITIAL_SHARES, BASE_POSITION_LIMIT,
+    BASE_INITIAL_PRICE, DEFAULT_PARAMS
+)
 
 # Convert all warnings to errors
 import warnings
@@ -31,15 +35,15 @@ LOG_DIR = PROJECT_ROOT / "logs"
 ARCHIVE_DIR = RATIO_DIR / "archive"
 
 # Analysis parameters
-RATIOS = np.linspace(0.1, 3.5, 7)  
+RATIOS = np.linspace(0.1, 3.5, 7)
 REPEATS_PER_RATIO = 2
 
-# Agent parameters (matching run_base_sim.py)
-INITIAL_CASH = 100000.0
-INITIAL_SHARES = 1000
-POSITION_LIMIT = 100000000
-INITIAL_PRICE = 28.0
-MODEL_OPEN_AI = "gpt-4o-2024-11-20"
+# Agent parameters - now imported from scenarios.base for consistency
+INITIAL_CASH = BASE_INITIAL_CASH
+INITIAL_SHARES = BASE_INITIAL_SHARES
+POSITION_LIMIT = BASE_POSITION_LIMIT
+INITIAL_PRICE = BASE_INITIAL_PRICE
+MODEL_OPEN_AI = DEFAULT_PARAMS["MODEL_OPEN_AI"]
 
 def setup_logging(name: str = "ratio_analysis") -> logging.Logger:
     """Setup logging configuration"""

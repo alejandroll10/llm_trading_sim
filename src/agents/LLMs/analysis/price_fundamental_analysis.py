@@ -8,6 +8,7 @@ from market.information.information_types import InformationType
 from agents.LLMs.services.formatting_services import AgentContext
 from agents.LLMs.analysis.agent_scenario_runner import AgentScenarioRunner
 import numpy as np
+from visualization.plot_config import STANDARD_FIGSIZE
 
 class PriceFundamentalAnalyzer:
     """Analyzes agent behavior across different price/fundamental ratios"""
@@ -215,7 +216,7 @@ class PriceFundamentalAnalyzer:
     
     def _create_plot(self, df: pd.DataFrame, plot_type: str, colors: Dict) -> None:
         """Create standardized plots with common parameters"""
-        plt.figure(figsize=(12, 6))
+        plt.figure(figsize=STANDARD_FIGSIZE)
         
         if plot_type == 'price_analysis':
             # Plot zero line as reference (current price)

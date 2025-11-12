@@ -5,7 +5,8 @@ import pandas as pd
 from wordcloud import WordCloud
 from visualization.plot_config import (
     STANDARD_FIGSIZE, WORDCLOUD_FIGSIZE, WORDCLOUD_WIDTH, WORDCLOUD_HEIGHT,
-    WORDCLOUD_BACKGROUND, WORDCLOUD_MIN_FONT, GRID_ALPHA
+    WORDCLOUD_BACKGROUND, WORDCLOUD_MIN_FONT, GRID_ALPHA,
+    HEATMAP_COLORMAP, HEATMAP_VMIN, HEATMAP_VMAX, HEATMAP_INTERPOLATION
 )
 
 
@@ -29,8 +30,8 @@ def plot_decision_heatmap(decisions_df: pd.DataFrame):
     decision_heat = decisions_df.groupby(['round', 'agent_type'])['decision_value'].mean().unstack()
 
     # Plot heatmap
-    im = ax.imshow(decision_heat.T, aspect='auto', cmap='RdYlGn',
-                   vmin=-1, vmax=1, interpolation='nearest')
+    im = ax.imshow(decision_heat.T, aspect='auto', cmap=HEATMAP_COLORMAP,
+                   vmin=HEATMAP_VMIN, vmax=HEATMAP_VMAX, interpolation=HEATMAP_INTERPOLATION)
 
     plt.colorbar(im, ax=ax, label='Buy (1) vs Sell (-1)')
     ax.set_xlabel('Round')
