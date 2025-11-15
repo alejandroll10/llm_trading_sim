@@ -189,4 +189,50 @@ SCENARIOS = {
             }
         }
     ),
+    "deterministic_short_selling": SimulationScenario(
+        name="deterministic_short_selling",
+        description="Deterministic short selling scenario for regression testing (no LLM agents)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "INITIAL_PRICE": 35.0,  # 25% above fundamental ($28) to encourage shorting
+            "LENDABLE_SHARES": 20000,  # Plenty of shares available to borrow
+            "DIVIDEND_PARAMS": {
+                'type': 'stochastic',
+                'base_dividend': 1.0,  # Fixed $1.00 per share dividend
+                'dividend_frequency': 1,  # Pay every round
+                'dividend_growth': 0.0,
+                'dividend_probability': 1.0,  # Always pay (deterministic)
+                'dividend_variation': 0.0,  # No variation (deterministic)
+                'destination': 'dividend'
+            },
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.02,  # 2% borrow cost per round
+                    'payment_frequency': 1
+                },
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'short_sell_trader': 2,  # 2 deterministic short sellers
+                    'hold_trader': 1,        # 1 holder for liquidity
+                },
+                'type_specific_params': {
+                    'short_sell_trader': {
+                        'initial_cash': 2.0 * BASE_INITIAL_CASH,  # $2M cash for margin
+                        'initial_shares': 0  # ZERO shares - must borrow to short
+                    },
+                    'hold_trader': {
+                        'initial_cash': BASE_INITIAL_CASH,  # $1M cash
+                        'initial_shares': int(2.0 * BASE_INITIAL_SHARES)  # 20,000 shares to hold
+                    }
+                }
+            }
+        }
+    ),
 }
