@@ -18,6 +18,7 @@ from services.agent_resource_manager import (
     commit_shares_with_borrowing, commit_agent_resources, release_agent_resources,
     update_shares_with_covering, redeem_shares_and_return_borrowed
 )
+from constants import FLOAT_TOLERANCE
 
 class AgentRepository:
     """Manages a collection of agents"""
@@ -202,7 +203,6 @@ class AgentRepository:
                     shares_committed_per_stock.get(stock_id, 0) + order.current_share_commitment
 
         # Verify commitments match agent state
-        FLOAT_TOLERANCE = 1e-5
         if abs(total_cash_committed - agent.committed_cash) > FLOAT_TOLERANCE:
             error_msg = [
                 f"\nCash commitment mismatch for agent {agent_id}:",

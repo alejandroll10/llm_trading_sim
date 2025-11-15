@@ -8,6 +8,7 @@ from agents.agents_api import TradeDecision
 import logging
 from services.logging_service import LoggingService
 from services.messaging_service import MessagingService
+from constants import FLOAT_TOLERANCE
 
 @dataclass
 class AgentType:
@@ -555,9 +556,7 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict(),
             outstanding_orders=self.outstanding_orders
         )
-        
-        FLOAT_TOLERANCE = 1e-10  # Add tolerance for floating point comparisons
-        
+
         if amount - self.committed_cash > FLOAT_TOLERANCE:
             raise ValueError(f"Cannot release more than committed: {amount} > {self.committed_cash}")
         
@@ -718,8 +717,6 @@ class BaseAgent(ABC):
             agent_state=self._get_state_dict(),
             outstanding_orders=self.outstanding_orders
         )
-
-        FLOAT_TOLERANCE = 1e-10  # tolerance for floating point comparisons
 
         # Check against per-stock commitment (not global, which may not be updated for DEFAULT_STOCK)
         current_committed = self.committed_positions.get(stock_id, 0)

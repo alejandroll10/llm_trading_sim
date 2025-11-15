@@ -4,6 +4,7 @@ from datetime import datetime
 from enum import Enum
 from dataclasses import dataclass
 from typing import Optional, List, NewType
+from constants import FLOAT_TOLERANCE
 
 # Create new ID types
 OrderId = NewType('OrderId', str)
@@ -82,8 +83,6 @@ class Order:
 
     def release_commitment(self, amount: float):
         """Release commitment for the order"""
-        FLOAT_TOLERANCE = 1e-10  # Add tolerance for floating point comparisons
-        
         if self.side == 'buy':
             # Check if amount is within tolerance of available commitment
             if amount - self.current_cash_commitment > FLOAT_TOLERANCE:
