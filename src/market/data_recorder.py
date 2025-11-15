@@ -7,6 +7,11 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from services.short_interest_calculator import calculate_short_interest
+from services.dividend_calculator import (
+    calculate_agent_dividends_received,
+    calculate_total_dividend_cash,
+    calculate_multi_stock_dividend_cash
+)
 
 @dataclass
 class AgentRecordData:
@@ -219,38 +224,13 @@ class DataRecorder:
             # Calculate dividends received based on actual payments from payment history
             # This avoids timing issues where positions change between dividend payment and recording
             agent = self.agent_repository.get_agent(agent_id)
-
-            # Get the actual dividend payment from the previous round (if any)
-            # We're recording data for round N, and dividends were paid at end of round N-1
-            dividends_received = 0.0
-            used_payment_history = False
-
-            if hasattr(agent, 'payment_history') and 'dividend' in agent.payment_history:
-                dividend_payments = agent.payment_history['dividend']
-                # Find dividend payments from the previous round (round_number - 1)
-                # or the most recent if we're in round 0
-                previous_round = max(0, round_number - 1)
-                for payment in reversed(dividend_payments):
-                    if payment.round_number == previous_round:
-                        dividends_received += payment.amount
-                dividends_received = round(dividends_received, 2)
-                used_payment_history = True  # We checked payment_history, trust the result (even if $0)
-
-            # Fallback for scenarios without payment history: calculate from positions
-            # Note: This has timing issues in multi-stock scenarios where positions change
-            if not used_payment_history and dividends != 0.0:
-                if dividends_by_stock is not None:
-                    # Multi-stock: Calculate based on current positions (timing issue warning)
-                    for stock_id, dividend_per_share in dividends_by_stock.items():
-                        shares_in_stock = agent.positions.get(stock_id, 0)
-                        committed_in_stock = agent.committed_positions.get(stock_id, 0)
-                        borrowed_in_stock = agent.borrowed_positions.get(stock_id, 0)
-                        net_position = shares_in_stock + committed_in_stock - borrowed_in_stock
-                        dividends_received += net_position * dividend_per_share
-                    dividends_received = round(dividends_received, 2)
-                else:
-                    # Single-stock: Use current positions
-                    dividends_received = round(state.net_shares * dividends, 2)
+            dividends_received = calculate_agent_dividends_received(
+                agent,
+                round_number,
+                dividends,
+                dividends_by_stock,
+                state.net_shares
+            )
             
             # Update wealth history
             self.wealth_history[agent_id].append(current_wealth)
@@ -347,16 +327,10 @@ class DataRecorder:
         last_paid = round(dividend_state.get('last_paid_dividend', 0.0), 2)  # Round to 2 decimals
 
         # Calculate actual total cash paid from payment_history (avoids timing issues)
-        # Dividends were paid at END of round_number-1
-        previous_round = max(0, round_number - 1)
-        total_cash_paid = 0.0
-
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            agent = self.agent_repository.get_agent(agent_id)
-            if hasattr(agent, 'payment_history') and 'dividend' in agent.payment_history:
-                for payment in agent.payment_history['dividend']:
-                    if payment.round_number == previous_round:
-                        total_cash_paid += payment.amount
+        total_cash_paid = calculate_total_dividend_cash(
+            self.agent_repository,
+            round_number
+        )
 
         self.dividend_data.append({
             'round': round_number + 1,
@@ -381,23 +355,11 @@ class DataRecorder:
         total_aggregated_dividend = sum(dividends_by_stock.values())
 
         # Calculate actual total cash paid using payment_history (avoids timing issues)
-        # Dividends were paid at END of round_number-1, so look for those payments
-        previous_round = max(0, round_number - 1)
-        total_cash_paid_aggregate = 0.0
-        stock_cash_paid = {stock_id: 0.0 for stock_id in dividends_by_stock.keys()}
-
-        # Sum actual payments from all agents' payment history, tracking per-stock breakdown
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            agent = self.agent_repository.get_agent(agent_id)
-            if hasattr(agent, 'payment_history') and 'dividend' in agent.payment_history:
-                for payment in agent.payment_history['dividend']:
-                    if payment.round_number == previous_round:
-                        # This payment was made in the previous round
-                        total_cash_paid_aggregate += payment.amount
-
-                        # Track per-stock breakdown using stock_id from payment
-                        if payment.stock_id and payment.stock_id in stock_cash_paid:
-                            stock_cash_paid[payment.stock_id] += payment.amount
+        total_cash_paid_aggregate, stock_cash_paid = calculate_multi_stock_dividend_cash(
+            self.agent_repository,
+            round_number,
+            list(dividends_by_stock.keys())
+        )
 
         # Record aggregate dividend (for backwards compatibility with save_simulation_data)
         # Use 'last_paid_dividend' field name to match single-stock format
