@@ -14,6 +14,10 @@ from agents.agent_manager.services.agent_data_structures import (
 from agents.agent_manager.services.order_services import is_active
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
 from services.agent_state_calculator import calculate_state_snapshot, calculate_commitment_state
+from services.agent_resource_manager import (
+    commit_shares_with_borrowing, commit_agent_resources, release_agent_resources,
+    update_shares_with_covering, redeem_shares_and_return_borrowed
+)
 
 class AgentRepository:
     """Manages a collection of agents"""
@@ -157,29 +161,13 @@ class AgentRepository:
     
     def update_share_balance(self, agent_id: str, amount: int, stock_id: str = "DEFAULT_STOCK") -> BaseAgent:
         """Update agent's share balance for a specific stock and handle short covering"""
-        LoggingService.get_logger('agents').info(
-            f"Updating share balance for agent {agent_id}, amount: {amount}, stock: {stock_id}")
         agent = self.get_agent(agent_id)
-
-        # Get current positions for this stock
-        current_shares = agent.positions.get(stock_id, 0)
-        current_borrowed = agent.borrowed_positions.get(stock_id, 0)
-
-        if amount > 0 and current_borrowed > 0:
-            # Use purchases to cover existing borrowed shares first
-            cover = min(amount, current_borrowed)
-            agent.borrowed_positions[stock_id] = current_borrowed - cover
-            agent.positions[stock_id] = current_shares + (amount - cover)
-            if cover > 0:
-                # Release shares to the correct stock's borrowing repository
-                borrowing_repo = self._get_borrowing_repo(stock_id)
-                borrowing_repo.release_shares(agent_id, cover)
-        else:
-            agent.positions[stock_id] = current_shares + amount
-
-        LoggingService.get_logger('agents').info(
-            f"Updated share balance for agent {agent_id}, stock {stock_id}, new balance: {agent.positions[stock_id]}")
-        return agent
+        return update_shares_with_covering(
+            agent=agent,
+            amount=amount,
+            stock_id=stock_id,
+            get_borrowing_repo=self._get_borrowing_repo
+        )
 
 
     def record_agent_decision(self, agent_id: str, decision: dict):
@@ -313,68 +301,14 @@ class AgentRepository:
             stock_id: Which stock's shares to commit (for multi-stock mode)
         """
         agent = self.get_agent(agent_id)
-        current_price = self.context.current_price
-        round_number = self.context.round_number
-
-        # Save original request for tracking
-        original_requested = share_amount
-
-        # Get current position for this specific stock
-        current_shares = agent.positions.get(stock_id, 0)
-
-        # Determine if we need to borrow shares
-        shares_needed = max(0, share_amount - current_shares)
-        allocated_shares = 0
-
-        if shares_needed > 0:
-            # Get the correct borrowing repository for this stock
-            borrowing_repo = self._get_borrowing_repo(stock_id)
-
-            # Try to allocate shares (respects allow_partial_borrows setting)
-            allocated_shares = borrowing_repo.allocate_shares(agent_id, shares_needed)
-
-            if allocated_shares == 0:
-                # No shares available and/or partial fills disabled
-                return CommitmentResult(
-                    success=False,
-                    message=f"Insufficient lendable shares for {stock_id}: requested {shares_needed}, allocated {allocated_shares}",
-                    requested_amount=original_requested
-                )
-
-            # Calculate the actual fillable amount
-            fillable_shares = current_shares + allocated_shares
-
-            # Check if this is a partial fill
-            is_partial = fillable_shares < share_amount
-
-            if is_partial:
-                # Adjust the commitment to what we can actually fill
-                share_amount = fillable_shares
-                LoggingService.get_logger('agents').info(
-                    f"Partial borrow fill for agent {agent_id} ({stock_id}): "
-                    f"requested {original_requested}, "
-                    f"fillable {share_amount} (owned: {current_shares}, borrowed: {allocated_shares})"
-                )
-
-        try:
-            agent.commit_shares(share_amount, round_number=round_number, current_price=current_price, stock_id=stock_id)
-
-            # Determine if this was a partial fill
-            partial_fill = shares_needed > 0 and allocated_shares < shares_needed
-
-            return CommitmentResult(
-                success=True,
-                message="Shares committed successfully" + (" (partial fill)" if partial_fill else ""),
-                committed_amount=share_amount,
-                partial_fill=partial_fill,
-                requested_amount=original_requested
-            )
-        except ValueError as e:
-            # Roll back any allocated shares on failure
-            if allocated_shares > 0:
-                borrowing_repo = self._get_borrowing_repo(stock_id)
-                borrowing_repo.release_shares(agent_id, allocated_shares)
-            return CommitmentResult(False, str(e), requested_amount=original_requested)
+        return commit_shares_with_borrowing(
+            agent=agent,
+            share_amount=share_amount,
+            stock_id=stock_id,
+            get_borrowing_repo=self._get_borrowing_repo,
+            current_price=self.context.current_price,
+            round_number=self.context.round_number
+        )
     
     def commit_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0, stock_id: str = "DEFAULT_STOCK", prices: Optional[Dict[str, float]] = None) -> CommitmentResult:
         """Commit agent resources with validation
@@ -387,22 +321,14 @@ class AgentRepository:
             prices: Current prices dict for validation (required for leverage validation)
         """
         agent = self.get_agent(agent_id)
-        try:
-            if cash_amount > 0:
-                # NEW: Validate cash commitment feasibility before attempting it
-                if prices is not None:
-                    can_commit, error_msg = agent.can_commit_cash(cash_amount, prices)
-                    if not can_commit:
-                        return CommitmentResult(False, error_msg)
-
-                agent.commit_cash(cash_amount, prices=prices)
-                return CommitmentResult(True, "Cash committed successfully", cash_amount)
-            elif share_amount > 0:  # Changed from if to elif to avoid potential double commits
-                return self.commit_shares(agent_id, share_amount, stock_id=stock_id)
-            else:
-                LoggingService.get_logger('agents').error(f"No amount specified for agent {agent_id} with orders: {agent.get_trade_summary()}")
-        except ValueError as e:
-            return CommitmentResult(False, str(e))
+        return commit_agent_resources(
+            agent=agent,
+            cash_amount=cash_amount,
+            share_amount=share_amount,
+            stock_id=stock_id,
+            prices=prices,
+            commit_shares_fn=self.commit_shares
+        )
     
     def release_resources(self, agent_id: str, cash_amount: float = 0, share_amount: int = 0,
                           return_borrowed: bool = True, stock_id: str = "DEFAULT_STOCK") -> CommitmentResult:
@@ -416,28 +342,14 @@ class AgentRepository:
             stock_id: Which stock's shares to release (for multi-stock mode)
         """
         agent = self.get_agent(agent_id)
-        try:
-            results = []
-            if cash_amount > 0:
-                agent._release_cash(cash_amount)
-                results.append(f"Cash released: {cash_amount}")
-            if share_amount > 0:
-                # Track per-stock borrowed shares (not global property which only tracks DEFAULT_STOCK)
-                borrowed_before = agent.borrowed_positions.get(stock_id, 0)
-                agent._release_shares(share_amount, return_borrowed=return_borrowed, stock_id=stock_id)
-                results.append(f"Shares released: {share_amount} ({stock_id})")
-                borrowed_after = agent.borrowed_positions.get(stock_id, 0)
-                returned = borrowed_before - borrowed_after
-                if returned > 0:
-                    # Return shares to the correct stock's borrowing repository
-                    borrowing_repo = self._get_borrowing_repo(stock_id)
-                    borrowing_repo.release_shares(agent_id, returned)
-
-            if results:
-                return CommitmentResult(True, "; ".join(results))
-            return CommitmentResult(False, "No amount specified")
-        except ValueError as e:
-            return CommitmentResult(False, str(e))
+        return release_agent_resources(
+            agent=agent,
+            cash_amount=cash_amount,
+            share_amount=share_amount,
+            return_borrowed=return_borrowed,
+            stock_id=stock_id,
+            get_borrowing_repo=self._get_borrowing_repo
+        )
     
     def get_agent_state_snapshot(self, agent_id: str, prices) -> AgentStateSnapshot:
         """Get complete snapshot of agent state
@@ -499,24 +411,7 @@ class AgentRepository:
     def redeem_all_shares(self, agent_id: str) -> BaseAgent:
         """Set agent's shares to zero after redemption and clear borrows"""
         agent = self.get_agent(agent_id)
-        previous_total_shares = agent.total_shares
-
-        # Clear positions for ALL stocks (multi-stock support)
-        for stock_id in list(agent.positions.keys()):
-            agent.positions[stock_id] = 0
-            # NOTE: Don't clear committed_positions - agents may still have active orders!
-            # Commitments should only be released when orders are cancelled/filled.
-
-            # Release borrowed shares if any
-            if stock_id in agent.borrowed_positions and agent.borrowed_positions[stock_id] > 0:
-                borrowed = agent.borrowed_positions[stock_id]
-                agent.borrowed_positions[stock_id] = 0
-                # Return shares to the correct stock's borrowing repository
-                borrowing_repo = self._get_borrowing_repo(stock_id)
-                borrowing_repo.release_shares(agent_id, borrowed)
-
-        LoggingService.get_logger('agents').info(
-            f"Redeemed all shares for agent {agent_id}, "
-            f"previous balance: {previous_total_shares}, new balance: {agent.total_shares}"
+        return redeem_shares_and_return_borrowed(
+            agent=agent,
+            get_borrowing_repo=self._get_borrowing_repo
         )
-        return agent
