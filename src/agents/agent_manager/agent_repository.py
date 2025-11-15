@@ -13,6 +13,7 @@ from agents.agent_manager.services.agent_data_structures import (
 )
 from agents.agent_manager.services.order_services import is_active
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
+from services.agent_state_calculator import calculate_state_snapshot, calculate_commitment_state
 
 class AgentRepository:
     """Manages a collection of agents"""
@@ -298,15 +299,7 @@ class AgentRepository:
     def get_commitment_state(self, agent_id: str) -> AgentCommitmentState:
         """Get agent's commitment-related state"""
         agent = self.get_agent(agent_id)
-        return AgentCommitmentState(
-            agent_id=agent_id,
-            available_cash=agent.available_cash,
-            available_shares=agent.available_shares,
-            total_cash=agent.cash,
-            total_shares=agent.shares,
-            committed_cash=agent.committed_cash,
-            committed_shares=agent.committed_shares
-        )
+        return calculate_commitment_state(agent)
 
     def commit_shares(self, agent_id: str, share_amount: int, stock_id: str = "DEFAULT_STOCK") -> CommitmentResult:
         """Commit shares for an agent, borrowing if necessary.
@@ -454,25 +447,7 @@ class AgentRepository:
             prices: Either a single float (single-stock) or Dict[stock_id, price] (multi-stock)
         """
         agent = self.get_agent(agent_id)
-        agent.update_wealth(prices)
-        
-        return AgentStateSnapshot(
-            agent_id=agent_id,
-            agent_type=agent.agent_type.type_id,
-            cash=agent.cash,
-            dividend_cash=agent.dividend_cash,
-            shares=agent.shares,
-            committed_cash=agent.committed_cash,
-            committed_shares=agent.committed_shares,
-            total_shares=agent.total_shares,
-            borrowed_shares=agent.borrowed_shares,
-            net_shares=agent.total_shares - agent.borrowed_shares,
-            borrowed_cash=agent.borrowed_cash,
-            leverage_interest_paid=agent.leverage_interest_paid,
-            wealth=agent.wealth,
-            orders_by_state=agent.orders,
-            trade_summary=agent.get_trade_summary()
-        )
+        return calculate_state_snapshot(agent, prices)
     
     def get_agent_type(self, agent_id: str) -> str:
         """Get agent type identifier"""
