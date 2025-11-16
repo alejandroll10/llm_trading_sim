@@ -89,19 +89,30 @@ class OrderBookModifiers:
         """Push a sell order entry to the book"""
         self._push_order(entry, 'sell')
 
+    def remove_order(self, order: Order) -> None:
+        """Public API: Remove an order from the book and update its state.
+
+        This is the public interface for removing orders from the book.
+        Use this method instead of accessing the private _remove_order_from_book.
+
+        Args:
+            order: The order to remove from the book
+        """
+        self._remove_order_from_book(order)
+
     def _remove_order_from_book(self, order: Order) -> None:
-        """Remove an order from the book and update its state"""
+        """Internal implementation: Remove an order from the book and update its state"""
         if order.state in [OrderState.ACTIVE, OrderState.PARTIALLY_FILLED]:
             self.order_repository.transition_state(order.order_id, OrderState.CANCELLED)
-        
+
         # Remove from appropriate side
         if order.side == 'buy':
-            self.buy_orders = [entry for entry in self.buy_orders 
+            self.buy_orders = [entry for entry in self.buy_orders
                               if entry.order.order_id != order.order_id]
         else:
-            self.sell_orders = [entry for entry in self.sell_orders 
+            self.sell_orders = [entry for entry in self.sell_orders
                               if entry.order.order_id != order.order_id]
-        
+
         self._update_public_view()
 
     def _validate_limit_order(self, order: Order) -> None:

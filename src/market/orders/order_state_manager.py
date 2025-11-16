@@ -158,10 +158,10 @@ class OrderStateManager:
         # Get the order book for this order's stock
         order_book = SharedServiceFactory.get_order_book_for_stock(order.stock_id)
         if order_book:
-            order_book._remove_order_from_book(order)
+            order_book.remove_order(order)
         else:
             # Fallback to self.order_book
-            self.order_book._remove_order_from_book(order)
+            self.order_book.remove_order(order)
 
         if not skip_sync:
             self.sync_agent_orders(order.agent_id)
