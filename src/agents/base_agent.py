@@ -8,7 +8,7 @@ from agents.agents_api import TradeDecision
 import logging
 from services.logging_service import LoggingService
 from services.messaging_service import MessagingService
-from constants import FLOAT_TOLERANCE
+from constants import FLOAT_TOLERANCE, CASH_MATCHING_TOLERANCE
 
 @dataclass
 class AgentType:
@@ -1130,12 +1130,9 @@ class BaseAgent(ABC):
         # So it's not in payment history but affects self.cash
         expected_main_cash += self.borrowed_cash
 
-        # Use small tolerance for float comparison
-        FLOAT_TOLERANCE = 0.01
-
-        # Check if current positions match expected positions
-        main_cash_matches = abs(expected_main_cash - self.cash) <= FLOAT_TOLERANCE
-        dividend_cash_matches = abs(expected_dividend_cash - self.dividend_cash) <= FLOAT_TOLERANCE
+        # Check if current positions match expected positions (using 1 cent tolerance for cash aggregates)
+        main_cash_matches = abs(expected_main_cash - self.cash) <= CASH_MATCHING_TOLERANCE
+        dividend_cash_matches = abs(expected_dividend_cash - self.dividend_cash) <= CASH_MATCHING_TOLERANCE
 
         if not (main_cash_matches and dividend_cash_matches):
             LoggingService.log_agent_state(
