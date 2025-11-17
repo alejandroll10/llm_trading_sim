@@ -22,6 +22,7 @@ from agents.agent_manager.services.agent_decision_service import AgentDecisionSe
 from market.orders.order_service_factory import OrderServiceFactory
 from services.shared_service_factory import SharedServiceFactory
 from market.information.base_information_services import InformationService
+from market.state.provider_registry import ProviderRegistry
 from services.logging_service import LoggingService
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
 from agents.agent_manager.services.cash_lending_repository import CashLendingRepository
@@ -59,7 +60,7 @@ class BaseSimulation:
                  lendable_shares: int = 0,
                  agent_params: dict = None,
                  hide_fundamental_price: bool = True,
-                 model_open_ai = "gpt-4o-2024-07-18",
+                 model_open_ai = "gpt-oss-20b",  # Usually set via DEFAULT_PARAMS from .env
                  dividend_params: dict = None,
                  interest_params: dict = None,
                  borrow_params: dict = None,
@@ -399,21 +400,15 @@ class BaseSimulation:
 
     def execute_round(self, round_number):
         """Execute a single round of trading"""
-        self.logger.warning(f"\n=== Round {round_number} ===")
         # Log initial states
-        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Start of ")
-        self.order_book.log_order_book_state(f"Start of Round {round_number}")
-        
+        self._log_round_start(round_number)
+
         # Store pre-round states for verification
         pre_round_states = self._store_pre_round_states()
 
         # 1. UPDATE MARKET AND CONTEXT at the beginning of the round
-        if self.is_multi_stock:
-            for manager in self.market_state_managers.values():
-                manager.update_market_depth()
-        else:
-            self.market_state_manager.update_market_depth()
-        
+        self._update_all_market_depths()
+
         # Get last volume from data recorder
         if self.is_multi_stock:
             # Multi-stock: Get per-stock volumes from market_data
@@ -479,7 +474,14 @@ class BaseSimulation:
             # IMPORTANT: Register from ALL managers to ensure we get providers from any stock that has them
             if not information_service.providers:
                 for manager in self.market_state_managers.values():
-                    manager._register_base_providers()
+                    ProviderRegistry.register_providers(
+                        information_service=information_service,
+                        market_state_manager=manager,
+                        dividend_service=manager.dividend_service,
+                        interest_service=manager.interest_service,
+                        borrow_service=manager.borrow_service,
+                        hide_fundamental_price=self.hide_fundamental_price
+                    )
                     # Providers dict is shared, so each manager adds its providers
                     # If multiple managers have the same provider, the last one wins (but they're equivalent)
 
@@ -493,28 +495,10 @@ class BaseSimulation:
                 last_volume=last_volume,
                 is_round_end=False
             )
-        
-        # Log state before collecting decisions
-        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Pre-Decision ")
-        
+
         # 2. COLLECT NEW AGENT DECISIONS (ORDERS)
-        new_orders = self.decision_service.collect_decisions(
-            market_state=market_state,
-            history=self.data_recorder.history,
-            round_number=round_number
-        )
+        new_orders = self._phase_collect_decisions(market_state, round_number)
 
-        # Update market depth after new orders are placed
-        if self.is_multi_stock:
-            for manager in self.market_state_managers.values():
-                manager.update_market_depth()
-        else:
-            self.market_state_manager.update_market_depth()
-
-        # Log state after decisions but before matching
-        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Post-Decision ")
-        self.order_book.log_order_book_state(f"After New Orders Round {round_number}")
-        
         # 3. EXECUTE TRADES using the matching engine
         if self.is_multi_stock:
             # Multi-stock: Match orders FOR EACH STOCK separately (THE BIG FOR LOOP!)
@@ -573,87 +557,16 @@ class BaseSimulation:
             self.context.round_number = round_number + 1
 
         # Update market depth after matching
-        if self.is_multi_stock:
-            for manager in self.market_state_managers.values():
-                manager.update_market_depth()
-        else:
-            self.market_state_manager.update_market_depth()
+        self._update_all_market_depths()
 
-        # Log state after matching
-        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Post-Matching ")
-        self.order_book.log_order_book_state(f"After Trades Matched Round {round_number}")
-
-        if round_number == self.context._num_rounds - 1 and not self.infinite_rounds:
-            self.logger.info(f"Last round, redeeming shares for fundamental value: {self.context.fundamental_price}")
-            self.logger.info(f"Shares are worthless after redemption")
-        
         # 4. RECORD DATA for the round
-
-        # Get last paid dividend
-        if self.is_multi_stock:
-            # Multi-stock: Aggregate dividends from all stocks
-            last_paid_dividend = 0.0
-            dividends_by_stock = {}  # Track per-stock for detailed recording
-
-            for stock_id, manager in self.market_state_managers.items():
-                if manager.dividend_service and manager.dividend_service.dividend_history:
-                    # Get last paid dividend for this stock
-                    stock_dividend = manager.dividend_service.dividend_history[-1]
-                    dividends_by_stock[stock_id] = stock_dividend
-                    last_paid_dividend += stock_dividend
-                    self.logger.debug(f"Stock {stock_id} last dividend: ${stock_dividend:.2f}")
-                else:
-                    dividends_by_stock[stock_id] = 0.0
-
-            self.logger.debug(f"Total last paid dividend across all stocks: ${last_paid_dividend:.2f}")
-
-            # Invariance check: Verify aggregation is correct
-            expected_total = sum(dividends_by_stock.values())
-            if abs(last_paid_dividend - expected_total) > 1e-6:  # Allow for floating point error
-                raise ValueError(
-                    f"Dividend aggregation invariance violated: "
-                    f"last_paid_dividend={last_paid_dividend:.6f} != "
-                    f"sum(dividends_by_stock)={expected_total:.6f}"
-                )
-
-            # Record per-stock dividends for analytics
-            if dividends_by_stock:
-                self.data_recorder.record_multi_stock_dividends(
-                    round_number=round_number,
-                    dividends_by_stock=dividends_by_stock
-                )
-        else:
-            # Single-stock: Original behavior
-            last_paid_dividend = market_state.get('last_paid_dividend', 0.0)
-            if not last_paid_dividend and round_number == 0:
-                self.logger.info("First round, no dividend paid")
-                last_paid_dividend = 0.0
-            else:
-                # Get last paid dividend from market state
-                if 'dividend_state' in market_state and market_state['dividend_state']:
-                    dividend_state = market_state['dividend_state']
-                    last_paid_dividend = dividend_state.get('last_paid_dividend')
-                    if last_paid_dividend is None:
-                        raise ValueError(f"No last paid dividend found in dividend state: {dividend_state}")
-                else:
-                    raise ValueError(f"No dividend state found in market state: {market_state.keys()}")
-
-        self.data_recorder.record_round_data(
+        last_paid_dividend = self._phase_record_data(
             round_number=round_number,
             market_state=market_state,
-            orders=new_orders,
-            trades=market_result.trades,
-            total_volume=market_result.volume,
-            dividends=last_paid_dividend,
-            dividends_by_stock=dividends_by_stock if self.is_multi_stock else None
+            market_result=market_result,
+            new_orders=new_orders,
+            stock_market_results=stock_market_results if self.is_multi_stock else None
         )
-
-        
-        # Log final states
-        LoggingService.log_all_agent_states(self.agent_repository, round_number, "End of ")
-        
-        # Final order book state
-        self.order_book.log_order_book_state(f"End of Round {round_number}")
 
         # 5. FINAL END-OF-ROUND UPDATES (including interest/dividend payments)
         # Check if this is final redemption round
@@ -760,10 +673,10 @@ class BaseSimulation:
         # Check if it's a deterministic agent
         if agent_type in DETERMINISTIC_AGENTS:
             return DETERMINISTIC_AGENTS[agent_type](**base_params)
-        
-        # Set model name for hold_llm agent
-        model = "hold_llm" if agent_type == "hold_llm" else self.model_open_ai
-        
+
+        # Set model name for hold_llm agent, or use type-specific model override
+        model = "hold_llm" if agent_type == "hold_llm" else type_specific_params.get('model', self.model_open_ai)
+
         # Create LLM agent with appropriate model
         return LLMAgent(
             **base_params,
@@ -1658,3 +1571,135 @@ class BaseSimulation:
             raise ValueError(msg)
 
         self.logger.info("✓ Borrow fee calculations verified")
+
+    def _log_round_start(self, round_number: int):
+        """Log initial state at the start of a round"""
+        self.logger.warning(f"\n=== Round {round_number} ===")
+        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Start of ")
+        self.order_book.log_order_book_state(f"Start of Round {round_number}")
+
+    def _log_round_end(self, round_number: int):
+        """Log final state at the end of a round"""
+        LoggingService.log_all_agent_states(self.agent_repository, round_number, "End of ")
+        self.order_book.log_order_book_state(f"End of Round {round_number}")
+
+    def _update_all_market_depths(self):
+        """Update market depth for all stocks (handles both single and multi-stock)"""
+        if self.is_multi_stock:
+            for manager in self.market_state_managers.values():
+                manager.update_market_depth()
+        else:
+            self.market_state_manager.update_market_depth()
+
+    def _phase_collect_decisions(self, market_state: dict, round_number: int) -> list:
+        """Phase 2: Collect agent decisions and create orders
+
+        Args:
+            market_state: Current market state
+            round_number: Current round number
+
+        Returns:
+            List of new orders from agents
+        """
+        # Log state before collecting decisions
+        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Pre-Decision ")
+
+        # Collect new agent decisions (orders)
+        new_orders = self.decision_service.collect_decisions(
+            market_state=market_state,
+            history=self.data_recorder.history,
+            round_number=round_number
+        )
+
+        # Update market depth after new orders are placed
+        self._update_all_market_depths()
+
+        # Log state after decisions but before matching
+        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Post-Decision ")
+        self.order_book.log_order_book_state(f"After New Orders Round {round_number}")
+
+        return new_orders
+
+    def _phase_record_data(self, round_number: int, market_state: dict, market_result,
+                          new_orders: list, stock_market_results: dict = None):
+        """Phase 4: Record round data including dividends and trades
+
+        Args:
+            round_number: Current round number
+            market_state: Current market state
+            market_result: Result from matching engine
+            new_orders: List of orders placed this round
+            stock_market_results: Per-stock results (multi-stock only)
+        """
+        # Log state after matching
+        LoggingService.log_all_agent_states(self.agent_repository, round_number, "Post-Matching ")
+        self.order_book.log_order_book_state(f"After Trades Matched Round {round_number}")
+
+        if round_number == self.context._num_rounds - 1 and not self.infinite_rounds:
+            self.logger.info(f"Last round, redeeming shares for fundamental value: {self.context.fundamental_price}")
+            self.logger.info(f"Shares are worthless after redemption")
+
+        # Get last paid dividend
+        dividends_by_stock = None
+        if self.is_multi_stock:
+            # Multi-stock: Aggregate dividends from all stocks
+            last_paid_dividend = 0.0
+            dividends_by_stock = {}  # Track per-stock for detailed recording
+
+            for stock_id, manager in self.market_state_managers.items():
+                if manager.dividend_service and manager.dividend_service.dividend_history:
+                    # Get last paid dividend for this stock
+                    stock_dividend = manager.dividend_service.dividend_history[-1]
+                    dividends_by_stock[stock_id] = stock_dividend
+                    last_paid_dividend += stock_dividend
+                    self.logger.debug(f"Stock {stock_id} last dividend: ${stock_dividend:.2f}")
+                else:
+                    dividends_by_stock[stock_id] = 0.0
+
+            self.logger.debug(f"Total last paid dividend across all stocks: ${last_paid_dividend:.2f}")
+
+            # Invariance check: Verify aggregation is correct
+            expected_total = sum(dividends_by_stock.values())
+            if abs(last_paid_dividend - expected_total) > 1e-6:  # Allow for floating point error
+                raise ValueError(
+                    f"Dividend aggregation invariance violated: "
+                    f"last_paid_dividend={last_paid_dividend:.6f} != "
+                    f"sum(dividends_by_stock)={expected_total:.6f}"
+                )
+
+            # Record per-stock dividends for analytics
+            if dividends_by_stock:
+                self.data_recorder.record_multi_stock_dividends(
+                    round_number=round_number,
+                    dividends_by_stock=dividends_by_stock
+                )
+        else:
+            # Single-stock: Original behavior
+            last_paid_dividend = market_state.get('last_paid_dividend', 0.0)
+            if not last_paid_dividend and round_number == 0:
+                self.logger.info("First round, no dividend paid")
+                last_paid_dividend = 0.0
+            else:
+                # Get last paid dividend from market state
+                if 'dividend_state' in market_state and market_state['dividend_state']:
+                    dividend_state = market_state['dividend_state']
+                    last_paid_dividend = dividend_state.get('last_paid_dividend')
+                    if last_paid_dividend is None:
+                        raise ValueError(f"No last paid dividend found in dividend state: {dividend_state}")
+                else:
+                    raise ValueError(f"No dividend state found in market state: {market_state.keys()}")
+
+        self.data_recorder.record_round_data(
+            round_number=round_number,
+            market_state=market_state,
+            orders=new_orders,
+            trades=market_result.trades,
+            total_volume=market_result.volume,
+            dividends=last_paid_dividend,
+            dividends_by_stock=dividends_by_stock
+        )
+
+        # Log final states
+        self._log_round_end(round_number)
+
+        return last_paid_dividend
