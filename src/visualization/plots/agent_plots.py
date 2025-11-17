@@ -392,3 +392,188 @@ def plot_excess_returns(agent_df: pd.DataFrame, initial_values: Dict):
             alpha=0.5, label='Risk-Free Baseline')
 
     return fig
+
+
+def plot_borrowed_cash(agent_df: pd.DataFrame):
+    """
+    Plot borrowed cash over time for each agent type.
+
+    Args:
+        agent_df: DataFrame with agent data including borrowed_cash column
+
+    Returns:
+        Matplotlib figure or None if no borrowed cash data
+    """
+    if 'borrowed_cash' not in agent_df.columns:
+        return None
+
+    # Check if any agent has borrowed cash
+    if agent_df['borrowed_cash'].sum() == 0:
+        return None
+
+    fig, ax = plt.subplots(figsize=STANDARD_FIGSIZE)
+
+    # Group by round and agent_type, sum borrowed_cash
+    grouped = agent_df.groupby(['round', 'agent_type'])['borrowed_cash'].sum().unstack()
+
+    # Plot borrowed cash
+    grouped.plot(kind='line', marker='o', ax=ax)
+
+    ax.set_xlabel('Round')
+    ax.set_ylabel('Borrowed Cash ($)')
+    ax.set_title('Borrowed Cash Over Time by Agent Type')
+    ax.legend(title='Agent Type')
+    ax.grid(True, alpha=GRID_ALPHA)
+    ax.axhline(y=0, color='black', linestyle='-', alpha=GRID_ALPHA)
+
+    return fig
+
+
+def plot_margin_ratios(agent_df: pd.DataFrame, maintenance_margin: float = 0.25,
+                       initial_margin: float = 0.5):
+    """
+    Plot margin ratios over time with threshold lines.
+
+    Margin ratio = (Total Value - Borrowed Cash) / Total Value
+
+    Args:
+        agent_df: DataFrame with agent data
+        maintenance_margin: Maintenance margin threshold (default 0.25)
+        initial_margin: Initial margin requirement (default 0.5)
+
+    Returns:
+        Matplotlib figure or None if no leverage data
+    """
+    if 'borrowed_cash' not in agent_df.columns or 'total_value' not in agent_df.columns:
+        return None
+
+    # Check if any agent has borrowed cash
+    if agent_df['borrowed_cash'].sum() == 0:
+        return None
+
+    fig, ax = plt.subplots(figsize=STANDARD_FIGSIZE)
+
+    # Calculate margin ratio for each agent
+    agent_df_copy = agent_df.copy()
+    agent_df_copy['margin_ratio'] = agent_df_copy.apply(
+        lambda row: ((row['total_value'] - row['borrowed_cash']) / row['total_value'] * 100)
+        if row['total_value'] > 0 and row['borrowed_cash'] > 0
+        else 100.0,
+        axis=1
+    )
+
+    # Group by round and agent_type, calculate weighted average margin ratio
+    # Weight by total_value to get more meaningful aggregate
+    grouped = agent_df_copy.groupby(['round', 'agent_type']).apply(
+        lambda x: (x['margin_ratio'] * x['total_value']).sum() / x['total_value'].sum()
+        if x['total_value'].sum() > 0 else 100.0
+    ).unstack()
+
+    # Plot margin ratios
+    grouped.plot(kind='line', marker='o', ax=ax)
+
+    # Add threshold lines
+    ax.axhline(y=maintenance_margin * 100, color='red', linestyle='--',
+               linewidth=2, label=f'Maintenance Margin ({maintenance_margin*100:.0f}%)', alpha=0.7)
+    ax.axhline(y=initial_margin * 100, color='orange', linestyle='--',
+               linewidth=2, label=f'Initial Margin ({initial_margin*100:.0f}%)', alpha=0.7)
+
+    ax.set_xlabel('Round')
+    ax.set_ylabel('Margin Ratio (%)')
+    ax.set_title('Margin Ratio Over Time by Agent Type')
+    ax.legend(title='Agent Type')
+    ax.grid(True, alpha=GRID_ALPHA)
+
+    # Highlight danger zone (below maintenance margin)
+    ax.axhspan(0, maintenance_margin * 100, alpha=0.1, color='red', label='Margin Call Zone')
+
+    return fig
+
+
+def plot_leverage_interest(agent_df: pd.DataFrame):
+    """
+    Plot cumulative leverage interest paid over time.
+
+    Args:
+        agent_df: DataFrame with agent data including leverage_interest_paid column
+
+    Returns:
+        Matplotlib figure or None if no leverage interest data
+    """
+    if 'leverage_interest_paid' not in agent_df.columns:
+        return None
+
+    # Check if any agent has paid interest
+    if agent_df['leverage_interest_paid'].sum() == 0:
+        return None
+
+    fig, ax = plt.subplots(figsize=STANDARD_FIGSIZE)
+
+    # Group by round and agent_type, sum leverage interest
+    grouped = agent_df.groupby(['round', 'agent_type'])['leverage_interest_paid'].sum().unstack()
+
+    # Plot cumulative interest
+    grouped.plot(kind='line', marker='o', ax=ax)
+
+    ax.set_xlabel('Round')
+    ax.set_ylabel('Cumulative Interest Paid ($)')
+    ax.set_title('Cumulative Leverage Interest Paid by Agent Type')
+    ax.legend(title='Agent Type')
+    ax.grid(True, alpha=GRID_ALPHA)
+
+    return fig
+
+
+def plot_leverage_heatmap(agent_df: pd.DataFrame):
+    """
+    Heatmap showing leverage usage over time.
+
+    Leverage ratio = Total Value / (Total Value - Borrowed Cash)
+    1.0 = no leverage, 2.0 = 2x leverage
+
+    Args:
+        agent_df: DataFrame with agent data
+
+    Returns:
+        Matplotlib figure or None if no leverage data
+    """
+    if 'borrowed_cash' not in agent_df.columns or 'total_value' not in agent_df.columns:
+        return None
+
+    # Check if any agent has borrowed cash
+    if agent_df['borrowed_cash'].sum() == 0:
+        return None
+
+    fig, ax = plt.subplots(figsize=LARGE_FIGSIZE)
+
+    # Calculate leverage ratio for each agent
+    agent_df_copy = agent_df.copy()
+    agent_df_copy['leverage_ratio'] = agent_df_copy.apply(
+        lambda row: row['total_value'] / (row['total_value'] - row['borrowed_cash'])
+        if row['total_value'] > 0 and row['borrowed_cash'] > 0
+        else 1.0,
+        axis=1
+    )
+
+    # Cap leverage ratio at reasonable max for visualization
+    agent_df_copy['leverage_ratio'] = agent_df_copy['leverage_ratio'].clip(upper=5.0)
+
+    # Pivot to get heatmap data (agent_type vs round)
+    pivot_data = agent_df_copy.pivot_table(
+        values='leverage_ratio',
+        index='agent_type',
+        columns='round',
+        aggfunc='mean'  # Average across agents of same type
+    )
+
+    # Create heatmap
+    import seaborn as sns
+    sns.heatmap(pivot_data, annot=True, fmt='.2f', cmap='YlOrRd',
+                cbar_kws={'label': 'Leverage Ratio (x)'}, ax=ax,
+                vmin=1.0, vmax=3.0)
+
+    ax.set_xlabel('Round')
+    ax.set_ylabel('Agent Type')
+    ax.set_title('Leverage Usage Heatmap by Agent Type\n(1.0 = No Leverage, 2.0 = 2x Leverage)')
+
+    return fig

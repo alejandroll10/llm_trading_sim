@@ -176,6 +176,39 @@ class PlotGenerator:
             save_plot(fig, 'agent_excess_returns', self.scenario_name,
                      self.dated_plots_dir, self.scenario_plots_dir)
 
+            # Leverage plots (only if leverage is being used)
+            if 'borrowed_cash' in agent_df.columns and agent_df['borrowed_cash'].sum() > 0:
+                print("  Processing leverage metrics...")
+
+                # Get leverage parameters from simulation
+                leverage_params = self.simulation.params.get('AGENT_PARAMS', {}).get('leverage_params', {})
+                maintenance_margin = leverage_params.get('maintenance_margin', 0.25)
+                initial_margin = leverage_params.get('initial_margin', 0.5)
+
+                # Borrowed cash plot
+                fig = agent_plots.plot_borrowed_cash(agent_df)
+                if fig:
+                    save_plot(fig, 'leverage_borrowed_cash', self.scenario_name,
+                             self.dated_plots_dir, self.scenario_plots_dir)
+
+                # Margin ratios plot
+                fig = agent_plots.plot_margin_ratios(agent_df, maintenance_margin, initial_margin)
+                if fig:
+                    save_plot(fig, 'leverage_margin_ratios', self.scenario_name,
+                             self.dated_plots_dir, self.scenario_plots_dir)
+
+                # Leverage interest plot
+                fig = agent_plots.plot_leverage_interest(agent_df)
+                if fig:
+                    save_plot(fig, 'leverage_interest_paid', self.scenario_name,
+                             self.dated_plots_dir, self.scenario_plots_dir)
+
+                # Leverage heatmap
+                fig = agent_plots.plot_leverage_heatmap(agent_df)
+                if fig:
+                    save_plot(fig, 'leverage_usage_heatmap', self.scenario_name,
+                             self.dated_plots_dir, self.scenario_plots_dir)
+
         except Exception as e:
             print(f"  Error processing agent data: {str(e)}")
             import traceback
