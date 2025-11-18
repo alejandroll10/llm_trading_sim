@@ -9,6 +9,7 @@ import logging
 from services.logging_service import LoggingService
 from services.messaging_service import MessagingService
 from constants import FLOAT_TOLERANCE, CASH_MATCHING_TOLERANCE
+from agents.verification.agent_verifier import AgentVerifier
 
 @dataclass
 class AgentType:
@@ -128,6 +129,9 @@ class BaseAgent(ABC):
             'other': []
         }
 
+        # Initialize verifier (Phase 1 of issue #57 refactoring)
+        self.verifier = AgentVerifier(self)
+
     # Backwards compatibility properties for single-stock code
     @property
     def shares(self) -> int:
@@ -188,95 +192,12 @@ class BaseAgent(ABC):
     def _check_borrowed_positions_invariants(self) -> bool:
         """Verify borrowed positions invariants are maintained
 
-        This defensive check ensures internal consistency of the borrowed_positions
-        tracking system, particularly the DEFAULT_STOCK accumulator pattern.
-
-        Invariants checked:
-        1. DEFAULT_STOCK accumulator matches sum of other stocks (multi-stock mode)
-        2. No borrowed positions are negative
-        3. total_borrowed_shares is consistent with individual positions
+        REFACTORED: Delegates to AgentVerifier (issue #57 Phase 1)
 
         Returns:
             bool: True if all invariants pass
-
-        Raises:
-            AssertionError: If any invariant is violated (only in debug mode)
         """
-        all_positions = self.borrowed_positions
-
-        # Invariant 1: No negative borrowed positions
-        for stock_id, shares in all_positions.items():
-            if shares < 0:
-                error_msg = f"INVARIANT VIOLATION: Negative borrowed position for {stock_id}: {shares}"
-                LoggingService.log_agent_state(
-                    agent_id=self.agent_id,
-                    operation="INVARIANT_VIOLATION",
-                    amount=error_msg,
-                    agent_state=self._get_state_dict(),
-                    is_error=True
-                )
-                assert False, error_msg
-
-        # Invariant 2: DEFAULT_STOCK accumulator consistency (multi-stock only)
-        if len(all_positions) > 1:
-            # Multi-stock mode: DEFAULT_STOCK should equal sum of other stocks
-            default_stock_value = all_positions.get("DEFAULT_STOCK", 0)
-            other_stocks_sum = sum(
-                shares for stock_id, shares in all_positions.items()
-                if stock_id != "DEFAULT_STOCK"
-            )
-
-            # Allow small floating point tolerance
-            tolerance = 0.01
-            if abs(default_stock_value - other_stocks_sum) > tolerance:
-                error_msg = (
-                    f"INVARIANT VIOLATION: DEFAULT_STOCK accumulator mismatch. "
-                    f"DEFAULT_STOCK={default_stock_value}, sum of other stocks={other_stocks_sum}. "
-                    f"All positions: {all_positions}"
-                )
-                LoggingService.log_agent_state(
-                    agent_id=self.agent_id,
-                    operation="INVARIANT_VIOLATION",
-                    amount=error_msg,
-                    agent_state=self._get_state_dict(),
-                    is_error=True
-                )
-                # Warning instead of assertion failure in production
-                # This allows simulation to continue while logging the issue
-                import warnings
-                warnings.warn(error_msg, RuntimeWarning)
-                return False
-
-        # Invariant 3: total_borrowed_shares consistency
-        expected_total = self.total_borrowed_shares
-        if len(all_positions) <= 1:
-            # Single-stock: should equal DEFAULT_STOCK
-            actual_total = all_positions.get("DEFAULT_STOCK", 0)
-        else:
-            # Multi-stock: should equal sum of non-DEFAULT stocks
-            actual_total = sum(
-                shares for stock_id, shares in all_positions.items()
-                if stock_id != "DEFAULT_STOCK"
-            )
-
-        tolerance = 0.01
-        if abs(expected_total - actual_total) > tolerance:
-            error_msg = (
-                f"INVARIANT VIOLATION: total_borrowed_shares inconsistency. "
-                f"total_borrowed_shares={expected_total}, actual sum={actual_total}"
-            )
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="INVARIANT_VIOLATION",
-                amount=error_msg,
-                agent_state=self._get_state_dict(),
-                is_error=True
-            )
-            import warnings
-            warnings.warn(error_msg, RuntimeWarning)
-            return False
-
-        return True
+        return self.verifier.check_borrowed_positions_invariants()
 
     def get_last_round_messages(self, round_number: int):
         """Retrieve broadcast messages from the previous round."""
@@ -959,196 +880,31 @@ class BaseAgent(ABC):
         return summary
 
     def verify_state(self):
-        """Verify agent state consistency"""
-        state_valid = True
-        
-        # Check cash commitments
-        committed_cash_from_orders = sum(
-            order.current_cash_commitment or 0  # Handle None case
-            for order in self.outstanding_orders['buy']
-        )
-        
-        # Verify commitment matches
-        if abs(committed_cash_from_orders - self.committed_cash) > 0.01:
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="CASH COMMITMENT MISMATCH",
-                amount=(f"Orders: {committed_cash_from_orders:.2f}, "
-                       f"State: {self.committed_cash:.2f}"),
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            state_valid = False
-        
-        # Check for negative cash position
-        if self.cash < -0.01:  # Using small tolerance for float comparison
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="NEGATIVE AVAILABLE CASH NOT ALLOWED",
-                amount=(f"Available cash: {self.cash:.2f}, "
-                       f"Total cash: {self.total_cash:.2f} "
-                       f"(including {self.committed_cash:.2f} committed, "
-                       f"{self.dividend_cash:.2f} dividends)"),
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            state_valid = False
-        
-        # Check for negative share position when short selling is not allowed
-        if not self.allow_short_selling and self.total_shares < 0:
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="NEGATIVE TOTAL SHARE POSITION NOT ALLOWED",
-                amount=(f"Total shares: {self.total_shares} "
-                       f"(Available: {self.shares}, Committed: {self.committed_shares}), "
-                       f"Short selling disabled"),
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            state_valid = False
-        
-        # Check for negative available shares when short selling is not allowed
-        if not self.allow_short_selling and self.shares < 0:
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="NEGATIVE AVAILABLE SHARES NOT ALLOWED",
-                amount=(f"Available shares: {self.shares}, "
-                       f"Total shares: {self.total_shares} "
-                       f"(including {self.committed_shares} committed)"),
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            state_valid = False
-        
-        # Verify share position matches trade history
-        if not self.verify_share_position():
-            state_valid = False
-        
-        # Verify cash position matches payment/trade history
-        if not self.verify_cash_position():
-            state_valid = False
-        
-        # Check for borrowed shares when short selling is not allowed
-        if not self.allow_short_selling and self.borrowed_shares > 0:
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="BORROWED SHARES NOT ALLOWED",
-                amount=f"Borrowed shares: {self.borrowed_shares}, Short selling disabled",
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            state_valid = False
-        
-        # Modify the check for negative position to account for borrowed shares
-        if not self.allow_short_selling and (self.total_shares - self.borrowed_shares) < 0:
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="NEGATIVE NET SHARE POSITION NOT ALLOWED",
-                amount=(f"Net shares: {self.total_shares - self.borrowed_shares} "
-                       f"(Total: {self.total_shares}, Borrowed: {self.borrowed_shares}), "
-                       f"Short selling disabled"),
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            state_valid = False
-        
-        # Check margin requirements and trigger margin call if needed
-        if self.borrowed_shares > 0 and hasattr(self, 'last_price'):
-            self.handle_margin_call(self.last_price, self.last_update_round)
+        """Verify agent state consistency
 
-        # Check borrowed positions invariants
-        if self.allow_short_selling:
-            invariants_valid = self._check_borrowed_positions_invariants()
-            state_valid = state_valid and invariants_valid
-
-        return state_valid
+        REFACTORED: Delegates to AgentVerifier (issue #57 Phase 1)
+        """
+        return self.verifier.verify_state()
 
     def verify_share_position(self) -> bool:
+        """Verify that current share position matches initial position plus net trades
+
+        REFACTORED: Delegates to AgentVerifier (issue #57 Phase 1)
+
+        Returns:
+            bool: True if position matches trade history, False otherwise
         """
-        Verify that current share position matches initial position plus net trades
-        Returns True if position matches trade history, False otherwise
-        """
-        net_trade_position = 0
-        
-        # Calculate net position from trades
-        for trade in self.trade_history:
-            if trade.buyer_id == self.agent_id:
-                net_trade_position += trade.quantity
-            elif trade.seller_id == self.agent_id:
-                net_trade_position -= trade.quantity
-            
-        expected_position = self.initial_shares + net_trade_position
-        
-        # Check if current position matches expected position
-        if abs(expected_position - self.shares) > 0.01:  # Using small tolerance for float comparison
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="SHARE POSITION MISMATCH",
-                amount=(f"Expected: {expected_position} "
-                       f"(Initial: {self.initial_shares} + Net Trades: {net_trade_position}), "
-                       f"Actual: {self.shares}"),
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            return False
-        
-        return True
+        return self.verifier.verify_share_position()
 
     def verify_cash_position(self) -> bool:
+        """Verify that current cash position matches initial position plus net payments and trades
+
+        REFACTORED: Delegates to AgentVerifier (issue #57 Phase 1)
+
+        Returns:
+            bool: True if position matches payment/trade history, False otherwise
         """
-        Verify that current cash position matches initial position plus net payments and trades
-        Returns True if position matches payment/trade history, False otherwise
-        """
-        # Start with initial positions
-        expected_main_cash = self.initial_cash
-        expected_dividend_cash = self.initial_dividend_cash
-
-        # Add up all payments from history
-        for payment_type in ['interest', 'dividend', 'trade', 'other']:
-            for payment in self.payment_history[payment_type]:
-                if payment.account == "main":
-                    expected_main_cash += payment.amount
-                elif payment.account == "dividend":
-                    expected_dividend_cash += payment.amount
-
-        # Account for borrowed cash (leverage)
-        # Borrowed cash increases available cash but is a liability, not income
-        # So it's not in payment history but affects self.cash
-        expected_main_cash += self.borrowed_cash
-
-        # Check if current positions match expected positions (using 1 cent tolerance for cash aggregates)
-        main_cash_matches = abs(expected_main_cash - self.cash) <= CASH_MATCHING_TOLERANCE
-        dividend_cash_matches = abs(expected_dividend_cash - self.dividend_cash) <= CASH_MATCHING_TOLERANCE
-
-        if not (main_cash_matches and dividend_cash_matches):
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="CASH POSITION MISMATCH",
-                amount=(f"Main Cash - Expected: {expected_main_cash:.2f} (including ${self.borrowed_cash:.2f} borrowed), "
-                       f"Actual: {self.cash:.2f}\n"
-                       f"Dividend Cash - Expected: {expected_dividend_cash:.2f}, Actual: {self.dividend_cash:.2f}"),
-                agent_state=self._get_state_dict(),
-                outstanding_orders=self.outstanding_orders,
-                order_history=self.order_history,
-                is_error=True
-            )
-            return False
-
-        return True
+        return self.verifier.verify_cash_position()
 
     def receive_information(self, signals: Dict[InformationType, InformationSignal]):
         """Receive, store and archive information signals"""
@@ -1634,144 +1390,15 @@ class BaseAgent(ABC):
     def _check_leverage_invariants(self, prices: Dict[str, float] = None) -> bool:
         """Verify leverage invariants are maintained.
 
-        This defensive check ensures internal consistency of the leverage trading system,
-        particularly cash borrowing and margin calculations.
-
-        Invariants checked:
-        1. borrowed_cash is never negative
-        2. borrowed_cash matches CashLendingRepository records (if repo exists)
-        3. If borrowed_cash > 0, agent must have leverage_ratio > 1.0
-        4. If borrowed_cash > 0, cash_lending_repo must be set
-        5. leverage_interest_paid is never negative
-        6. If prices provided, equity calculation is consistent
+        REFACTORED: Delegates to AgentVerifier (issue #57 Phase 1)
 
         Args:
             prices: Optional price dict for equity consistency checks
 
         Returns:
             bool: True if all invariants pass
-
-        Raises:
-            AssertionError: If any critical invariant is violated
         """
-        # Invariant 1: No negative borrowed cash
-        if self.borrowed_cash < -1e-10:  # Small tolerance for floating point
-            error_msg = f"INVARIANT VIOLATION: Negative borrowed cash: ${self.borrowed_cash:.2f}"
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="LEVERAGE_INVARIANT_VIOLATION",
-                amount=error_msg,
-                agent_state=self._get_state_dict(),
-                is_error=True
-            )
-            assert False, error_msg
-
-        # Invariant 2: Repository consistency
-        if self.cash_lending_repo and self.borrowed_cash > 0:
-            repo_borrowed = self.cash_lending_repo.get_borrowed(self.agent_id)
-            tolerance = 1e-6  # Very small tolerance for floating point
-            if abs(self.borrowed_cash - repo_borrowed) > tolerance:
-                error_msg = (
-                    f"INVARIANT VIOLATION: Borrowed cash mismatch. "
-                    f"Agent tracking: ${self.borrowed_cash:.2f}, "
-                    f"Repository tracking: ${repo_borrowed:.2f}"
-                )
-                LoggingService.log_agent_state(
-                    agent_id=self.agent_id,
-                    operation="LEVERAGE_INVARIANT_VIOLATION",
-                    amount=error_msg,
-                    agent_state=self._get_state_dict(),
-                    is_error=True
-                )
-                import warnings
-                warnings.warn(error_msg, RuntimeWarning)
-                return False
-
-        # Invariant 3: Borrowed cash requires leverage enabled
-        if self.borrowed_cash > 1e-6 and self.leverage_ratio <= 1.0:
-            error_msg = (
-                f"INVARIANT VIOLATION: Agent has borrowed cash (${self.borrowed_cash:.2f}) "
-                f"but leverage_ratio is {self.leverage_ratio:.2f} (should be > 1.0)"
-            )
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="LEVERAGE_INVARIANT_VIOLATION",
-                amount=error_msg,
-                agent_state=self._get_state_dict(),
-                is_error=True
-            )
-            import warnings
-            warnings.warn(error_msg, RuntimeWarning)
-            return False
-
-        # Invariant 4: Borrowed cash requires repository
-        if self.borrowed_cash > 1e-6 and self.cash_lending_repo is None:
-            error_msg = (
-                f"INVARIANT VIOLATION: Agent has borrowed cash (${self.borrowed_cash:.2f}) "
-                f"but cash_lending_repo is None"
-            )
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="LEVERAGE_INVARIANT_VIOLATION",
-                amount=error_msg,
-                agent_state=self._get_state_dict(),
-                is_error=True
-            )
-            import warnings
-            warnings.warn(error_msg, RuntimeWarning)
-            return False
-
-        # Invariant 5: No negative interest paid
-        if self.leverage_interest_paid < -1e-10:
-            error_msg = f"INVARIANT VIOLATION: Negative interest paid: ${self.leverage_interest_paid:.2f}"
-            LoggingService.log_agent_state(
-                agent_id=self.agent_id,
-                operation="LEVERAGE_INVARIANT_VIOLATION",
-                amount=error_msg,
-                agent_state=self._get_state_dict(),
-                is_error=True
-            )
-            import warnings
-            warnings.warn(error_msg, RuntimeWarning)
-            return False
-
-        # Invariant 6: Equity consistency (if prices provided)
-        if prices and self.borrowed_cash > 0:
-            try:
-                # Equity should equal wealth (which already subtracts borrowed_cash)
-                calculated_equity = self.get_equity(prices)
-                # Wealth should be consistent
-                share_value = sum(
-                    (self.positions.get(stock_id, 0) + self.committed_positions.get(stock_id, 0) -
-                     self.borrowed_positions.get(stock_id, 0)) * price
-                    for stock_id, price in prices.items()
-                    if stock_id != "DEFAULT_STOCK"
-                )
-                expected_wealth = self.total_cash + share_value - self.borrowed_cash
-
-                tolerance = 0.01
-                if abs(calculated_equity - expected_wealth) > tolerance:
-                    error_msg = (
-                        f"INVARIANT VIOLATION: Equity calculation inconsistency. "
-                        f"Calculated equity: ${calculated_equity:.2f}, "
-                        f"Expected (from components): ${expected_wealth:.2f}"
-                    )
-                    LoggingService.log_agent_state(
-                        agent_id=self.agent_id,
-                        operation="LEVERAGE_INVARIANT_VIOLATION",
-                        amount=error_msg,
-                        agent_state=self._get_state_dict(),
-                        is_error=True
-                    )
-                    import warnings
-                    warnings.warn(error_msg, RuntimeWarning)
-                    return False
-            except Exception as e:
-                # Don't fail if calculation has issues, just log it
-                import warnings
-                warnings.warn(f"Could not verify equity invariant: {e}", RuntimeWarning)
-
-        return True
+        return self.verifier.check_leverage_invariants(prices)
 
     def handle_leverage_margin_call(self, prices: Dict[str, float], round_number: int):
         """Force sell positions when leverage margin requirements violated.

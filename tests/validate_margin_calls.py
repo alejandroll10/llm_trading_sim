@@ -7,7 +7,7 @@ This script tests the key functionality without requiring pytest.
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parent / "src"))
+sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
 # Mock the logging service
 import types
