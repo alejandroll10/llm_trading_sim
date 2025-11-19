@@ -71,10 +71,13 @@ class LLMService:
                 price_target_reasoning="LLM Hold Agent: Always hold strategy",
                 orders=[],  # Empty list for hold
                 replace_decision="Add",
-                reasoning="LLM Hold Agent: Always hold strategy"
+                reasoning="LLM Hold Agent: Always hold strategy",
+                notes_to_self=None,
+                message_reasoning=None,
+                post_message=None
             ).model_dump()
             decision["agent_id"] = request.agent_id
-            
+
             return LLMResponse(
                 decision=decision,
                 raw_response="Testing hold_llm agent. Always holds."
@@ -112,7 +115,7 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
             # Convert the parsed response to OrderDetails format
             orders = [OrderDetails(**order.model_dump()) for order in parsed_response.orders]
             
-            # Create TradeDecision
+            # Create TradeDecision - all fields go through Pydantic validation
             decision = TradeDecision(
                 valuation_reasoning=parsed_response.valuation_reasoning,
                 valuation=parsed_response.valuation,
@@ -121,15 +124,11 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
                 orders=orders,
                 replace_decision=parsed_response.replace_decision,
                 reasoning=parsed_response.reasoning,
-                notes_to_self=parsed_response.notes_to_self  # Optional field
+                notes_to_self=parsed_response.notes_to_self,
+                message_reasoning=parsed_response.message_reasoning,
+                post_message=parsed_response.post_message
             ).model_dump()
             decision["agent_id"] = request.agent_id
-            # Add optional message_reasoning if provided
-            if parsed_response.message_reasoning:
-                decision["message_reasoning"] = parsed_response.message_reasoning
-            # Add optional post_message if provided
-            if parsed_response.post_message:
-                decision["post_message"] = parsed_response.post_message
 
             return LLMResponse(
                 raw_response=raw_response,
@@ -152,7 +151,9 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
             orders=[],  # Empty list for hold
             replace_decision="Add",
             reasoning="Fallback decision due to parsing error",
-            notes_to_self=None
+            notes_to_self=None,
+            message_reasoning=None,
+            post_message=None
         ).model_dump()
         fallback["agent_id"] = agent_id
         return fallback
