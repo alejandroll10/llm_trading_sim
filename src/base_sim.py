@@ -501,11 +501,16 @@ class BaseSimulation:
         # Set model name for hold_llm agent, or use type-specific model override
         model = "hold_llm" if agent_type == "hold_llm" else type_specific_params.get('model', self.model_open_ai)
 
-        # Create LLM agent with appropriate model
+        # Extract enabled features from agent_params
+        from agents.LLMs.services.schema_features import FeatureRegistry
+        enabled_features = FeatureRegistry.extract_features_from_config(agent_params)
+
+        # Create LLM agent with appropriate model and feature configuration
         return LLMAgent(
             **base_params,
             agent_type=agent_type,
-            model_open_ai=model
+            model_open_ai=model,
+            enabled_features=enabled_features
         )
 
     def initialize_agents(self, agent_params: dict):

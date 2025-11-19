@@ -7,6 +7,41 @@ from market.trade import Trade
 if TYPE_CHECKING:
     from agents.agent_manager.agent_repository import AgentStateSnapshot
 
+
+def sanitize_for_csv(text: str) -> str:
+    """Sanitize text for safe CSV storage
+
+    Handles:
+    - Newlines and carriage returns (break CSV formatting)
+    - Tab characters (misalign columns)
+    - Quotes and commas (CSV delimiters)
+    - Formula injection (security risk in Excel/Sheets)
+
+    Args:
+        text: Raw text to sanitize
+
+    Returns:
+        Sanitized text safe for CSV storage
+    """
+    if not text:
+        return ''
+
+    # Remove/replace problematic whitespace characters
+    text = text.replace('\n', ' | ').replace('\r', '')  # Use | to preserve logical breaks
+    text = text.replace('\t', ' ')  # Replace tabs with spaces
+
+    # Replace CSV delimiter characters
+    text = text.replace('"', "'")  # Replace double quotes with single quotes
+    text = text.replace(',', ';')  # Replace commas with semicolons
+
+    # Prevent formula injection (security risk if CSV opened in Excel)
+    # If text starts with formula characters, prepend with single quote
+    if text and text[0] in ('=', '+', '-', '@', '\t', '\r'):
+        text = "'" + text
+
+    return text
+
+
 @dataclass
 class ValidationErrorEntry:
     """Structured format for validation error logging"""
@@ -81,15 +116,15 @@ class DecisionLogEntry:
         # Extract valuation fields, defaulting to 0 if not present
         valuation = decision_dict.get('valuation', 0.0)
         price_target = decision_dict.get('price_target', 0.0)
-        valuation_reasoning = decision_dict.get('valuation_reasoning', '').replace('"', "'").replace(',', ';')
-        price_target_reasoning = decision_dict.get('price_target_reasoning', '').replace('"', "'").replace(',', ';')
+        valuation_reasoning = sanitize_for_csv(decision_dict.get('valuation_reasoning', ''))
+        price_target_reasoning = sanitize_for_csv(decision_dict.get('price_target_reasoning', ''))
 
         # Ensure reasoning is present
-        reasoning = decision_dict.get('reasoning', '').replace('"', "'").replace(',', ';')
+        reasoning = sanitize_for_csv(decision_dict.get('reasoning', ''))
 
         # Extract memory notes (handle None case when LLM doesn't include field)
-        notes_to_self = decision_dict.get('notes_to_self') or ''
-        notes_to_self = notes_to_self.replace('"', "'").replace(',', ';')
+        # If notes_to_self is not in decision (feature disabled), use empty string
+        notes_to_self = sanitize_for_csv(decision_dict.get('notes_to_self') or '') if 'notes_to_self' in decision_dict else ''
         
         if not decision_dict.get('orders'):
             # Log hold decision

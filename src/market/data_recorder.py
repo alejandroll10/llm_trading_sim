@@ -445,6 +445,9 @@ class DataRecorder:
             social_df = pd.DataFrame(self.social_messages)
             social_df.to_csv(data_path / 'social_messages.csv', index=False)
 
+        # Save agent memory timeline (notes_to_self over time)
+        self._save_agent_memory_timeline(data_path)
+
         # Create a summary statistics file with safe dividend access
         dividend_model = self.market_state_manager.dividend_model
         
@@ -474,3 +477,55 @@ class DataRecorder:
         
         with open(data_path / 'summary_statistics.json', 'w') as f:
             json.dump(summary_data, f, indent=4)
+
+    def _save_agent_memory_timeline(self, data_path: Path):
+        """Export all agent memory notes to a separate CSV file for timeline analysis
+
+        This creates a dedicated CSV file showing the evolution of each agent's
+        memory notes over time, making it easy to analyze how agents learn and
+        adapt their strategies.
+
+        The notes are also saved in structured_decisions.csv, but this file
+        provides a cleaner view focused solely on memory evolution.
+
+        Args:
+            data_path: Directory path where CSV should be saved
+        """
+        memory_data = []
+
+        # Collect memory notes from all agents
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+
+            # Check if agent has memory_notes attribute (only LLMAgents do)
+            if hasattr(agent, 'memory_notes') and agent.memory_notes:
+                agent_type_name = getattr(agent.agent_type, 'name', 'unknown')
+
+                for round_num, note in agent.memory_notes:
+                    memory_data.append({
+                        'agent_id': agent_id,
+                        'agent_type': agent_type_name,
+                        'round': round_num,
+                        'note': note,
+                        'note_index': len([r for r, _ in agent.memory_notes if r <= round_num])  # Note number for this agent
+                    })
+
+        # Save to CSV if we have any memory notes
+        if memory_data:
+            memory_df = pd.DataFrame(memory_data)
+            # Sort by round, then agent_id for chronological view
+            memory_df = memory_df.sort_values(['round', 'agent_id'])
+            memory_df.to_csv(data_path / 'agent_memory_timeline.csv', index=False)
+
+            # Log summary (optional - loggers may not be configured)
+            if hasattr(self, 'loggers') and self.loggers:
+                # Use simulation logger if available
+                try:
+                    from services.logging_service import LoggingService
+                    logger = LoggingService.get_logger('simulation')
+                    logger.info(
+                        f"Saved agent memory timeline: {len(memory_data)} notes from "
+                        f"{len(set(m['agent_id'] for m in memory_data))} agents"
+                    )
+                except:
+                    pass  # Logging is optional

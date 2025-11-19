@@ -1,21 +1,36 @@
 from agents.base_agent import BaseAgent
 from agents.agent_types import AGENT_TYPES
 import traceback
+from typing import List, Dict, Any, Set
 from .services.formatting_services import MarketStateFormatter, AgentContext
 from services.logging_models import DecisionLogEntry
 from .services.llm_services import LLMService, LLMRequest
+from .services.schema_features import Feature, FeatureRegistry
+from .services.prompt_builder import PromptBuilder
 from services.logging_service import LoggingService
 from market.information.information_types import InformationType
 
 class LLMAgent(BaseAgent):
+    # Memory system constants
+    MEMORY_DISPLAY_LIMIT = 10  # Number of recent notes to show in prompts (prevents prompt bloat)
+
     def __init__(self, agent_id: str, agent_type: str,
-                 model_open_ai: str = "gpt-oss-20b", *args, **kwargs):  # Usually set via scenario params
+                 model_open_ai: str = "gpt-oss-20b",
+                 enabled_features: Set[Feature] = None,
+                 *args, **kwargs):  # Usually set via scenario params
         super().__init__(agent_id, *args, **kwargs)
         self.agent_type = AGENT_TYPES[agent_type]
         self.model = model_open_ai
         self._formatter = MarketStateFormatter()
         self._llm_service = LLMService()
-        self.memory_notes = []  # List of (round_number, note) tuples for agent memory
+
+        # Feature toggle system: store enabled features
+        # Default to all features for backward compatibility if not specified
+        self.enabled_features = enabled_features if enabled_features is not None else FeatureRegistry.get_all_features()
+
+        # Conditionally initialize memory based on feature flags
+        if Feature.MEMORY in self.enabled_features:
+            self.memory_notes = []  # List of (round_number, note) tuples for agent memory
 
     def make_decision(self, market_state, history, round_number):
         try:
@@ -25,43 +40,23 @@ class LLMAgent(BaseAgent):
             # Prepare context using signals + market_state
             context = self.prepare_context_llm()
 
-            # Get last round messages for social feed context
-            last_messages = self.get_last_round_messages(round_number)
-
-            strategic_instructions = """
-MEMORY SYSTEM:
-You can optionally write notes to yourself in the 'notes_to_self' field - these will be shown to you in future rounds.
-Use this to track patterns, record what works/doesn't work, and improve your strategy over time.
-
-MESSAGING:
-You can optionally post a message visible to all agents next round using the 'post_message' field.
-Before posting, explain your intent in 'message_reasoning' - what effect do you want your message to have?
-
-Strategic Considerations:
-- Messages can influence other agents' beliefs and decisions
-- You may share information to shape market sentiment
-- You may withhold information for competitive advantage
-- You may signal confidence, uncertainty, or specific views to move prices
-- Consider: What do you want other agents to believe?
-- Be explicit about your messaging strategy in 'message_reasoning'"""
-
-            if last_messages:
-                formatted_messages = "\n".join(
-                    f"- Agent {m['agent_id']}: {m['message']}"
-                    for m in last_messages
+            # Build memory section using PromptBuilder (only if memory enabled)
+            memory_section = ""
+            if Feature.MEMORY in self.enabled_features:
+                memory_notes = getattr(self, 'memory_notes', [])
+                memory_section = PromptBuilder.build_memory_section(
+                    memory_notes,
+                    self.MEMORY_DISPLAY_LIMIT
                 )
-                messages_section = f"\n\nSocial Feed (previous round):\n{formatted_messages}\n{strategic_instructions}"
-            else:
-                messages_section = f"\n\nSocial Feed: No messages yet.\n{strategic_instructions}"
 
-            # Build memory section from stored notes
-            if self.memory_notes:
-                recent_notes = self.memory_notes[-10:]  # Last 10 notes
-                memory_section = "\n\n=== YOUR MEMORY LOG (Last Notes) ===\n" + "\n".join(
-                    f"Round {r}: {note}" for r, note in recent_notes
-                ) + "\n"
-            else:
-                memory_section = ""
+            # Build social feed section using PromptBuilder (only if social enabled)
+            messages_section = ""
+            if Feature.SOCIAL in self.enabled_features:
+                last_messages = self.get_last_round_messages(round_number)
+                messages_section = PromptBuilder.build_social_section(
+                    last_messages,
+                    self.enabled_features
+                )
 
             # Detect if this is a multi-stock scenario
             is_multi_stock = 'stocks' in market_state
@@ -72,14 +67,15 @@ Strategic Considerations:
                 + messages_section
             )
 
-            # Create LLM request
+            # Create LLM request with enabled features
             request = LLMRequest(
                 system_prompt=self.agent_type.system_prompt,
                 user_prompt=user_prompt,
                 model=self.model,
                 agent_id=self.agent_id,
                 round_number=round_number,
-                is_multi_stock=is_multi_stock
+                is_multi_stock=is_multi_stock,
+                enabled_features=self.enabled_features
             )
             
             # Log prompt
@@ -101,13 +97,28 @@ Strategic Considerations:
             # Store replace_decision in the agent instance
             self.last_replace_decision = response.decision['replace_decision']
 
-            # Store memory notes
-            if note := response.decision.get('notes_to_self', '').strip():
-                self.memory_notes.append((round_number, note))
-                LoggingService.log_decision(
-                    f"\n========== Agent {self.agent_id} Memory Note ==========\n"
-                    f"Round {round_number}: {note}"
-                )
+            # Store memory notes with validation (only if memory feature enabled)
+            if Feature.MEMORY in self.enabled_features:
+                if note := response.decision.get('notes_to_self', '').strip():
+                    # Ensure memory_notes exists (should be initialized in __init__)
+                    if not hasattr(self, 'memory_notes'):
+                        self.memory_notes = []
+
+                    # Validation: warn if round numbers are non-monotonic
+                    if self.memory_notes and round_number <= self.memory_notes[-1][0]:
+                        LoggingService.log_decision(
+                            f"\n========== Agent {self.agent_id} Memory Warning ==========\n"
+                            f"Non-monotonic round numbers: previous={self.memory_notes[-1][0]}, current={round_number}"
+                        )
+
+                    # Store the note (all notes are kept in memory + saved to CSV)
+                    self.memory_notes.append((round_number, note))
+
+                    LoggingService.log_decision(
+                        f"\n========== Agent {self.agent_id} Memory Note ==========\n"
+                        f"Round {round_number}: {note}\n"
+                        f"Total notes in memory: {len(self.memory_notes)}"
+                    )
 
             # Get price signal for logging (handle multi-stock format)
             if isinstance(self.private_signals, dict) and self.private_signals.get('is_multi_stock'):
@@ -131,16 +142,17 @@ Strategic Considerations:
             for entry in log_entries:
                 LoggingService.log_structured_decision(entry)
 
-            # Optional: Broadcast message if agent chose to post
-            post_message = response.decision.get('post_message')
-            message_reasoning = response.decision.get('message_reasoning')
-            if post_message:
-                self.broadcast_message(round_number, post_message)
-                reasoning_text = f"\nMessage Reasoning: {message_reasoning}" if message_reasoning else ""
-                LoggingService.log_decision(
-                    f"\n========== Agent {self.agent_id} Posted to Social Feed ==========\n"
-                    f"{post_message}{reasoning_text}"
-                )
+            # Optional: Broadcast message if agent chose to post (only if social feature enabled)
+            if Feature.SOCIAL in self.enabled_features:
+                post_message = response.decision.get('post_message')
+                message_reasoning = response.decision.get('message_reasoning')
+                if post_message:
+                    self.broadcast_message(round_number, post_message)
+                    reasoning_text = f"\nMessage Reasoning: {message_reasoning}" if message_reasoning else ""
+                    LoggingService.log_decision(
+                        f"\n========== Agent {self.agent_id} Posted to Social Feed ==========\n"
+                        f"{post_message}{reasoning_text}"
+                    )
 
             # Auto-fix stock_id for single-stock scenarios
             # In single-stock scenarios, market_state won't have 'stocks' key
@@ -255,4 +267,37 @@ Strategic Considerations:
             signal_history=self.signal_history,
             market_state=market_state
         )
+
+    def reset_memory(self):
+        """Clear agent's memory notes (for simulation resets or testing)
+
+        Note: This only clears the in-memory list. Notes are still preserved
+        in CSV logs for permanent storage and analysis.
+        Only works if memory feature is enabled.
+        """
+        if Feature.MEMORY in self.enabled_features and hasattr(self, 'memory_notes'):
+            self.memory_notes.clear()
+            LoggingService.log_decision(
+                f"\n========== Agent {self.agent_id} Memory Reset ==========\n"
+                f"All memory notes cleared"
+            )
+        else:
+            LoggingService.log_decision(
+                f"\n========== Agent {self.agent_id} Memory Reset Skipped ==========\n"
+                f"Memory feature not enabled for this agent"
+            )
+
+    def get_memory_timeline(self) -> List[Dict[str, Any]]:
+        """Export memory notes as structured data for analysis
+
+        Returns:
+            List of dicts with keys: round, note
+            Empty list if memory feature is not enabled
+        """
+        if Feature.MEMORY in self.enabled_features and hasattr(self, 'memory_notes'):
+            return [
+                {'round': round_num, 'note': note}
+                for round_num, note in self.memory_notes
+            ]
+        return []
  

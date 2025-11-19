@@ -15,6 +15,7 @@ Scenarios are organized by category:
 - social_dynamics: Testing social influence and herd behavior
 - multi_stock: Testing multi-stock trading scenarios
 - multi_model: Testing different LLM models competing against each other
+- feature_ab_tests: A/B testing pairs for feature toggle system
 - test_scenarios: Simple test scenarios for development
 """
 
@@ -28,6 +29,7 @@ from . import short_selling
 from . import social_dynamics
 from . import multi_stock
 from . import multi_model
+from . import feature_ab_tests
 from . import test_scenarios
 
 # Combine all scenarios into a single registry
@@ -38,6 +40,7 @@ SCENARIOS = {
     **social_dynamics.SCENARIOS,
     **multi_stock.SCENARIOS,
     **multi_model.MULTI_MODEL_SCENARIOS,
+    **feature_ab_tests.SCENARIOS,
     **test_scenarios.SCENARIOS,
 }
 
