@@ -1,6 +1,24 @@
 from typing import Dict, Any
 from calculate_fundamental import calculate_fundamental_price, calibrate_redemption_value
 
+# =============================================================================
+# LLM Configuration (Non-sensitive settings - safe to commit)
+# =============================================================================
+# Default LLM provider settings
+DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"  # UF Hypergator endpoint
+DEFAULT_LLM_MODEL = "llama-3.1-70b-instruct"           # Default model
+
+# Alternative configurations (comment/uncomment to switch):
+# OpenAI:
+# DEFAULT_LLM_BASE_URL = None  # None = use OpenAI default
+# DEFAULT_LLM_MODEL = "gpt-4o-2024-11-20"
+
+# Other UF Hypergator models:
+# DEFAULT_LLM_MODEL = "gpt-oss-20b"              # Reasoning model
+# DEFAULT_LLM_MODEL = "gpt-oss-120b"             # Large reasoning model
+# DEFAULT_LLM_MODEL = "llama-3.1-8b-instruct"    # Smaller/faster Llama
+# =============================================================================
+
 class SimulationScenario:
     """
     Represents a specific simulation scenario with a defined set of parameters.
@@ -98,7 +116,7 @@ DEFAULT_PARAMS = {
     "LENDABLE_SHARES": 0,
 
     # Agent parameters
-    "MODEL_OPEN_AI": "gpt-4o-2024-11-20",
+    "MODEL_OPEN_AI": DEFAULT_LLM_MODEL,  # Set at top of this file
     "AGENT_PARAMS": {
         'allow_short_selling': False,
         'margin_requirement': 0.5,

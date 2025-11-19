@@ -13,7 +13,8 @@ class CashLendingRepository:
         self,
         total_lendable_cash: float = float('inf'),
         allow_partial_borrows: bool = False,
-        logger=None
+        logger=None,
+        context=None
     ) -> None:
         """Initialize the cash lending repository.
 
@@ -21,12 +22,14 @@ class CashLendingRepository:
             total_lendable_cash: Total cash available to lend (default: unlimited)
             allow_partial_borrows: If True, allow partial fills when pool has insufficient cash
             logger: Optional logger instance
+            context: SimulationContext for tracking borrowed cash history
         """
         self.total_lendable_cash = total_lendable_cash
         self.available_cash = total_lendable_cash
         self.borrowed: Dict[str, float] = {}
         self.allow_partial_borrows = allow_partial_borrows
         self.logger = logger or LoggingService.get_logger('cash_lending')
+        self.context = context  # For recording borrowed cash in market history
 
         # Handle case where LoggingService returns None
         if self.logger is None:
@@ -87,6 +90,13 @@ class CashLendingRepository:
         # Update state
         self.available_cash -= allocated
         self.borrowed[agent_id] = self.borrowed.get(agent_id, 0.0) + allocated
+
+        # Record in market history if context available
+        if self.context:
+            self.context.record_leverage_cash_borrowed(
+                amount=allocated,
+                round_number=self.context.round_number
+            )
 
         if allocated < amount:
             self.logger.info(

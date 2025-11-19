@@ -143,7 +143,7 @@ class AgentManager:
             if required > state.available_cash + order.current_cash_commitment:
                 error_msg = f"Insufficient cash: needs {required:.2f}, has {state.available_cash:.2f} + {order.current_cash_commitment:.2f}"
                 LoggingService.log_validation_error(
-                    round_number=self.agent_repository.current_round,
+                    round_number=self.context.round_number,
                     agent_id=order.agent_id,
                     agent_type=agent.__class__.__name__,
                     error_type="INSUFFICIENT_CASH",
@@ -156,7 +156,7 @@ class AgentManager:
                 error_msg = f"Insufficient shares: needs {required}, has {state.available_shares} available shares + {order.current_share_commitment} currently committed shares"
                 # Log validation error
                 LoggingService.log_validation_error(
-                    round_number=self.agent_repository.current_round,
+                    round_number=self.context.round_number,
                     agent_id=order.agent_id,
                     agent_type=agent.__class__.__name__,
                     error_type="INSUFFICIENT_SHARES",

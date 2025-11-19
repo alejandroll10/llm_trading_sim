@@ -24,6 +24,7 @@ DETERMINISTIC_AGENTS = {
     "deterministic_market_maker": DeterministicMarketMaker,
     "hold_trader": HoldTrader,
     "short_sell_trader": ShortSellTrader,
+    "short_seller": ShortSellTrader,  # Alias for consistency with agent_types.py
     "buy_to_close_trader": BuyToCloseTrader,
     "multi_stock_test": MultiStockValueTrader,
     "multi_stock_value": MultiStockValueTrader,

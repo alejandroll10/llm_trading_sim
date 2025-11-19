@@ -14,6 +14,7 @@ Scenarios are organized by category:
 - short_selling: Testing short selling mechanics
 - social_dynamics: Testing social influence and herd behavior
 - multi_stock: Testing multi-stock trading scenarios
+- multi_model: Testing different LLM models competing against each other
 - test_scenarios: Simple test scenarios for development
 """
 
@@ -26,6 +27,7 @@ from . import market_stress
 from . import short_selling
 from . import social_dynamics
 from . import multi_stock
+from . import multi_model
 from . import test_scenarios
 
 # Combine all scenarios into a single registry
@@ -35,6 +37,7 @@ SCENARIOS = {
     **short_selling.SCENARIOS,
     **social_dynamics.SCENARIOS,
     **multi_stock.SCENARIOS,
+    **multi_model.MULTI_MODEL_SCENARIOS,
     **test_scenarios.SCENARIOS,
 }
 

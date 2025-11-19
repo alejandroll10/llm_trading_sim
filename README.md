@@ -58,13 +58,39 @@ This paper presents a realistic simulated stock market where large language mode
     pip install -r requirements.txt
     ```
 
-4.  **Configure Environment Variables:**
-    This project requires an `OPENAI_API_KEY` to be stored in a `.env` file at the root of the project. This file is not tracked by Git for security reasons. 
+4.  **Configure LLM Provider:**
 
-    You will need to create this file yourself and add your key like this:
-    ```
+    **Step 1 - Add API Key:**
+
+    Create a `.env` file in the project root:
+    ```bash
     OPENAI_API_KEY="sk-..."
     ```
+
+    - **UF Hypergator:** Get virtual key from https://api.ai.it.ufl.edu/ui/
+    - **OpenAI:** Get API key from https://platform.openai.com/api-keys
+
+    **Step 2 - Select Model:**
+
+    Edit lines 8-9 in `src/scenarios/base.py`:
+
+    **Option A - UF Hypergator (Free for UF users):**
+    ```python
+    DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"
+    DEFAULT_LLM_MODEL = "llama-3.1-70b-instruct"
+    ```
+
+    **Option B - OpenAI (Paid service):**
+    ```python
+    DEFAULT_LLM_BASE_URL = None  # None = use OpenAI's default endpoint
+    DEFAULT_LLM_MODEL = "gpt-4o-2024-11-20"
+    ```
+
+    **Verified Working Models:**
+    - UF Hypergator: `llama-3.1-70b-instruct` ✅, `llama-3.3-70b-instruct` ✅, `gpt-oss-20b` ✅, `gpt-oss-120b` ✅
+    - OpenAI: `gpt-4o` ✅, `gpt-4o-2024-11-20` ✅
+
+    **Note:** Smaller models like `llama-3.1-8b-instruct` fail structured output validation. Use 70B+ models for reliable results.
 
 ## Usage
 

@@ -22,9 +22,9 @@ class OrderValidationService:
         """Validate basic market order properties and commitments"""
         if order.order_type != 'market':
             LoggingService.log_validation_error(
-                round_number=self._agent_manager.current_round,
+                round_number=self._agent_manager.context.round_number,
                 agent_id=order.agent_id,
-                agent_type=self._agent_manager.get_agent(order.agent_id).__class__.__name__,
+                agent_type=self._agent_manager.agent_repository.get_agent(order.agent_id).__class__.__name__,
                 error_type="INVALID_ORDER_TYPE",
                 details=f"Expected market order, got {order.order_type}",
                 attempted_action=f"{order.order_type.upper()} {order.quantity}"
@@ -38,12 +38,12 @@ class OrderValidationService:
             return ValidationResult(False, f"Invalid order side: {order.side}")
         
         is_valid, max_qty, message = self._agent_manager.validate_order(order)
-        
+
         if not is_valid:
             LoggingService.log_validation_error(
-                round_number=self._agent_manager.current_round,
+                round_number=self._agent_manager.context.round_number,
                 agent_id=order.agent_id,
-                agent_type=self._agent_manager.get_agent(order.agent_id).__class__.__name__,
+                agent_type=self._agent_manager.agent_repository.get_agent(order.agent_id).__class__.__name__,
                 error_type="ORDER_VALIDATION_FAILED",
                 details=message,
                 attempted_action=f"{order.side.upper()} {order.quantity}"

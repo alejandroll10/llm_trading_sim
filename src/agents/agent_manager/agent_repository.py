@@ -271,8 +271,9 @@ class AgentRepository:
                 - reasoning: str
         """
         agent = self.get_agent(agent_id)
+
         decision = agent.make_decision(market_state, history, round_number)
-        
+
         # Ensure decision is converted to dict format for consistency
         if isinstance(decision, TradeDecision):
             return decision.model_dump()

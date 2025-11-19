@@ -19,6 +19,8 @@ class MarketHistory:
     quote_history: List[Dict]
     short_interest: List[float]
     borrow_fees_paid: List[float]
+    leverage_cash_borrowed: List[float]  # Track cash borrowed for leverage
+    leverage_interest_charged: List[float]  # Track interest paid on borrowed cash
 
 class SimulationContext:
     """
@@ -56,7 +58,9 @@ class SimulationContext:
             trade_history=[],
             quote_history=[],
             short_interest=[0],
-            borrow_fees_paid=[]
+            borrow_fees_paid=[],
+            leverage_cash_borrowed=[],
+            leverage_interest_charged=[]
         )
         
         # Public market information (observable by all)
@@ -109,6 +113,22 @@ class SimulationContext:
     def record_borrow_fee_payment(self, amount: float, round_number: int):
         """Record borrow fee payment"""
         self.market_history.borrow_fees_paid.append({
+            'round': round_number,
+            'amount': amount,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    def record_leverage_cash_borrowed(self, amount: float, round_number: int):
+        """Record cash borrowed for leverage"""
+        self.market_history.leverage_cash_borrowed.append({
+            'round': round_number,
+            'amount': amount,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    def record_leverage_interest_charged(self, amount: float, round_number: int):
+        """Record interest charged on borrowed cash"""
+        self.market_history.leverage_interest_charged.append({
             'round': round_number,
             'amount': amount,
             'timestamp': datetime.now().isoformat()

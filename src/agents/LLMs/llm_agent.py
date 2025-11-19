@@ -8,13 +8,14 @@ from services.logging_service import LoggingService
 from market.information.information_types import InformationType
 
 class LLMAgent(BaseAgent):
-    def __init__(self, agent_id: str, agent_type: str, 
-                 model_open_ai: str = "gpt-4o", *args, **kwargs):
+    def __init__(self, agent_id: str, agent_type: str,
+                 model_open_ai: str = "gpt-oss-20b", *args, **kwargs):  # Usually set via scenario params
         super().__init__(agent_id, *args, **kwargs)
         self.agent_type = AGENT_TYPES[agent_type]
         self.model = model_open_ai
         self._formatter = MarketStateFormatter()
         self._llm_service = LLMService()
+        self.memory_notes = []  # List of (round_number, note) tuples for agent memory
 
     def make_decision(self, market_state, history, round_number):
         try:
@@ -28,6 +29,11 @@ class LLMAgent(BaseAgent):
             last_messages = self.get_last_round_messages(round_number)
 
             strategic_instructions = """
+MEMORY SYSTEM:
+You can optionally write notes to yourself in the 'notes_to_self' field - these will be shown to you in future rounds.
+Use this to track patterns, record what works/doesn't work, and improve your strategy over time.
+
+MESSAGING:
 You can optionally post a message visible to all agents next round using the 'post_message' field.
 Before posting, explain your intent in 'message_reasoning' - what effect do you want your message to have?
 
@@ -48,8 +54,21 @@ Strategic Considerations:
             else:
                 messages_section = f"\n\nSocial Feed: No messages yet.\n{strategic_instructions}"
 
+            # Build memory section from stored notes
+            if self.memory_notes:
+                recent_notes = self.memory_notes[-10:]  # Last 10 notes
+                memory_section = "\n\n=== YOUR MEMORY LOG (Last Notes) ===\n" + "\n".join(
+                    f"Round {r}: {note}" for r, note in recent_notes
+                ) + "\n"
+            else:
+                memory_section = ""
+
+            # Detect if this is a multi-stock scenario
+            is_multi_stock = 'stocks' in market_state
+
             user_prompt = (
                 self.agent_type.user_prompt_template.format(**context)
+                + memory_section
                 + messages_section
             )
 
@@ -59,7 +78,8 @@ Strategic Considerations:
                 user_prompt=user_prompt,
                 model=self.model,
                 agent_id=self.agent_id,
-                round_number=round_number
+                round_number=round_number,
+                is_multi_stock=is_multi_stock
             )
             
             # Log prompt
@@ -80,6 +100,14 @@ Strategic Considerations:
             
             # Store replace_decision in the agent instance
             self.last_replace_decision = response.decision['replace_decision']
+
+            # Store memory notes
+            if note := response.decision.get('notes_to_self', '').strip():
+                self.memory_notes.append((round_number, note))
+                LoggingService.log_decision(
+                    f"\n========== Agent {self.agent_id} Memory Note ==========\n"
+                    f"Round {round_number}: {note}"
+                )
 
             # Get price signal for logging (handle multi-stock format)
             if isinstance(self.private_signals, dict) and self.private_signals.get('is_multi_stock'):
@@ -113,6 +141,14 @@ Strategic Considerations:
                     f"\n========== Agent {self.agent_id} Posted to Social Feed ==========\n"
                     f"{post_message}{reasoning_text}"
                 )
+
+            # Auto-fix stock_id for single-stock scenarios
+            # In single-stock scenarios, market_state won't have 'stocks' key
+            is_single_stock = 'stocks' not in market_state
+            if is_single_stock and response.decision.get('orders'):
+                for order in response.decision['orders']:
+                    if isinstance(order, dict):
+                        order['stock_id'] = 'DEFAULT_STOCK'
 
             return response.decision
                 

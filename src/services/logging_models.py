@@ -61,6 +61,7 @@ class DecisionLogEntry:
     price_target: float = 0.0  # Agent's predicted price for next round
     valuation_reasoning: str = ""  # Separate reasoning for valuation
     price_target_reasoning: str = ""  # Separate reasoning for price target
+    notes_to_self: str = ""  # Agent's memory notes for future rounds
 
     @staticmethod
     def from_decision(
@@ -82,9 +83,13 @@ class DecisionLogEntry:
         price_target = decision_dict.get('price_target', 0.0)
         valuation_reasoning = decision_dict.get('valuation_reasoning', '').replace('"', "'").replace(',', ';')
         price_target_reasoning = decision_dict.get('price_target_reasoning', '').replace('"', "'").replace(',', ';')
-        
+
         # Ensure reasoning is present
         reasoning = decision_dict.get('reasoning', '').replace('"', "'").replace(',', ';')
+
+        # Extract memory notes (handle None case when LLM doesn't include field)
+        notes_to_self = decision_dict.get('notes_to_self') or ''
+        notes_to_self = notes_to_self.replace('"', "'").replace(',', ';')
         
         if not decision_dict.get('orders'):
             # Log hold decision
@@ -102,7 +107,8 @@ class DecisionLogEntry:
                 valuation=valuation,
                 price_target=price_target,
                 valuation_reasoning=valuation_reasoning,
-                price_target_reasoning=price_target_reasoning
+                price_target_reasoning=price_target_reasoning,
+                notes_to_self=notes_to_self
             ))
             return entries
             
@@ -122,7 +128,8 @@ class DecisionLogEntry:
                 valuation=valuation,
                 price_target=price_target,
                 valuation_reasoning=valuation_reasoning,
-                price_target_reasoning=price_target_reasoning
+                price_target_reasoning=price_target_reasoning,
+                notes_to_self=notes_to_self
             ))
         
         return entries
@@ -133,7 +140,7 @@ class DecisionLogEntry:
             f"{self.timestamp},{self.round_number},{self.agent_id},"
             f"{self.agent_type_name},{self.agent_type_id},{self.decision},"
             f"{self.order_type},{self.quantity},{self.price},\"{self.reasoning}\","
-            f"{self.valuation},{self.price_target},\"{self.valuation_reasoning}\",\"{self.price_target_reasoning}\""
+            f"{self.valuation},{self.price_target},\"{self.valuation_reasoning}\",\"{self.price_target_reasoning}\",\"{self.notes_to_self}\""
         )
 
 @dataclass

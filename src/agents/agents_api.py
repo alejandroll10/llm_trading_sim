@@ -53,6 +53,9 @@ class TradeDecision(BaseModel):
             - "Replace": Cancels all existing orders and places new orders
         message_reasoning: Reasoning for the social media message (what effect do you want it to have?)
         post_message: Optional message to post to social feed
+        notes_to_self: Optional notes to your future self about what you learned this round,
+            patterns observed, or strategy adjustments. These notes appear in your memory log
+            in future rounds.
     """
     valuation_reasoning: str
     valuation: float
@@ -63,10 +66,12 @@ class TradeDecision(BaseModel):
     replace_decision: Literal["Cancel", "Replace", "Add"] = "Replace"
     message_reasoning: str | None = None
     post_message: str | None = None
+    notes_to_self: str | None = None
 
     @model_validator(mode='after')
     def validate_order_api(self):
         """Validate the complete order"""
+
         # Handle Cancel replace_decision
         if self.replace_decision == "Cancel":
             self.orders = []
@@ -76,11 +81,11 @@ class TradeDecision(BaseModel):
         if self.orders:
             price_matches = re.findall(r'\$?(\d+\.?\d*)', self.reasoning)
             for order in self.orders:
-                if (order.order_type == OrderType.LIMIT and 
-                    order.price_limit is None and 
+                if (order.order_type == OrderType.LIMIT and
+                    order.price_limit is None and
                     price_matches):
                     order.price_limit = float(price_matches[0])
-        
+
         return self
 
     model_config = {

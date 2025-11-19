@@ -26,6 +26,7 @@ from market.state.provider_registry import ProviderRegistry
 from services.logging_service import LoggingService
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
 from agents.agent_manager.services.cash_lending_repository import CashLendingRepository
+from verification.simulation_verifier import SimulationVerifier
 import random
 import warnings
 from wordcloud import WordCloud
@@ -267,7 +268,8 @@ class BaseSimulation:
             self.cash_lending_repo = CashLendingRepository(
                 total_lendable_cash=cash_lending_pool,
                 allow_partial_borrows=allow_partial_cash_borrows,
-                logger=LoggingService.get_logger('cash_lending')
+                logger=LoggingService.get_logger('cash_lending'),
+                context=self.context
             )
 
             # Leverage interest service
@@ -398,163 +400,44 @@ class BaseSimulation:
             context=self.context
         )
 
+        # Initialize verification service
+        self.verifier = SimulationVerifier(
+            agent_repository=self.agent_repository,
+            context=self.context,
+            contexts=self.contexts if self.is_multi_stock else None,
+            order_repository=self.order_repository,
+            order_book=self.order_book,
+            order_books=self.order_books if self.is_multi_stock else None,
+            borrowing_repository=self.borrowing_repository,
+            borrowing_repositories=self.borrowing_repositories if self.is_multi_stock else None,
+            dividend_service=self.dividend_service,
+            dividend_services=self.dividend_services if self.is_multi_stock else None,
+            is_multi_stock=self.is_multi_stock,
+            infinite_rounds=self.infinite_rounds,
+            agent_params=self.agent_params,
+            leverage_enabled=self.leverage_enabled,
+            cash_lending_repo=self.cash_lending_repo if self.leverage_enabled else None,
+            interest_service=self.interest_service,
+            borrow_service=self.borrow_service,
+            leverage_interest_service=self.leverage_interest_service if self.leverage_enabled else None
+        )
+
     def execute_round(self, round_number):
         """Execute a single round of trading"""
         # Log initial states
         self._log_round_start(round_number)
 
         # Store pre-round states for verification
-        pre_round_states = self._store_pre_round_states()
+        pre_round_states = self.verifier.store_pre_round_states()
 
         # 1. UPDATE MARKET AND CONTEXT at the beginning of the round
-        self._update_all_market_depths()
-
-        # Get last volume from data recorder
-        if self.is_multi_stock:
-            # Multi-stock: Get per-stock volumes from market_data
-            # market_data has one entry per stock per round
-            last_stock_volumes = {}
-            if self.data_recorder.market_data:
-                # Get volumes from previous round for each stock
-                for stock_id in self.contexts.keys():
-                    # Filter market_data for this stock and previous round
-                    prev_round_data = [
-                        entry for entry in self.data_recorder.market_data
-                        if entry['stock_id'] == stock_id and entry['round'] == round_number
-                    ]
-                    last_stock_volumes[stock_id] = (
-                        prev_round_data[-1]['total_volume']
-                        if prev_round_data
-                        else 0
-                    )
-            else:
-                # First round - no previous volume
-                last_stock_volumes = {stock_id: 0 for stock_id in self.contexts.keys()}
-        else:
-            # Single-stock: Get total volume from history
-            last_volume = (
-                self.data_recorder.history[-1]['total_volume']
-                if self.data_recorder.history
-                else 0
-            )
-
-        # Update market components and build market state
-        if self.is_multi_stock:
-            # Multi-stock: Update each manager and aggregate state
-            market_state = {
-                'stocks': {},
-                'round_number': round_number + 1,
-                'is_multi_stock': True
-            }
-
-            # Update all managers WITHOUT distributing information yet
-            for stock_id, manager in self.market_state_managers.items():
-                # Update public info for this stock BEFORE calling manager.update()
-                # This updates public_info['last_trade']['volume'] with the previous round's volume
-                stock_last_volume = last_stock_volumes[stock_id]
-                self.contexts[stock_id].update_public_info(round_number, stock_last_volume)
-
-                # Call manager.update() with skip_distribution to avoid multiple calls
-                # We'll distribute once after all managers are updated
-                stock_market_state = manager.update(
-                    round_number=round_number,
-                    last_volume=stock_last_volume,
-                    is_round_end=False,
-                    skip_distribution=True  # NEW: Skip distribution in multi-stock mode
-                )
-                # Store this stock's state
-                market_state['stocks'][stock_id] = stock_market_state
-
-            # Now distribute information ONCE for all stocks
-            # Get any manager's information_service (they all share the same one)
-            first_manager = list(self.market_state_managers.values())[0]
-            information_service = first_manager.information_service
-
-            # Ensure providers are registered (lazy initialization)
-            # IMPORTANT: Register from ALL managers to ensure we get providers from any stock that has them
-            if not information_service.providers:
-                for manager in self.market_state_managers.values():
-                    ProviderRegistry.register_providers(
-                        information_service=information_service,
-                        market_state_manager=manager,
-                        dividend_service=manager.dividend_service,
-                        interest_service=manager.interest_service,
-                        borrow_service=manager.borrow_service,
-                        hide_fundamental_price=self.hide_fundamental_price
-                    )
-                    # Providers dict is shared, so each manager adds its providers
-                    # If multiple managers have the same provider, the last one wins (but they're equivalent)
-
-            # Distribute information for all stocks
-            information_service.distribute_information(round_number)
-        else:
-            # Single stock: Original behavior
-            self.context.update_public_info(round_number, last_volume)
-            market_state = self.market_state_manager.update(
-                round_number=round_number,
-                last_volume=last_volume,
-                is_round_end=False
-            )
+        market_state = self._phase_update_market(round_number)
 
         # 2. COLLECT NEW AGENT DECISIONS (ORDERS)
         new_orders = self._phase_collect_decisions(market_state, round_number)
 
         # 3. EXECUTE TRADES using the matching engine
-        if self.is_multi_stock:
-            # Multi-stock: Match orders FOR EACH STOCK separately (THE BIG FOR LOOP!)
-            # Store results per stock to avoid overwriting
-            stock_market_results = {}
-
-            for stock_id in self.contexts.keys():
-                # Filter orders for THIS stock only
-                stock_orders = [o for o in new_orders if o.stock_id == stock_id]
-
-                self.logger.info(f"=== Matching {len(stock_orders)} orders for {stock_id} ===")
-
-                # Match orders for this stock
-                stock_market_results[stock_id] = self.matching_engines[stock_id].match_orders(
-                    stock_orders,
-                    self.contexts[stock_id].current_price,
-                    round_number + 1
-                )
-
-                # Update price for THIS stock
-                self.contexts[stock_id].current_price = stock_market_results[stock_id].price
-                self.contexts[stock_id].round_number = round_number + 1
-
-            # Aggregate all trades and volumes from all stocks
-            all_trades = []
-            total_volume = 0
-            for stock_id, result in stock_market_results.items():
-                all_trades.extend(result.trades)
-                total_volume += result.volume
-
-            # Create aggregated market result for backwards compatibility
-            # Use first stock's result as template, but with aggregated trades/volume
-            first_result = list(stock_market_results.values())[0]
-            market_result = type(first_result)(
-                price=first_result.price,  # Not used in multi-stock (each stock has own price)
-                trades=all_trades,
-                volume=total_volume
-            )
-
-            # Update backwards-compatible self.context
-            self.context.round_number = round_number + 1
-
-            # Update agent wealth with all stock prices (multi-stock)
-            all_prices = {stock_id: ctx.current_price for stock_id, ctx in self.contexts.items()}
-            self.agent_repository.update_all_wealth(all_prices)
-        else:
-            # Single stock: Original behavior
-            market_result = self.matching_engine.match_orders(
-                new_orders,
-                self.context.current_price,
-                round_number + 1
-            )
-
-            # Update price and round number in the context
-            self.context.current_price = market_result.price
-            self.context.round_number = round_number + 1
+        market_result, stock_market_results = self._phase_match_orders(new_orders, round_number)
 
         # Update market depth after matching
         self._update_all_market_depths()
@@ -569,72 +452,13 @@ class BaseSimulation:
         )
 
         # 5. FINAL END-OF-ROUND UPDATES (including interest/dividend payments)
-        # Check if this is final redemption round
-        is_final_round = round_number == self.context._num_rounds - 1 and not self.infinite_rounds
-
-        if self.is_multi_stock:
-            # Multi-stock: Let each manager handle end-of-round processing
-            # Managers will process dividends/redemption through their _process_end_of_round() method
-            total_payments = 0.0
-
-            for stock_id, manager in self.market_state_managers.items():
-                # If final round with redemption, cancel all orders for this stock BEFORE redemption
-                # This releases commitments properly back to positions
-                if is_final_round and self.contexts[stock_id].redemption_value is not None:
-                    self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
-                    self._cancel_all_orders_for_stock(stock_id)
-
-                # Manager.update() with is_round_end=True handles all end-of-round processing
-                # Pass THIS stock's volume, not the aggregated total
-                stock_volume = stock_market_results[stock_id].volume
-                manager.update(
-                    round_number=round_number,
-                    last_volume=stock_volume,
-                    is_round_end=True
-                )
-                manager.update_market_depth()
-
-                # Aggregate total payments from all stocks for logging
-                # Get last payment from dividend service if it exists
-                if manager.dividend_service and manager.dividend_service.dividend_history:
-                    stock_payment = manager.dividend_service.dividend_history[-1]
-                    total_payments += stock_payment
-                    self.logger.info(f"  {stock_id} dividend payment: ${stock_payment:.2f}")
-
-            last_paid_dividend = total_payments
-            self.logger.info(f"Total payments across all stocks: ${total_payments:.2f}")
-        else:
-            # Single stock: Original behavior
-            # If final round with redemption, cancel all orders BEFORE redemption
-            if is_final_round and self.context.redemption_value is not None:
-                stock_id = self.dividend_service.stock_id if self.dividend_service else "DEFAULT_STOCK"
-                self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
-                self._cancel_all_orders_for_stock(stock_id)
-
-            self.market_state_manager.update(
-                round_number=round_number,
-                last_volume=market_result.volume,
-                is_round_end=True
-            )
-            self.market_state_manager.update_market_depth()
-
-        self.logger.info(f"Dividends paid last round: {last_paid_dividend}")
-
-        # NEW: Charge interest on borrowed cash for leverage (after market state updates)
-        if self.leverage_enabled and self.leverage_interest_service:
-            interest_charged = self.leverage_interest_service.charge_interest(
-                self.agent_repository.get_all_agents(),
-                rounds_per_year=252  # Daily trading
-            )
-            if interest_charged:
-                total_leverage_interest = sum(interest_charged.values())
-                self.logger.info(
-                    f"Leverage interest charged this round: ${total_leverage_interest:.2f} "
-                    f"({len(interest_charged)} agents)"
-                )
-
-        # Verify final states
-        self._verify_round_end_states(pre_round_states)
+        self._phase_end_of_round(
+            round_number=round_number,
+            market_result=market_result,
+            stock_market_results=stock_market_results,
+            pre_round_states=pre_round_states,
+            last_paid_dividend=last_paid_dividend
+        )
 
     def create_agent(self, agent_id: int, agent_type: str, agent_params: dict):
         """Factory method to create appropriate agent type with explicit parameters"""
@@ -732,437 +556,6 @@ class BaseSimulation:
                 LoggingService.log_simulation(f"Failed to save final data: {str(e)}")
        # Clean up expired orders at end of round
 
-    def _verify_round_end_states(self, pre_round_states):
-        """Verify agent states at end of round"""
-        logger = LoggingService.get_logger('verification')
-        self.logger.info(f"\n=== Verifying state changes for round {self.context.round_number} ===")
-        
-        # Log individual agent changes
-        self.logger.info("\nPer-agent cash changes:")
-        for agent_id in pre_round_states:
-            pre_cash = pre_round_states[agent_id]['total_cash']
-            post_cash = self.agent_repository.get_agent(agent_id).total_cash
-            change = post_cash - pre_cash
-            self.logger.info(f"Agent {agent_id}: ${pre_cash:.2f} -> ${post_cash:.2f} (Δ${change:.2f})")
-
-        # Calculate totals
-        total_cash_pre = sum(state['total_cash'] for state in pre_round_states.values())
-        total_cash_post = sum(
-            self.agent_repository.get_agent(agent_id).total_cash
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-        
-        # Get payments from this round
-        current_round = self.context.round_number
-
-        if self.is_multi_stock:
-            # Multi-stock: Aggregate payments from all stock contexts
-            dividend_payment = 0.0
-            interest_payment = 0.0
-            borrow_fee_payment = 0.0
-
-            for stock_id, context in self.contexts.items():
-                dividend_payment += sum(
-                    payment['amount']
-                    for payment in context.market_history.dividends_paid
-                    if payment['round'] == current_round - 1
-                )
-                interest_payment += sum(
-                    payment['amount']
-                    for payment in context.market_history.interest_paid
-                    if payment['round'] == current_round - 1
-                )
-                borrow_fee_payment += sum(
-                    payment['amount']
-                    for payment in context.market_history.borrow_fees_paid
-                    if payment['round'] == current_round - 1
-                )
-        else:
-            # Single stock: Original behavior
-            dividend_payment = sum(
-                payment['amount']
-                for payment in self.context.market_history.dividends_paid
-                if payment['round'] == current_round - 1
-            )
-            interest_payment = sum(
-                payment['amount']
-                for payment in self.context.market_history.interest_paid
-                if payment['round'] == current_round - 1
-            )
-            borrow_fee_payment = sum(
-                payment['amount']
-                for payment in self.context.market_history.borrow_fees_paid
-                if payment['round'] == current_round - 1
-            )
-
-        self.logger.info(
-            f"Round payments - Dividends: ${dividend_payment:.2f}, Interest: ${interest_payment:.2f}, Borrow Fees: ${borrow_fee_payment:.2f}"
-        )
-
-        # Verify round-by-round changes
-        cash_difference = total_cash_post - total_cash_pre
-        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment
-        self.logger.info(f"Cash change: ${cash_difference:.2f}, Expected: ${total_round_payments:.2f}")
-
-        if abs(cash_difference - total_round_payments) > 0.01:
-            msg = (f"Round cash change doesn't match round payments:\n"
-                   f"Change in cash: ${cash_difference:.2f}\n"
-                   f"Round payments: ${total_round_payments:.2f}")
-            logger.error(msg)
-            raise ValueError(msg)
-        
-        # Verify total system cash
-        initial_cash = sum(
-            self.agent_repository.get_agent(agent_id).initial_cash
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-
-        if self.is_multi_stock:
-            # Multi-stock: Aggregate historical payments from all stock contexts
-            total_historical_dividends = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.dividends_paid
-            )
-            total_historical_interest = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.interest_paid
-            )
-            total_historical_borrow_fees = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.borrow_fees_paid
-            )
-        else:
-            # Single stock: Original behavior
-            total_historical_dividends = sum(payment['amount'] for payment in self.context.market_history.dividends_paid)
-            total_historical_interest = sum(payment['amount'] for payment in self.context.market_history.interest_paid)
-            total_historical_borrow_fees = sum(payment['amount'] for payment in self.context.market_history.borrow_fees_paid)
-        expected_total_cash = (
-            initial_cash + total_historical_dividends + total_historical_interest - total_historical_borrow_fees
-        )
-
-        self.logger.info(f"\n=== System-wide cash verification ===")
-        self.logger.info(f"Initial cash: ${initial_cash:.2f}")
-        self.logger.info(f"Total historical dividends: ${total_historical_dividends:.2f}")
-        self.logger.info(f"Total historical interest: ${total_historical_interest:.2f}")
-        self.logger.info(f"Total historical borrow fees: ${total_historical_borrow_fees:.2f}")
-        self.logger.info(f"Current total cash: ${total_cash_post:.2f}")
-        self.logger.info(f"Expected total: ${expected_total_cash:.2f}")
-
-        if abs(total_cash_post - expected_total_cash) > 0.01:
-            msg = (f"Total system cash doesn't match historical payments")
-            logger.error(msg)
-            raise ValueError(msg)
-
-        # Share verification
-        initial_shares = sum(
-            self.agent_repository.get_agent(agent_id).initial_shares
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-        
-        # Check if this is the final round and shares are being redeemed
-        is_final_redemption = (
-            self.context.round_number == self.context._num_rounds and 
-            not self.infinite_rounds
-        )
-        
-        self.logger.info("\n=== Share allocation verification ===")
-        self.logger.info("Initial allocation:")
-        if 'initial_shares' in self.agent_params:
-            self.logger.info(f"Per agent: {self.agent_params['initial_shares']}")
-        elif 'initial_positions' in self.agent_params:
-            self.logger.info(f"Per agent (multi-stock): {self.agent_params['initial_positions']}")
-        self.logger.info(f"Total: {initial_shares}")
-        
-        # Log pre-round share distribution
-        self.logger.info("\nPre-round share distribution:")
-        pre_shares = {
-            agent_id: state['total_shares']
-            for agent_id, state in pre_round_states.items()
-        }
-        for agent_id, shares in pre_shares.items():
-            self.logger.info(f"Agent {agent_id}: {shares}")
-        self.logger.info(f"Pre-round total: {sum(pre_shares.values())}")
-        
-        # Log post-round share distribution
-        self.logger.info("\nPost-round share distribution:")
-        post_shares = {
-            agent_id: self.agent_repository.get_agent(agent_id).total_shares
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        }
-        for agent_id, shares in post_shares.items():
-            agent = self.agent_repository.get_agent(agent_id)
-            self.logger.info(f"Agent {agent_id}: {shares} (available: {agent.shares}, committed: {agent.committed_shares})")
-        
-        total_shares_current = sum(post_shares.values())
-        self.logger.info(f"Post-round total: {total_shares_current}")
-
-        borrowed_total = self.agent_repository.borrowing_repository.total_lendable - self.agent_repository.borrowing_repository.available_shares
-        expected_total_shares = initial_shares + borrowed_total
-
-        # Modified verification logic
-        if is_final_redemption:
-            if total_shares_current != 0:
-                msg = (f"Final redemption: All shares should be zero but found {total_shares_current} shares"
-                       f"Initial shares: {initial_shares}"
-                       f"Current shares: {total_shares_current}"
-                       f"Share changes this round:")
-                for agent_id in pre_shares:
-                    change = post_shares[agent_id] - pre_shares[agent_id]
-                    msg += f"\nAgent {agent_id}: {pre_shares[agent_id]} -> {post_shares[agent_id]} (Δ{change})"
-                logger.error(msg)
-                raise ValueError(msg)
-            else:
-                redemption_msg = "Final redemption: All shares successfully redeemed"
-                if self.is_multi_stock:
-                    redemption_msg += f" across {len(self.dividend_services)} stocks"
-                self.logger.info(redemption_msg)
-        elif total_shares_current != expected_total_shares:
-            msg = (f"Total shares in system changed from initial allocation:\n"
-                   f"Initial shares: {initial_shares}\n"
-                   f"Borrowed shares: {borrowed_total}\n"
-                   f"Current shares: {total_shares_current}\n"
-                   f"Share changes this round:")
-            for agent_id in pre_shares:
-                change = post_shares[agent_id] - pre_shares[agent_id]
-                msg += f"\nAgent {agent_id}: {pre_shares[agent_id]} -> {post_shares[agent_id]} (Δ{change})"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        # Multi-stock specific invariants
-        if self.is_multi_stock:
-            self._verify_multi_stock_invariants(logger)
-
-        # Additional invariants (both single and multi-stock)
-        self._verify_commitment_order_matching(logger)
-        self._verify_borrowing_pool_consistency(logger)
-        self._verify_wealth_conservation(pre_round_states, logger)
-        self._verify_order_book_consistency(logger)
-        self._verify_dividend_accumulation(logger)
-        self._verify_interest_calculations(logger)
-        self._verify_borrow_fee_calculations(logger)
-
-    def _store_pre_round_states(self) -> Dict[str, Dict]:
-        """Store pre-round states for verification through repository"""
-        pre_round_states = {}
-
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            agent = self.agent_repository.get_agent(agent_id)
-
-            pre_round_states[agent_id] = {
-                'total_cash': agent.total_cash,
-                'total_shares': agent.total_shares,
-            }
-
-        return pre_round_states
-
-    def _verify_multi_stock_invariants(self, logger):
-        """Verify multi-stock specific invariants"""
-        self.logger.info("\n=== Multi-stock invariant verification ===")
-
-        # Check if this is the final round and shares are being redeemed
-        is_final_redemption = (
-            self.context.round_number == self.context._num_rounds and
-            not self.infinite_rounds
-        )
-
-        # Get all stock IDs
-        stock_ids = list(self.contexts.keys())
-        self.logger.info(f"Verifying {len(stock_ids)} stocks: {stock_ids}")
-
-        # Per-stock share conservation
-        for stock_id in stock_ids:
-            self.logger.info(f"\n--- Verifying {stock_id} ---")
-
-            # Calculate total shares for this stock across all agents
-            total_shares_for_stock = 0
-            total_committed_for_stock = 0
-            total_borrowed_for_stock = 0
-
-            agent_positions = {}
-            for agent_id in self.agent_repository.get_all_agent_ids():
-                agent = self.agent_repository.get_agent(agent_id)
-                position = agent.positions.get(stock_id, 0)
-                committed = agent.committed_positions.get(stock_id, 0)
-                borrowed = agent.borrowed_positions.get(stock_id, 0)
-
-                total_shares_for_stock += position + committed
-                total_committed_for_stock += committed
-                total_borrowed_for_stock += borrowed
-
-                agent_positions[agent_id] = {
-                    'position': position,
-                    'committed': committed,
-                    'borrowed': borrowed,
-                    'total': position + committed
-                }
-
-            # Get expected initial shares for this stock
-            if 'initial_positions' in self.agent_params:
-                initial_per_agent = self.agent_params['initial_positions'].get(stock_id, 0)
-                num_agents = len(self.agent_repository.get_all_agent_ids())
-                expected_initial = initial_per_agent * num_agents
-            else:
-                expected_initial = 0  # Single-stock mode, should not reach here
-
-            # Expected total includes borrowed shares
-            expected_total_with_borrowed = expected_initial + total_borrowed_for_stock
-
-            self.logger.info(f"Initial shares for {stock_id}: {expected_initial}")
-            self.logger.info(f"Current total shares: {total_shares_for_stock}")
-            self.logger.info(f"Borrowed shares: {total_borrowed_for_stock}")
-            self.logger.info(f"Expected total (initial + borrowed): {expected_total_with_borrowed}")
-
-            # Verify share conservation for this stock
-            if is_final_redemption:
-                # Final round: all shares should be redeemed (0)
-                if total_shares_for_stock != 0:
-                    msg = f"Final redemption failed for {stock_id}:\n"
-                    msg += f"Expected all shares to be redeemed (0), but found {total_shares_for_stock}\n"
-                    msg += f"Per-agent breakdown:\n"
-                    for agent_id, pos in agent_positions.items():
-                        msg += f"  Agent {agent_id}: position={pos['position']}, committed={pos['committed']}, borrowed={pos['borrowed']}, total={pos['total']}\n"
-                    logger.error(msg)
-                    raise ValueError(msg)
-                self.logger.info(f"✓ Final redemption verified for {stock_id} (all shares redeemed)")
-            else:
-                # Normal round: verify share conservation
-                if abs(total_shares_for_stock - expected_total_with_borrowed) > 0.01:
-                    msg = f"Share conservation violated for {stock_id}:\n"
-                    msg += f"Expected: {expected_total_with_borrowed} (initial: {expected_initial} + borrowed: {total_borrowed_for_stock})\n"
-                    msg += f"Actual: {total_shares_for_stock}\n"
-                    msg += f"Per-agent breakdown:\n"
-                    for agent_id, pos in agent_positions.items():
-                        msg += f"  Agent {agent_id}: position={pos['position']}, committed={pos['committed']}, borrowed={pos['borrowed']}, total={pos['total']}\n"
-                    logger.error(msg)
-                    raise ValueError(msg)
-                self.logger.info(f"✓ Share conservation verified for {stock_id}")
-
-        # Verify all agents have positions for the same stocks
-        all_stock_ids = set()
-        agent_stock_sets = {}
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            agent = self.agent_repository.get_agent(agent_id)
-            agent_stocks = set(agent.positions.keys())
-            agent_stock_sets[agent_id] = agent_stocks
-            all_stock_ids.update(agent_stocks)
-
-        # Check for consistency (all agents should have entries for all stocks in multi-stock mode)
-        expected_stocks = set(stock_ids)
-        for agent_id, agent_stocks in agent_stock_sets.items():
-            # Allow DEFAULT_STOCK to exist in single-stock mode
-            agent_stocks_normalized = agent_stocks - {"DEFAULT_STOCK"}
-            if agent_stocks_normalized and agent_stocks_normalized != expected_stocks:
-                missing = expected_stocks - agent_stocks_normalized
-                extra = agent_stocks_normalized - expected_stocks
-                msg = f"Stock position inconsistency for agent {agent_id}:\n"
-                if missing:
-                    msg += f"  Missing stocks: {missing}\n"
-                if extra:
-                    msg += f"  Extra stocks: {extra}\n"
-                msg += f"  Expected: {expected_stocks}\n"
-                msg += f"  Actual: {agent_stocks_normalized}"
-                logger.warning(msg)  # Warning instead of error for now
-
-        self.logger.info("\n✓ All multi-stock invariants verified")
-
-    def _verify_commitment_order_matching(self, logger):
-        """Verify that committed resources match outstanding orders"""
-        self.logger.info("\n=== Commitment-Order Matching Verification ===")
-
-        # Get all active orders
-        from market.orders.order import OrderState
-        # Check orders that should have commitments: ACTIVE, PENDING, and PARTIALLY_FILLED
-        # COMMITTED orders are transitioning (commitments made but not yet in book)
-        active_states = {OrderState.ACTIVE, OrderState.PENDING, OrderState.PARTIALLY_FILLED}
-
-        # Calculate expected commitments from orders
-        expected_committed_cash = 0
-        expected_committed_shares_per_stock = {}
-
-        for order in self.order_repository.orders.values():
-            if order.state in active_states:
-                if order.side == 'buy':
-                    # Buy orders commit cash - use current_cash_commitment which tracks actual commitment
-                    expected_committed_cash += order.current_cash_commitment
-                elif order.side == 'sell':
-                    # Sell orders commit shares - use current_share_commitment not remaining_quantity
-                    # because commitment tracks what's actually committed (not filled)
-                    stock_id = order.stock_id
-                    expected_committed_shares_per_stock[stock_id] = \
-                        expected_committed_shares_per_stock.get(stock_id, 0) + order.current_share_commitment
-
-        # Calculate actual commitments
-        actual_committed_cash = sum(
-            self.agent_repository.get_agent(agent_id).committed_cash
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-
-        # For shares, aggregate across all stocks
-        actual_committed_shares_per_stock = {}
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            agent = self.agent_repository.get_agent(agent_id)
-            for stock_id in agent.committed_positions.keys():
-                actual_committed_shares_per_stock[stock_id] = \
-                    actual_committed_shares_per_stock.get(stock_id, 0) + agent.committed_positions.get(stock_id, 0)
-
-        self.logger.info(f"Expected committed cash from orders: ${expected_committed_cash:.2f}")
-        self.logger.info(f"Actual committed cash: ${actual_committed_cash:.2f}")
-
-        # Allow for small floating point differences
-        if abs(expected_committed_cash - actual_committed_cash) > 0.1:
-            # Debug: Print all order states
-            msg = f"CRITICAL ERROR - Commitment-order mismatch for cash:\n"
-            msg += f"Expected (from orders): ${expected_committed_cash:.2f}\n"
-            msg += f"Actual (from agents): ${actual_committed_cash:.2f}\n"
-            msg += f"Difference: ${abs(expected_committed_cash - actual_committed_cash):.2f}\n"
-            msg += f"\n=== DEBUG: ALL ORDERS ===\n"
-            for order_id, order in self.order_repository.orders.items():
-                price_str = f"${order.price:.2f}" if order.price is not None else "market"
-                msg += f"{order_id[:8]}: {order.state.value} - {order.side} {order.quantity} @ {price_str}\n"
-                msg += f"  cash_commit=${order.current_cash_commitment:.2f}, share_commit={order.current_share_commitment}\n"
-            msg += f"\n=== DEBUG: AGENT COMMITMENTS ===\n"
-            for agent_id in self.agent_repository.get_all_agent_ids():
-                agent = self.agent_repository.get_agent(agent_id)
-                if agent.committed_cash > 0.01:
-                    msg += f"Agent {agent_id}: committed_cash=${agent.committed_cash:.2f}\n"
-            msg += f"\nThis indicates broken bookkeeping - cannot trust simulation results."
-            logger.error(msg)
-            raise ValueError(msg)
-
-        # Check per-stock share commitments
-        all_stock_ids = set(expected_committed_shares_per_stock.keys()) | set(actual_committed_shares_per_stock.keys())
-        for stock_id in all_stock_ids:
-            expected = expected_committed_shares_per_stock.get(stock_id, 0)
-            actual = actual_committed_shares_per_stock.get(stock_id, 0)
-
-            self.logger.info(f"{stock_id}: Expected committed shares: {expected}, Actual: {actual}")
-
-            if abs(expected - actual) > 0.01:
-                msg = f"CRITICAL ERROR - Commitment-order mismatch for {stock_id} shares:\n"
-                msg += f"Expected (from orders): {expected}\n"
-                msg += f"Actual (from agents): {actual}\n"
-                msg += f"Difference: {abs(expected - actual)}\n"
-                msg += f"\n=== DEBUG: SELL ORDERS ===\n"
-                for order_id, order in self.order_repository.orders.items():
-                    if order.side == 'sell' and order.state in active_states:
-                        price_str = f"${order.price:.2f}" if order.price is not None else "market"
-                        msg += f"{order_id[:8]}: {order.state.value} - sell {order.quantity} @ {price_str}\n"
-                        msg += f"  share_commit={order.current_share_commitment}\n"
-                msg += f"\n=== DEBUG: AGENT SHARE COMMITMENTS ===\n"
-                for agent_id in self.agent_repository.get_all_agent_ids():
-                    agent = self.agent_repository.get_agent(agent_id)
-                    total_committed = sum(agent.committed_positions.values())
-                    dict_id = id(agent.committed_positions)
-                    msg += f"Agent {agent_id}: dict_id={dict_id}, committed_positions={agent.committed_positions}, committed_shares={agent.committed_shares}, total={total_committed}\n"
-                msg += f"\nThis indicates broken bookkeeping - cannot trust simulation results."
-                logger.error(msg)
-                raise ValueError(msg)
-
-        self.logger.info("✓ Commitment-order matching verified")
-
     def _cancel_all_orders_for_stock(self, stock_id: str):
         """Cancel all orders for a specific stock (used during final redemption)"""
         # Get the correct order book for this stock
@@ -1192,386 +585,6 @@ class BaseSimulation:
                 # Remove from order book
                 order_book.remove_agent_orders(agent_id)
 
-    def _verify_borrowing_pool_consistency(self, logger):
-        """Verify borrowing pool accounting is consistent"""
-        self.logger.info("\n=== Borrowing Pool Consistency Verification ===")
-
-        borrowing_repo = self.agent_repository.borrowing_repository
-
-        # Borrowing pool invariant: available + sum(borrowed) == total_lendable
-        total_borrowed_from_pool = sum(borrowing_repo.borrowed.values())
-        expected_available = borrowing_repo.total_lendable - total_borrowed_from_pool
-
-        self.logger.info(f"Total lendable: {borrowing_repo.total_lendable}")
-        self.logger.info(f"Available in pool: {borrowing_repo.available_shares}")
-        self.logger.info(f"Total borrowed from pool: {total_borrowed_from_pool}")
-        self.logger.info(f"Expected available: {expected_available}")
-
-        if borrowing_repo.available_shares != expected_available:
-            msg = f"Borrowing pool accounting error:\n"
-            msg += f"Available: {borrowing_repo.available_shares}\n"
-            msg += f"Expected: {expected_available}\n"
-            msg += f"Total lendable: {borrowing_repo.total_lendable}\n"
-            msg += f"Total borrowed: {total_borrowed_from_pool}"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        # Verify agent borrowed shares match pool
-        total_agent_borrowed = 0
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            agent = self.agent_repository.get_agent(agent_id)
-            # Sum across all stocks
-            for stock_id in agent.borrowed_positions.keys():
-                total_agent_borrowed += agent.borrowed_positions.get(stock_id, 0)
-
-        self.logger.info(f"Total borrowed by agents: {total_agent_borrowed}")
-
-        if total_agent_borrowed != total_borrowed_from_pool:
-            msg = f"Agent borrowed shares don't match pool:\n"
-            msg += f"Agents borrowed: {total_agent_borrowed}\n"
-            msg += f"Pool records: {total_borrowed_from_pool}"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        self.logger.info("✓ Borrowing pool consistency verified")
-
-    def _verify_wealth_conservation(self, pre_round_states, logger):
-        """Verify that total wealth changes only due to dividends, interest, and fees"""
-        self.logger.info("\n=== Wealth Conservation Verification ===")
-
-        # Calculate pre-round total wealth
-        pre_wealth = 0
-        for agent_id in pre_round_states:
-            agent = self.agent_repository.get_agent(agent_id)
-            # Need to calculate wealth at pre-round prices
-            # For simplicity, we'll just verify that trades are zero-sum
-            pre_wealth += pre_round_states[agent_id]['total_cash']
-
-        # Calculate post-round total wealth
-        post_wealth = sum(
-            self.agent_repository.get_agent(agent_id).total_cash
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-
-        # Get payments from this round
-        current_round = self.context.round_number
-
-        if self.is_multi_stock:
-            dividend_payment = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.dividends_paid
-                if payment['round'] == current_round - 1
-            )
-            interest_payment = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.interest_paid
-                if payment['round'] == current_round - 1
-            )
-            borrow_fee_payment = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.borrow_fees_paid
-                if payment['round'] == current_round - 1
-            )
-        else:
-            dividend_payment = sum(
-                payment['amount']
-                for payment in self.context.market_history.dividends_paid
-                if payment['round'] == current_round - 1
-            )
-            interest_payment = sum(
-                payment['amount']
-                for payment in self.context.market_history.interest_paid
-                if payment['round'] == current_round - 1
-            )
-            borrow_fee_payment = sum(
-                payment['amount']
-                for payment in self.context.market_history.borrow_fees_paid
-                if payment['round'] == current_round - 1
-            )
-
-        expected_wealth_change = dividend_payment + interest_payment - borrow_fee_payment
-        actual_wealth_change = post_wealth - pre_wealth
-
-        self.logger.info(f"Pre-round cash: ${pre_wealth:.2f}")
-        self.logger.info(f"Post-round cash: ${post_wealth:.2f}")
-        self.logger.info(f"Cash change: ${actual_wealth_change:.2f}")
-        self.logger.info(f"Expected change (div+int-fees): ${expected_wealth_change:.2f}")
-
-        # This is the same check as the cash conservation check above, but with clearer wealth framing
-        if abs(actual_wealth_change - expected_wealth_change) > 0.01:
-            msg = f"Wealth conservation violated (trades should be zero-sum):\n"
-            msg += f"Cash change: ${actual_wealth_change:.2f}\n"
-            msg += f"Expected from payments: ${expected_wealth_change:.2f}\n"
-            msg += f"Difference: ${abs(actual_wealth_change - expected_wealth_change):.2f}"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        self.logger.info("✓ Wealth conservation verified (trades are zero-sum)")
-
-    def _verify_order_book_consistency(self, logger):
-        """Verify order book consistency invariants"""
-        self.logger.info("\n=== Order Book Consistency Verification ===")
-
-        # Get order book(s) - could be single or multiple for multi-stock
-        if self.is_multi_stock:
-            order_books = self.order_books  # Dict[stock_id, OrderBook]
-        else:
-            order_books = {"DEFAULT_STOCK": self.order_book}
-
-        for stock_id, order_book in order_books.items():
-            self.logger.info(f"\n--- Verifying order book for {stock_id} ---")
-
-            best_bid = order_book.get_best_bid()
-            best_ask = order_book.get_best_ask()
-
-            self.logger.info(f"Best bid: {best_bid}")
-            self.logger.info(f"Best ask: {best_ask}")
-
-            # Invariant 1: No crossed market (bid should not exceed ask)
-            if best_bid is not None and best_ask is not None:
-                if best_bid > best_ask:
-                    msg = f"Crossed market detected for {stock_id}:\n"
-                    msg += f"Best bid: {best_bid}\n"
-                    msg += f"Best ask: {best_ask}\n"
-                    msg += f"Bid exceeds ask by: {best_bid - best_ask}"
-                    logger.error(msg)
-                    raise ValueError(msg)
-                self.logger.info(f"✓ No crossed market (bid {best_bid} <= ask {best_ask})")
-
-            # Invariant 2: All orders in book should be ACTIVE, PENDING or PARTIALLY_FILLED
-            from market.orders.order import OrderState
-            valid_book_states = {OrderState.ACTIVE, OrderState.PENDING, OrderState.PARTIALLY_FILLED}
-
-            invalid_orders = []
-            for side_name, heap in [('buy', order_book.buy_orders), ('sell', order_book.sell_orders)]:
-                for entry in heap:
-                    if entry.order.state not in valid_book_states:
-                        invalid_orders.append({
-                            'order_id': entry.order.order_id,
-                            'side': side_name,
-                            'state': entry.order.state,
-                            'agent_id': entry.order.agent_id
-                        })
-
-            if invalid_orders:
-                msg = f"CRITICAL ERROR - Invalid order states in {stock_id} order book:\n"
-                for order_info in invalid_orders:
-                    msg += f"  Order {order_info['order_id']} ({order_info['side']}): {order_info['state']}\n"
-                msg += f"Order book contains orders in invalid states - corrupted state."
-                logger.error(msg)
-                raise ValueError(msg)
-
-            # Invariant 3: Order book quantities match order remaining quantities
-            book_buy_quantity = sum(entry.order.remaining_quantity for entry in order_book.buy_orders)
-            book_sell_quantity = sum(entry.order.remaining_quantity for entry in order_book.sell_orders)
-
-            self.logger.info(f"Total buy quantity in book: {book_buy_quantity}")
-            self.logger.info(f"Total sell quantity in book: {book_sell_quantity}")
-
-            # Invariant 4: Prices are positive
-            for entry in order_book.buy_orders:
-                if entry.order.price is not None and entry.order.price <= 0:
-                    msg = f"Invalid buy order price in {stock_id}: {entry.order.price}"
-                    logger.error(msg)
-                    raise ValueError(msg)
-
-            for entry in order_book.sell_orders:
-                if entry.order.price is not None and entry.order.price <= 0:
-                    msg = f"Invalid sell order price in {stock_id}: {entry.order.price}"
-                    logger.error(msg)
-                    raise ValueError(msg)
-
-            self.logger.info(f"✓ Order book consistency verified for {stock_id}")
-
-        self.logger.info("\n✓ All order book invariants verified")
-
-    def _verify_dividend_accumulation(self, logger):
-        """Verify dividend cash accumulation matches payments"""
-        self.logger.info("\n=== Dividend Accumulation Verification ===")
-
-        # Calculate total dividends paid across all stocks
-        if self.is_multi_stock:
-            total_dividends_paid = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.dividends_paid
-            )
-        else:
-            total_dividends_paid = sum(
-                payment['amount']
-                for payment in self.context.market_history.dividends_paid
-            )
-
-        # Calculate total dividend cash held by agents
-        total_dividend_cash = sum(
-            self.agent_repository.get_agent(agent_id).dividend_cash
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-
-        self.logger.info(f"Total dividends paid: ${total_dividends_paid:.2f}")
-        self.logger.info(f"Total dividend cash held: ${total_dividend_cash:.2f}")
-
-        # Invariant: Dividend cash should equal total dividends paid
-        # (unless dividends are paid to main account instead of dividend account)
-        if abs(total_dividend_cash - total_dividends_paid) > 0.01:
-            # Check if dividends are configured to go to main account
-            # In that case, this invariant doesn't apply
-            dividend_destination = None
-            if self.is_multi_stock:
-                # Check first stock's dividend config
-                first_stock = list(self.contexts.values())[0]
-                dividend_destination = getattr(first_stock, 'dividend_destination', None)
-            else:
-                dividend_destination = getattr(self.context, 'dividend_destination', None)
-
-            if dividend_destination == 'dividend':
-                msg = f"Dividend accumulation mismatch:\n"
-                msg += f"Total paid: ${total_dividends_paid:.2f}\n"
-                msg += f"Total held: ${total_dividend_cash:.2f}\n"
-                msg += f"Difference: ${abs(total_dividend_cash - total_dividends_paid):.2f}"
-                logger.warning(msg)  # Warning for now as this might be expected in some configs
-            else:
-                self.logger.info("Dividends paid to main account (not dividend account)")
-        else:
-            self.logger.info("✓ Dividend accumulation matches payments")
-
-        # Verify non-negative dividend cash
-        for agent_id in self.agent_repository.get_all_agent_ids():
-            agent = self.agent_repository.get_agent(agent_id)
-            if agent.dividend_cash < 0:
-                msg = f"Negative dividend cash for agent {agent_id}: ${agent.dividend_cash:.2f}"
-                logger.error(msg)
-                raise ValueError(msg)
-
-        self.logger.info("✓ Dividend accumulation verified")
-
-    def _verify_interest_calculations(self, logger):
-        """Verify interest rate calculations and payments"""
-        self.logger.info("\n=== Interest Calculation Verification ===")
-
-        # Get interest service (shared across all stocks)
-        if not hasattr(self, 'interest_service') or not self.interest_service:
-            self.logger.info("No interest service configured")
-            return
-
-        interest_service = self.interest_service
-        stock_label = "all stocks" if self.is_multi_stock else "DEFAULT_STOCK"
-
-        # Verify interest rate is within bounds
-        rate = interest_service.interest_model.get('rate', 0)
-        self.logger.info(f"{stock_label} interest rate: {rate:.4f} ({rate*100:.2f}%)")
-
-        # Invariant 1: Interest rate should be reasonable (between -10% and +50%)
-        if rate < -0.10 or rate > 0.50:
-            msg = f"Interest rate out of reasonable bounds: {rate:.4f}"
-            logger.warning(msg)
-
-        # Verify interest payments match calculations
-        current_round = self.context.round_number
-
-        if self.is_multi_stock:
-            total_interest_paid = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.interest_paid
-                if payment['round'] == current_round - 1
-            )
-        else:
-            total_interest_paid = sum(
-                payment['amount']
-                for payment in self.context.market_history.interest_paid
-                if payment['round'] == current_round - 1
-            )
-
-        self.logger.info(f"Total interest paid this round: ${total_interest_paid:.2f}")
-
-        # Invariant 2: Interest should be non-negative (assuming positive rates)
-        if total_interest_paid < 0:
-            # This could be valid for negative interest rates
-            if rate >= 0:
-                msg = f"Negative interest paid with non-negative rate: ${total_interest_paid:.2f}"
-                logger.warning(msg)
-
-        # Invariant 3: If interest service exists, check compounding frequency is valid
-        compound_freq = interest_service.interest_model.get('compound_frequency', 'per_round')
-        valid_frequencies = ['per_round', 'annual', 'semi_annual', 'quarterly', 'monthly']
-        if compound_freq not in valid_frequencies:
-            msg = f"CRITICAL ERROR - Invalid compound frequency: {compound_freq}\n"
-            msg += f"Valid frequencies are: {', '.join(valid_frequencies)}\n"
-            msg += f"This is a configuration error that will produce incorrect results."
-            logger.error(msg)
-            raise ValueError(msg)
-
-        self.logger.info("✓ Interest calculations verified")
-
-    def _verify_borrow_fee_calculations(self, logger):
-        """Verify borrow fee (short selling cost) calculations"""
-        self.logger.info("\n=== Borrow Fee Calculation Verification ===")
-
-        # Check if borrowing is enabled
-        if not hasattr(self.agent_repository, 'borrowing_repository') or \
-           self.agent_repository.borrowing_repository.total_lendable == 0:
-            self.logger.info("No borrowing enabled")
-            return
-
-        # Get borrow fee payments
-        current_round = self.context.round_number
-
-        if self.is_multi_stock:
-            total_borrow_fees_paid = sum(
-                payment['amount']
-                for context in self.contexts.values()
-                for payment in context.market_history.borrow_fees_paid
-                if payment['round'] == current_round - 1
-            )
-        else:
-            total_borrow_fees_paid = sum(
-                payment['amount']
-                for payment in self.context.market_history.borrow_fees_paid
-                if payment['round'] == current_round - 1
-            )
-
-        # Get total borrowed shares
-        total_borrowed = sum(
-            self.agent_repository.get_agent(agent_id).borrowed_shares
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-
-        self.logger.info(f"Total borrowed shares: {total_borrowed}")
-        self.logger.info(f"Total borrow fees paid: ${total_borrow_fees_paid:.2f}")
-
-        # Invariant 1: Borrow fees should be non-negative
-        if total_borrow_fees_paid < 0:
-            msg = f"Negative borrow fees paid: ${total_borrow_fees_paid:.2f}"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        # Invariant 2: If shares are borrowed, fees should be paid (unless rate is 0)
-        if total_borrowed > 0 and total_borrow_fees_paid == 0:
-            # Check if borrow service exists and has a fee rate
-            if hasattr(self, 'borrow_service') and self.borrow_service:
-                # The borrow service might have a borrow_fee rate
-                borrow_fee_rate = getattr(self.borrow_service, 'borrow_fee_rate', 0)
-                if borrow_fee_rate > 0:
-                    msg = f"Shares borrowed ({total_borrowed}) but no fees paid with positive rate ({borrow_fee_rate})"
-                    logger.warning(msg)
-
-        # Invariant 3: Borrow fees should not exceed total cash in system
-        total_cash = sum(
-            self.agent_repository.get_agent(agent_id).total_cash
-            for agent_id in self.agent_repository.get_all_agent_ids()
-        )
-
-        if total_borrow_fees_paid > total_cash:
-            msg = f"Borrow fees (${total_borrow_fees_paid:.2f}) exceed total system cash (${total_cash:.2f})"
-            logger.error(msg)
-            raise ValueError(msg)
-
-        self.logger.info("✓ Borrow fee calculations verified")
-
     def _log_round_start(self, round_number: int):
         """Log initial state at the start of a round"""
         self.logger.warning(f"\n=== Round {round_number} ===")
@@ -1590,6 +603,101 @@ class BaseSimulation:
                 manager.update_market_depth()
         else:
             self.market_state_manager.update_market_depth()
+
+    def _phase_update_market(self, round_number: int) -> dict:
+        """Phase 1: Update market state and prepare for trading
+
+        Args:
+            round_number: Current round number
+
+        Returns:
+            dict: Market state for agent decision making
+        """
+        # Update market depths
+        self._update_all_market_depths()
+
+        # Get last volume from data recorder
+        if self.is_multi_stock:
+            # Multi-stock: Get per-stock volumes from market_data
+            last_stock_volumes = {}
+            if self.data_recorder.market_data:
+                # Get volumes from previous round for each stock
+                for stock_id in self.contexts.keys():
+                    # Filter market_data for this stock and previous round
+                    prev_round_data = [
+                        entry for entry in self.data_recorder.market_data
+                        if entry['stock_id'] == stock_id and entry['round'] == round_number
+                    ]
+                    last_stock_volumes[stock_id] = (
+                        prev_round_data[-1]['total_volume']
+                        if prev_round_data
+                        else 0
+                    )
+            else:
+                # First round - no previous volume
+                last_stock_volumes = {stock_id: 0 for stock_id in self.contexts.keys()}
+        else:
+            # Single-stock: Get total volume from history
+            last_volume = (
+                self.data_recorder.history[-1]['total_volume']
+                if self.data_recorder.history
+                else 0
+            )
+
+        # Update market components and build market state
+        if self.is_multi_stock:
+            # Multi-stock: Update each manager and aggregate state
+            market_state = {
+                'stocks': {},
+                'round_number': round_number + 1,
+                'is_multi_stock': True
+            }
+
+            # Update all managers WITHOUT distributing information yet
+            for stock_id, manager in self.market_state_managers.items():
+                # Update public info for this stock BEFORE calling manager.update()
+                stock_last_volume = last_stock_volumes[stock_id]
+                self.contexts[stock_id].update_public_info(round_number, stock_last_volume)
+
+                # Call manager.update() with skip_distribution to avoid multiple calls
+                stock_market_state = manager.update(
+                    round_number=round_number,
+                    last_volume=stock_last_volume,
+                    is_round_end=False,
+                    skip_distribution=True  # Skip distribution in multi-stock mode
+                )
+                # Store this stock's state
+                market_state['stocks'][stock_id] = stock_market_state
+
+            # Now distribute information ONCE for all stocks
+            # Get any manager's information_service (they all share the same one)
+            first_manager = list(self.market_state_managers.values())[0]
+            information_service = first_manager.information_service
+
+            # Ensure providers are registered (lazy initialization)
+            if not information_service.providers:
+                for manager in self.market_state_managers.values():
+                    ProviderRegistry.register_providers(
+                        information_service=information_service,
+                        market_state_manager=manager,
+                        dividend_service=manager.dividend_service,
+                        interest_service=manager.interest_service,
+                        borrow_service=manager.borrow_service,
+                        hide_fundamental_price=self.hide_fundamental_price
+                    )
+
+            # Distribute information for all stocks
+            information_service.distribute_information(round_number)
+        else:
+            # Single stock: Original behavior
+            self.context.update_public_info(round_number, last_volume)
+            market_state = self.market_state_manager.update(
+                round_number=round_number,
+                last_volume=last_volume,
+                is_round_end=False
+            )
+
+        return market_state
 
     def _phase_collect_decisions(self, market_state: dict, round_number: int) -> list:
         """Phase 2: Collect agent decisions and create orders
@@ -1619,6 +727,160 @@ class BaseSimulation:
         self.order_book.log_order_book_state(f"After New Orders Round {round_number}")
 
         return new_orders
+
+    def _phase_match_orders(self, new_orders: list, round_number: int):
+        """Phase 3: Match orders and execute trades
+
+        Args:
+            new_orders: List of orders to match
+            round_number: Current round number
+
+        Returns:
+            tuple: (market_result, stock_market_results)
+                - market_result: Aggregated result or single-stock result
+                - stock_market_results: Per-stock results dict (multi-stock only, else None)
+        """
+        if self.is_multi_stock:
+            # Multi-stock: Match orders FOR EACH STOCK separately
+            stock_market_results = {}
+
+            for stock_id in self.contexts.keys():
+                # Filter orders for THIS stock only
+                stock_orders = [o for o in new_orders if o.stock_id == stock_id]
+
+                self.logger.info(f"=== Matching {len(stock_orders)} orders for {stock_id} ===")
+
+                # Match orders for this stock
+                stock_market_results[stock_id] = self.matching_engines[stock_id].match_orders(
+                    stock_orders,
+                    self.contexts[stock_id].current_price,
+                    round_number + 1
+                )
+
+                # Update price for THIS stock
+                self.contexts[stock_id].current_price = stock_market_results[stock_id].price
+                self.contexts[stock_id].round_number = round_number + 1
+
+            # Aggregate all trades and volumes from all stocks
+            all_trades = []
+            total_volume = 0
+            for stock_id, result in stock_market_results.items():
+                all_trades.extend(result.trades)
+                total_volume += result.volume
+
+            # Create aggregated market result for backwards compatibility
+            # Use first stock's result as template, but with aggregated trades/volume
+            first_result = list(stock_market_results.values())[0]
+            market_result = type(first_result)(
+                price=first_result.price,  # Not used in multi-stock (each stock has own price)
+                trades=all_trades,
+                volume=total_volume
+            )
+
+            # Update backwards-compatible self.context
+            self.context.round_number = round_number + 1
+
+            # Update agent wealth with all stock prices (multi-stock)
+            all_prices = {stock_id: ctx.current_price for stock_id, ctx in self.contexts.items()}
+            self.agent_repository.update_all_wealth(all_prices)
+
+            return market_result, stock_market_results
+        else:
+            # Single stock: Original behavior
+            market_result = self.matching_engine.match_orders(
+                new_orders,
+                self.context.current_price,
+                round_number + 1
+            )
+
+            # Update price and round number in the context
+            self.context.current_price = market_result.price
+            self.context.round_number = round_number + 1
+
+            return market_result, None
+
+    def _phase_end_of_round(self, round_number: int, market_result,
+                           stock_market_results: dict, pre_round_states: dict,
+                           last_paid_dividend: float):
+        """Phase 5: End-of-round updates including dividends, redemptions, and interest
+
+        Args:
+            round_number: Current round number
+            market_result: Result from matching engine
+            stock_market_results: Per-stock results (multi-stock only)
+            pre_round_states: Pre-round states for verification
+            last_paid_dividend: Last paid dividend from phase 4 (for single-stock logging)
+        """
+        # Check if this is final redemption round
+        is_final_round = round_number == self.context._num_rounds - 1 and not self.infinite_rounds
+
+        if self.is_multi_stock:
+            # Multi-stock: Let each manager handle end-of-round processing
+            total_payments = 0.0
+
+            for stock_id, manager in self.market_state_managers.items():
+                # If final round with redemption, cancel all orders for this stock BEFORE redemption
+                if is_final_round and self.contexts[stock_id].redemption_value is not None:
+                    self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
+                    self._cancel_all_orders_for_stock(stock_id)
+
+                # Manager.update() with is_round_end=True handles all end-of-round processing
+                # Pass THIS stock's volume, not the aggregated total
+                stock_volume = stock_market_results[stock_id].volume
+                manager.update(
+                    round_number=round_number,
+                    last_volume=stock_volume,
+                    is_round_end=True
+                )
+                manager.update_market_depth()
+
+                # Aggregate total payments from all stocks for logging
+                if manager.dividend_service and manager.dividend_service.dividend_history:
+                    stock_payment = manager.dividend_service.dividend_history[-1]
+                    total_payments += stock_payment
+                    self.logger.info(f"  {stock_id} dividend payment: ${stock_payment:.2f}")
+
+            last_paid_dividend = total_payments
+            self.logger.info(f"Total payments across all stocks: ${total_payments:.2f}")
+        else:
+            # Single stock: Original behavior
+            # If final round with redemption, cancel all orders BEFORE redemption
+            if is_final_round and self.context.redemption_value is not None:
+                stock_id = self.dividend_service.stock_id if self.dividend_service else "DEFAULT_STOCK"
+                self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
+                self._cancel_all_orders_for_stock(stock_id)
+
+            self.market_state_manager.update(
+                round_number=round_number,
+                last_volume=market_result.volume,
+                is_round_end=True
+            )
+            self.market_state_manager.update_market_depth()
+
+            # Use last_paid_dividend passed from phase_record_data
+
+        self.logger.info(f"Dividends paid last round: {last_paid_dividend}")
+
+        # Charge interest on borrowed cash for leverage (after market state updates)
+        if self.leverage_enabled and self.leverage_interest_service:
+            interest_charged = self.leverage_interest_service.charge_interest(
+                self.agent_repository.get_all_agents(),
+                rounds_per_year=252  # Daily trading
+            )
+            if interest_charged:
+                total_leverage_interest = sum(interest_charged.values())
+                # Record leverage interest in market history (use round_number param, not self.context.round_number which was already incremented)
+                self.context.record_leverage_interest_charged(
+                    amount=total_leverage_interest,
+                    round_number=round_number
+                )
+                self.logger.info(
+                    f"Leverage interest charged this round: ${total_leverage_interest:.2f} "
+                    f"({len(interest_charged)} agents)"
+                )
+
+        # Verify final states
+        self.verifier.verify_round_end_states(pre_round_states)
 
     def _phase_record_data(self, round_number: int, market_state: dict, market_result,
                           new_orders: list, stock_market_results: dict = None):

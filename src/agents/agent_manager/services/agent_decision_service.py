@@ -104,9 +104,10 @@ class AgentDecisionService:
         try:
             # Handle both dict and OrderDetails formats
             if isinstance(order_details, dict):
+                stock_id_val = order_details.get('stock_id', 'DEFAULT_STOCK')
                 order = Order(
                     agent_id=agent_id,
-                    stock_id=order_details.get('stock_id', 'DEFAULT_STOCK'),  # NEW: Multi-stock support
+                    stock_id=stock_id_val,  # NEW: Multi-stock support
                     order_type=order_details['order_type'].lower(),
                     side=order_details['decision'].lower(),
                     quantity=order_details['quantity'],

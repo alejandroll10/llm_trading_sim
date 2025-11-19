@@ -15,7 +15,7 @@ class CSVHeaders:
 
     STRUCTURED_DECISIONS = (
         "timestamp,round,agent_id,agent_type,agent_type_id,decision,order_type,"
-        "quantity,price,reasoning,valuation,price_target,valuation_reasoning,price_target_reasoning"
+        "quantity,price,reasoning,valuation,price_target,valuation_reasoning,price_target_reasoning,notes_to_self"
     )
 
 

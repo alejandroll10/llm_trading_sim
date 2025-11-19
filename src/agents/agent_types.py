@@ -232,6 +232,21 @@ AGENT_TYPES = {
         type_id="default"
     ),
 
+    # Model comparison variants - same prompt as default, different type_id
+    "default_llama": AgentType(
+        name="Default Trader",
+        system_prompt="""You are a trading agent in a financial market simulation.""",
+        user_prompt_template=STANDARD_USER_TEMPLATE,
+        type_id="default_llama"
+    ),
+
+    "default_gpt": AgentType(
+        name="Default Trader",
+        system_prompt="""You are a trading agent in a financial market simulation.""",
+        user_prompt_template=STANDARD_USER_TEMPLATE,
+        type_id="default_gpt"
+    ),
+
     "minimal": AgentType(
         name="Minimal Trader",
         system_prompt="""""",

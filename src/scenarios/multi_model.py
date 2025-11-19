@@ -14,6 +14,126 @@ BASE_INITIAL_SHARES = DEFAULT_PARAMS["AGENT_PARAMS"]["initial_shares"]
 BASE_MAX_ORDER_SIZE = DEFAULT_PARAMS["AGENT_PARAMS"]["max_order_size"]
 
 MULTI_MODEL_SCENARIOS = {
+    "default_model_battle": SimulationScenario(
+        name="default_model_battle",
+        description="Pure model comparison: Default traders with minimal instructions (5 rounds)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'default': 4,  # All default traders, no strategy bias
+                },
+                'type_specific_params': {
+                    # Each pair of agents uses a different model
+                    # Note: We need distinct agent type names to assign different models
+                    # Using custom type names that map to 'default' behavior
+                }
+            }
+        }
+    ),
+
+    "llama_vs_gpt": SimulationScenario(
+        name="llama_vs_gpt",
+        description="Llama 3.3 vs GPT-OSS: Default traders head-to-head (5 rounds)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'default_llama': 2,     # Llama default traders
+                    'default_gpt': 2,       # GPT default traders
+                },
+                'type_specific_params': {
+                    'default_llama': {
+                        'model': 'llama-3.3-70b-instruct',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    },
+                    'default_gpt': {
+                        'model': 'gpt-oss-120b',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    }
+                }
+            }
+        }
+    ),
+
+    "llama_vs_gpt_extended": SimulationScenario(
+        name="llama_vs_gpt_extended",
+        description="Llama 3.3 vs GPT-OSS 120B: Extended battle with 4 agents each, 12 rounds",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 12,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'default_llama': 4,     # 4 Llama default traders
+                    'default_gpt': 4,       # 4 GPT default traders
+                },
+                'type_specific_params': {
+                    'default_llama': {
+                        'model': 'llama-3.3-70b-instruct',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    },
+                    'default_gpt': {
+                        'model': 'gpt-oss-120b',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    }
+                }
+            }
+        }
+    ),
+
+    "test_multi_model": SimulationScenario(
+        name="test_multi_model",
+        description="Quick test: Llama 3.3 vs GPT-OSS 120B (3 rounds)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 3,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'value': 1,      # Llama 3.3 70B
+                    'momentum': 1,   # GPT-OSS 120B
+                },
+                'type_specific_params': {
+                    'value': {
+                        'model': 'llama-3.3-70b-instruct',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    },
+                    'momentum': {
+                        'model': 'gpt-oss-120b',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    }
+                }
+            }
+        }
+    ),
+
     "llama_vs_gpt_oss": SimulationScenario(
         name="llama_vs_gpt_oss",
         description="Llama 3.3 70B vs GPT-OSS 120B: Head-to-head competition with value investors",
@@ -32,6 +152,44 @@ MULTI_MODEL_SCENARIOS = {
                 'type_specific_params': {
                     # Split the 4 'default' agents: first 2 use Llama, last 2 use GPT-OSS
                     # This is achieved by making them different agent types
+                }
+            }
+        }
+    ),
+
+    "llama_vs_gpt_vs_optimists": SimulationScenario(
+        name="llama_vs_gpt_vs_optimists",
+        description="Rational traders (Llama + GPT) vs Optimistic traders: Test no-trade theorem with behavioral agents",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 12,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'default_llama': 3,     # Rational Llama traders
+                    'default_gpt': 3,       # Rational GPT traders
+                    'optimistic': 4,        # Optimistic traders (should create opportunities)
+                },
+                'type_specific_params': {
+                    'default_llama': {
+                        'model': 'llama-3.3-70b-instruct',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    },
+                    'default_gpt': {
+                        'model': 'gpt-oss-120b',
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    },
+                    'optimistic': {
+                        'model': 'llama-3.3-70b-instruct',  # Same model, different prompt
+                        'initial_cash': BASE_INITIAL_CASH,
+                        'initial_shares': BASE_INITIAL_SHARES,
+                    }
                 }
             }
         }
