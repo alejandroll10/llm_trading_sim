@@ -118,9 +118,9 @@ DEFAULT_PARAMS = {
     # Agent parameters
     "MODEL_OPEN_AI": DEFAULT_LLM_MODEL,  # Set at top of this file
     "AGENT_PARAMS": {
-        # Feature toggles for agent capabilities
-        'MEMORY_ENABLED': True,  # Enable memory notes system (notes_to_self field)
-        'SOCIAL_ENABLED': True,  # Enable social media messaging (post_message field)
+        # Feature toggles for agent capabilities (opt-in by default)
+        'MEMORY_ENABLED': False,  # Enable memory notes system (notes_to_self field)
+        'SOCIAL_ENABLED': False,  # Enable social media messaging (post_message field)
 
         'allow_short_selling': False,
         'margin_requirement': 0.5,
