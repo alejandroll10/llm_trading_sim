@@ -306,4 +306,33 @@ SCENARIOS = {
             }
         }
     ),
+
+    "gptoss_social_mispriced": SimulationScenario(
+        name="gptoss_social_mispriced",
+        description="Social manipulation WITH memory and MISPRICING - test memory with actual trades",
+        parameters={
+            **DEFAULT_PARAMS,
+            "MODEL_OPEN_AI": "gpt-oss-120b",  # Override model
+            "NUM_ROUNDS": 10,  # Reduced for faster testing
+            "INITIAL_PRICE": 35.0,  # 25% above fundamental ($28) to generate trades
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                # BOTH features enabled
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': True,
+
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'influencer': 2,
+                    'herd_follower': 4,
+                    'value': 2,
+                    'contrarian': 1,
+                }
+            }
+        }
+    ),
 }

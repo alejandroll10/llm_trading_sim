@@ -154,13 +154,9 @@ class LLMAgent(BaseAgent):
                         f"{post_message}{reasoning_text}"
                     )
 
-            # Auto-fix stock_id for single-stock scenarios
-            # In single-stock scenarios, market_state won't have 'stocks' key
-            is_single_stock = 'stocks' not in market_state
-            if is_single_stock and response.decision.get('orders'):
-                for order in response.decision['orders']:
-                    # OrderDetails is a Pydantic object, use attribute access
-                    order.stock_id = 'DEFAULT_STOCK'
+            # NOTE: stock_id auto-fix removed - now handled by dynamic schema
+            # In single-stock mode, stock_id field is excluded from schema entirely
+            # and automatically added in llm_services.py when parsing the response
 
             return response.decision
                 

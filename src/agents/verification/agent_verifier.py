@@ -264,34 +264,22 @@ class AgentVerifier:
                 )
                 assert False, error_msg
 
-        # Invariant 2: DEFAULT_STOCK accumulator consistency (multi-stock only)
-        if len(all_positions) > 1:
-            # Multi-stock mode: DEFAULT_STOCK should equal sum of other stocks
-            default_stock_value = all_positions.get("DEFAULT_STOCK", 0)
-            other_stocks_sum = sum(
-                shares for stock_id, shares in all_positions.items()
-                if stock_id != "DEFAULT_STOCK"
+        # Invariant 2: DEFAULT_STOCK should not exist in multi-stock mode
+        if len(all_positions) > 1 and "DEFAULT_STOCK" in all_positions:
+            # Multi-stock mode: DEFAULT_STOCK should NOT exist
+            error_msg = (
+                f"INVARIANT VIOLATION: DEFAULT_STOCK found in multi-stock mode. "
+                f"All positions: {all_positions}"
             )
-
-            # Allow small floating point tolerance
-            tolerance = 0.01
-            if abs(default_stock_value - other_stocks_sum) > tolerance:
-                error_msg = (
-                    f"INVARIANT VIOLATION: DEFAULT_STOCK accumulator mismatch. "
-                    f"DEFAULT_STOCK={default_stock_value}, sum of other stocks={other_stocks_sum}. "
-                    f"All positions: {all_positions}"
-                )
-                LoggingService.log_agent_state(
-                    agent_id=self.agent.agent_id,
-                    operation="INVARIANT_VIOLATION",
-                    amount=error_msg,
-                    agent_state=self.agent._get_state_dict(),
-                    is_error=True
-                )
-                # Warning instead of assertion failure in production
-                # This allows simulation to continue while logging the issue
-                warnings.warn(error_msg, RuntimeWarning)
-                return False
+            LoggingService.log_agent_state(
+                agent_id=self.agent.agent_id,
+                operation="INVARIANT_VIOLATION",
+                amount=error_msg,
+                agent_state=self.agent._get_state_dict(),
+                is_error=True
+            )
+            warnings.warn(error_msg, RuntimeWarning)
+            return False
 
         # Invariant 3: total_borrowed_shares consistency
         expected_total = self.agent.total_borrowed_shares

@@ -361,8 +361,8 @@ class BaseSimulation:
                 self.matching_engines[stock_id] = MatchingEngine(
                     order_book=self.order_books[stock_id],
                     agent_manager=self.agent_manager,
-                    logger=LoggingService.get_logger(f'matching_{stock_id}'),
-                    trades_logger=LoggingService.get_logger(f'trades_{stock_id}'),
+                    logger=LoggingService.get_logger('order_book'),  # Use generic logger for all stocks
+                    trades_logger=LoggingService.get_logger('market'),  # Use generic logger for all stocks
                     trade_execution_service=self.trade_execution_service,
                     order_repository=self.order_repository,
                     order_state_manager=self.order_state_manager,
@@ -532,11 +532,12 @@ class BaseSimulation:
                 # For multi-stock scenarios, set positions dict
                 if 'initial_positions' in agent_params:
                     agent.positions = agent_params['initial_positions'].copy()
+                    # NOTE: Do NOT add DEFAULT_STOCK in multi-stock mode - only actual stocks exist
                     # Reset committed and borrowed positions for all stocks
                     agent.committed_positions = {stock_id: 0 for stock_id in agent.positions.keys()}
                     agent.borrowed_positions = {stock_id: 0 for stock_id in agent.positions.keys()}
                     # Update initial_shares to be the sum across all stocks for verification
-                    agent.initial_shares = sum(agent.positions.values())
+                    agent.initial_shares = sum(agent_params['initial_positions'].values())
 
                 agents.append(agent)
                 agent_id += 1

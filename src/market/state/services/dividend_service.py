@@ -167,7 +167,7 @@ class DividendPaymentProcessor:
 
             # Clear shares for THIS stock only
             # Redemption pays for ALL shares (positions + committed - borrowed), so clear everything
-            agent.positions[self.stock_id] = 0
+            agent._update_position(self.stock_id, 0)
             agent.committed_positions[self.stock_id] = 0  # We just paid for these!
 
             # Release borrowed shares back to the pool before clearing

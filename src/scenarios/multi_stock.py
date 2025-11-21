@@ -407,4 +407,97 @@ SCENARIOS = {
             }
         }
     ),
+
+    "gptoss_multistock_memory_test": SimulationScenario(
+        name="gptoss_multistock_memory_test",
+        description="Multi-stock memory test with GPT-OSS - 3 stocks with different mispricing levels",
+        parameters={
+            **DEFAULT_PARAMS,
+            "MODEL_OPEN_AI": "gpt-oss-120b",  # Use GPT-OSS reasoning model
+            "NUM_ROUNDS": 8,  # Medium length for memory testing
+            "IS_MULTI_STOCK": True,
+            "HIDE_FUNDAMENTAL_PRICE": False,
+            "STOCKS": {
+                "TECH_OVERVALUED": {
+                    "INITIAL_PRICE": 110.0,
+                    "FUNDAMENTAL_PRICE": 100.0,  # 10% overvalued
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "LENDABLE_SHARES": 5000,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                },
+                "PHARMA_UNDERVALUED": {
+                    "INITIAL_PRICE": 85.0,
+                    "FUNDAMENTAL_PRICE": 100.0,  # 15% undervalued
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "LENDABLE_SHARES": 5000,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.5,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                },
+                "ENERGY_FAIR": {
+                    "INITIAL_PRICE": 50.0,
+                    "FUNDAMENTAL_PRICE": 50.0,  # Fairly valued
+                    "REDEMPTION_VALUE": 50.0,
+                    "TRANSACTION_COST": 0.0,
+                    "LENDABLE_SHARES": 3000,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 1.0,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                # BOTH features enabled for memory testing
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': True,
+
+                'allow_short_selling': True,  # Enable shorting for overvalued stock
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH * 3,  # Extra cash for multi-stock
+                'initial_positions': {
+                    "TECH_OVERVALUED": 1000,
+                    "PHARMA_UNDERVALUED": 1000,
+                    "ENERGY_FAIR": 1000
+                },
+                'max_order_size': 500,
+                'agent_composition': {
+                    'influencer': 1,
+                    'herd_follower': 2,
+                    'value': 2,
+                    'contrarian': 1,
+                },
+                'borrow_model': {
+                    'rate': 0.02,
+                    'payment_frequency': 1,
+                    'allow_partial_borrows': True
+                },
+                'interest_model': {
+                    'rate': 0.01,
+                    'compound_frequency': 1
+                }
+            }
+        }
+    ),
 }

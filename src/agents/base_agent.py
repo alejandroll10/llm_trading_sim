@@ -137,13 +137,27 @@ class BaseAgent(ABC):
     # Backwards compatibility properties for single-stock code
     @property
     def shares(self) -> int:
-        """Get shares for DEFAULT_STOCK (backwards compatibility)"""
-        return self.positions.get("DEFAULT_STOCK", 0)
+        """Get shares for DEFAULT_STOCK (single-stock) or total shares (multi-stock)
+
+        In single-stock mode: returns positions["DEFAULT_STOCK"]
+        In multi-stock mode: returns sum across all stocks (same as total_shares)
+        """
+        if "DEFAULT_STOCK" in self.positions:
+            # Single-stock mode
+            return self.positions["DEFAULT_STOCK"]
+        else:
+            # Multi-stock mode: return total across all stocks
+            return sum(self.positions.values())
 
     @shares.setter
     def shares(self, value: int):
-        """Set shares for DEFAULT_STOCK (backwards compatibility)"""
-        self.positions["DEFAULT_STOCK"] = value
+        """Set shares for DEFAULT_STOCK (single-stock only)
+
+        Raises ValueError if used in multi-stock mode.
+        """
+        if "DEFAULT_STOCK" not in self.positions:
+            raise ValueError("Cannot use agent.shares setter in multi-stock mode. Use agent.positions[stock_id] instead.")
+        self._update_position("DEFAULT_STOCK", value)
 
     @property
     def committed_shares(self) -> int:
@@ -190,6 +204,18 @@ class BaseAgent(ABC):
             shares for stock_id, shares in all_positions.items()
             if stock_id != "DEFAULT_STOCK"
         )
+
+    def _update_position(self, stock_id: str, new_value: int):
+        """Update a stock position.
+
+        Args:
+            stock_id: The stock to update
+            new_value: The new position value
+
+        Note: In multi-stock mode, DEFAULT_STOCK should not be used.
+        """
+        # Simply update the position - no DEFAULT_STOCK accumulator in multi-stock mode
+        self.positions[stock_id] = new_value
 
     def _check_borrowed_positions_invariants(self) -> bool:
         """Verify borrowed positions invariants are maintained
@@ -512,7 +538,16 @@ class BaseAgent(ABC):
         )
 
         # Get current position for this specific stock
-        current_shares = self.positions.get(stock_id, 0)
+        # DEFENSIVE: Check if stock_id exists in positions
+        if stock_id not in self.positions:
+            LoggingService.get_logger('agents').warning(
+                f"Agent {self.agent_id} committing shares for stock_id='{stock_id}' "
+                f"which is not in positions {list(self.positions.keys())}. "
+                f"This may indicate a stock_id mismatch bug."
+            )
+            current_shares = 0
+        else:
+            current_shares = self.positions[stock_id]
 
         # Check if we need to borrow shares
         shares_to_borrow = 0
@@ -600,16 +635,12 @@ class BaseAgent(ABC):
         # Note: Don't update committed_shares property for non-DEFAULT_STOCK stocks
         # The property is for backward compatibility with single-stock mode only
 
-        # DEBUG
-        if stock_id == "DEFAULT_STOCK":
-            dict_id = id(self.committed_positions)
-            print(f"[DEBUG commit_shares] Agent {self.agent_id}: dict_id={dict_id}, committed_positions[DEFAULT_STOCK] = {self.committed_positions['DEFAULT_STOCK']}")
 
         # Decrement the correct stock's position
         # Only reduce by what we actually have of this stock (not borrowed amount)
         owned_shares = min(quantity, current_shares)
         if owned_shares > 0:
-            self.positions[stock_id] = current_shares - owned_shares
+            self._update_position(stock_id, current_shares - owned_shares)
 
         # Log final state
         LoggingService.log_agent_state(
@@ -652,13 +683,6 @@ class BaseAgent(ABC):
         # Note: Don't update committed_shares property for non-DEFAULT_STOCK stocks
         # The property is for backward compatibility with single-stock mode only
 
-        # DEBUG
-        if stock_id == "DEFAULT_STOCK":
-            print(f"[DEBUG release_shares] Agent {self.agent_id}: released {quantity}, new_value={new_value}, committed_positions[DEFAULT_STOCK] = {self.committed_positions['DEFAULT_STOCK']}")
-            if new_value == 0 and current_committed > 0:
-                import traceback
-                print("[DEBUG] Commitment went to 0, traceback:")
-                traceback.print_stack(limit=15)
 
         if return_borrowed:
             # If we've borrowed shares for this stock, return those first
@@ -672,11 +696,11 @@ class BaseAgent(ABC):
                 shares_to_restore = max(0, quantity - shares_to_return)
                 if shares_to_restore > 0:
                     current_position = self.positions.get(stock_id, 0)
-                    self.positions[stock_id] = current_position + shares_to_restore
+                    self._update_position(stock_id, current_position + shares_to_restore)
             else:
                 # No borrowed shares, so just add everything back to this stock
                 current_position = self.positions.get(stock_id, 0)
-                self.positions[stock_id] = current_position + quantity
+                self._update_position(stock_id, current_position + quantity)
 
         LoggingService.log_agent_state(
             agent_id=self.agent_id,

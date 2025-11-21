@@ -100,16 +100,36 @@ class AgentDecisionService:
         )
         
     def create_order(self, order_details: Dict | OrderDetails, agent_id: str) -> Order:
-        """Create and register new order"""
+        """Create and register new order with defensive validation"""
         try:
-            # Handle both dict and OrderDetails formats
+            # Extract stock_id and side early for validation
             if isinstance(order_details, dict):
                 stock_id_val = order_details.get('stock_id', 'DEFAULT_STOCK')
+                side = order_details['decision'].lower()
+            else:
+                stock_id_val = order_details.stock_id
+                side = order_details.decision.lower()
+
+            # DEFENSIVE VALIDATION: Check stock_id exists in agent positions for sell orders
+            if side == 'sell':
+                agent = self.agent_repository.get_agent(agent_id)
+                if stock_id_val not in agent.positions:
+                    available_stocks = list(agent.positions.keys())
+                    error_msg = (
+                        f"Agent {agent_id} cannot sell stock_id='{stock_id_val}' - "
+                        f"not found in agent positions. Available stocks: {available_stocks}. "
+                        f"This indicates a stock_id mismatch bug."
+                    )
+                    self.decisions_logger.error(error_msg)
+                    raise ValueError(error_msg)
+
+            # Create order after validation
+            if isinstance(order_details, dict):
                 order = Order(
                     agent_id=agent_id,
                     stock_id=stock_id_val,  # NEW: Multi-stock support
                     order_type=order_details['order_type'].lower(),
-                    side=order_details['decision'].lower(),
+                    side=side,
                     quantity=order_details['quantity'],
                     round_placed=self.context.round_number,
                     price=order_details['price_limit']
@@ -119,7 +139,7 @@ class AgentDecisionService:
                     agent_id=agent_id,
                     stock_id=order_details.stock_id,  # NEW: Multi-stock support
                     order_type=order_details.order_type.value,
-                    side=order_details.decision.lower(),
+                    side=side,
                     quantity=order_details.quantity,
                     round_placed=self.context.round_number,
                     price=order_details.price_limit
@@ -128,6 +148,6 @@ class AgentDecisionService:
             self.decisions_logger.error(f"Error creating order for agent {agent_id}: {e}")
             self.decisions_logger.error(f"Order details: {order_details}")
             raise e
-        
+
         self.order_repository.create_order(order)
         return order

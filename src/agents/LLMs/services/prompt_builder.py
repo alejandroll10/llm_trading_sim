@@ -25,9 +25,8 @@ class PromptBuilder:
     FEATURE_INSTRUCTIONS = {
         Feature.MEMORY: """
 MEMORY SYSTEM:
-Use 'notes_to_self' to record your strategic thinking and learnings.
-What are you trying? What did you learn from previous rounds?
-Don't repeat trades or prices.""",
+Use 'notes_to_self' to record what you LEARNED this round (what worked/failed).
+Don't repeat trade history or prices - you'll see those next round.""",
 
         Feature.SOCIAL: """
 MESSAGING:

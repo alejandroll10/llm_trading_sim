@@ -256,7 +256,7 @@ class MarginService:
             # Note: Don't update borrowed_shares property for non-DEFAULT_STOCK stocks
             # The property is for backward compatibility with single-stock mode only
 
-            self.agent.positions[stock_id] = self.agent.positions.get(stock_id, 0) + shares
+            self.agent._update_position(stock_id, self.agent.positions.get(stock_id, 0) + shares)
             self.agent.cash -= cost
             total_cost += cost
 
@@ -472,7 +472,7 @@ class MarginService:
             proceeds = shares * price
 
             # Update positions - sell the shares
-            self.agent.positions[stock_id] = max(0, self.agent.positions.get(stock_id, 0) - shares)
+            self.agent._update_position(stock_id, max(0, self.agent.positions.get(stock_id, 0) - shares))
             self.agent.cash += proceeds
             total_proceeds += proceeds
 

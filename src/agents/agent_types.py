@@ -259,6 +259,12 @@ AGENT_TYPES = {
         user_prompt_template=STANDARD_USER_TEMPLATE,
         type_id="speculator"
     ),
+    "college_student": AgentType(
+        name="College Student",
+        system_prompt="""You trade as a college student.""",
+        user_prompt_template=STANDARD_USER_TEMPLATE,
+        type_id="college_student"
+    ),
     "retail": AgentType(
         name="Retail Trader",
         system_prompt="""You are a retail trader.""",

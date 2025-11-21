@@ -7,28 +7,11 @@ from dotenv import load_dotenv
 from scenarios.base import DEFAULT_LLM_BASE_URL
 from .schema_features import Feature, FeatureRegistry
 
-class OrderSchema(BaseModel):
-    """Schema for individual orders"""
-    decision: Literal["Buy", "Sell"] = Field(..., description="Buy or Sell")
-    quantity: int = Field(..., description="Number of shares")
-    order_type: str = Field(..., description="Market or Limit")
-    price_limit: Optional[float] = Field(None, description="Required for limit orders")
-    stock_id: str = Field(default="DEFAULT_STOCK", description="Stock identifier (automatically set for single-stock scenarios)")
-
-class TradeDecisionSchema(BaseModel):
-
-    """Schema for trade decisions"""
-    valuation_reasoning: str = Field(..., description="Brief numerical calculation of valuation analysis")
-    valuation: float = Field(..., description="Agent's estimated fundamental value")
-    price_target_reasoning: str = Field(..., description="Specific reasoning of expected price next round")
-    price_target: float = Field(..., description="Agent's predicted price in near future")
-    reasoning: str = Field(..., description="Your strategy and reasoning for this trade - decide BEFORE specifying orders")
-    orders: List[OrderSchema] = Field(..., description="List of orders to execute")
-    replace_decision: str = Field(..., description="Add, Cancel, or Replace")
-    message_reasoning: Optional[str] = Field(None, description="Your reasoning for this social media message - what effect do you want it to have on other agents?")
-    post_message: Optional[str] = Field(None, description="Optional: Post a message to the social feed visible to other agents next round")
-    notes_to_self: Optional[str] = Field(None, description="Optional: Write notes to your future self about what you learned this round, patterns observed, or strategy adjustments. These notes will be shown to you in future rounds.")
-    
+# NOTE: OrderSchema and TradeDecisionSchema are now dynamically generated
+# in schema_features.py based on enabled features and stock mode.
+# This allows for:
+# - Conditional inclusion of optional fields (memory, social)
+# - Conditional inclusion of stock_id (only in multi-stock mode)
 
 @dataclass
 class LLMRequest:
@@ -109,8 +92,11 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
             {"role": "user", "content": user_prompt}
         ]
 
-        # Get dynamic schema based on enabled features
-        dynamic_schema = FeatureRegistry.get_schema_for_features(request.enabled_features)
+        # Get dynamic schema based on enabled features AND stock mode
+        dynamic_schema = FeatureRegistry.get_schema_for_features(
+            request.enabled_features,
+            is_multi_stock=request.is_multi_stock
+        )
 
         # Get the response using the parse method with our dynamic schema
         completion = self.client.beta.chat.completions.parse(
@@ -120,16 +106,23 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
             temperature=0.0,
             seed=self.seed
         )
-        
+
         # Get raw response from LLM
         raw_response = completion.choices[0].message.content
-        
+
         # Parse the response into structured format
         try:
             parsed_response = completion.choices[0].message.parsed
 
             # Convert the parsed response to OrderDetails format
-            orders = [OrderDetails(**order.model_dump()) for order in parsed_response.orders]
+            # In single-stock mode, add stock_id automatically since it's not in the schema
+            orders = []
+            for order in parsed_response.orders:
+                order_dict = order.model_dump()
+                # Add stock_id if not present (single-stock mode)
+                if 'stock_id' not in order_dict:
+                    order_dict['stock_id'] = 'DEFAULT_STOCK'
+                orders.append(OrderDetails(**order_dict))
 
             # Build decision dict with core fields (always present)
             decision_dict = {

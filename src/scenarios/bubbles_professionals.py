@@ -84,6 +84,11 @@ STUDENT_AGENT_MIX = {
     'speculator': 2,      # Gambling mentality
 }
 
+# College student mix - minimal prompting to let natural behavior emerge
+COLLEGE_STUDENT_MIX = {
+    'college_student': 8,  # All college students
+}
+
 # Mixed agent composition (for testing interaction effects)
 MIXED_AGENT_MIX = {
     'value': 2,
@@ -164,6 +169,23 @@ high_ca_students = SimulationScenario(
             'initial_cash': HIGH_CASH_PER_AGENT,
             'initial_shares': HIGH_SHARES_PER_AGENT,
             'agent_composition': STUDENT_AGENT_MIX,
+            'allow_short_selling': False,
+            'MEMORY_ENABLED': False,
+            'SOCIAL_ENABLED': False,
+        }
+    }
+)
+
+high_ca_college = SimulationScenario(
+    name="bubbles_high_ca_college",
+    description="HIGH CA ratio (10.2) with college student agents - minimal prompt, emergent behavior",
+    parameters={
+        **BASE_BUBBLES_PARAMS,
+        "AGENT_PARAMS": {
+            **BASE_BUBBLES_PARAMS["AGENT_PARAMS"],
+            'initial_cash': HIGH_CASH_PER_AGENT,
+            'initial_shares': HIGH_SHARES_PER_AGENT,
+            'agent_composition': COLLEGE_STUDENT_MIX,
             'allow_short_selling': False,
             'MEMORY_ENABLED': False,
             'SOCIAL_ENABLED': False,
@@ -294,6 +316,7 @@ SCENARIOS = {
     # HIGH CA scenarios (bubble-prone)
     'bubbles_high_ca_professionals': high_ca_professionals,
     'bubbles_high_ca_students': high_ca_students,
+    'bubbles_high_ca_college': high_ca_college,
     'bubbles_high_ca_mixed': high_ca_mixed,
 
     # LOW CA scenarios (benchmark)

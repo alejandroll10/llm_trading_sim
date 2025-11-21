@@ -43,7 +43,21 @@ def commit_shares_with_borrowing(
     original_requested = share_amount
 
     # Get current position for this specific stock
-    current_shares = agent.positions.get(stock_id, 0)
+    # DEFENSIVE: Check if stock_id exists in positions
+    if stock_id not in agent.positions:
+        # Log warning but continue (might be legitimate short sell from empty position)
+        # However, this could indicate a stock_id mismatch bug
+        from services.logging_models import LoggingService
+        logger = LoggingService.get_logger('agents')
+        logger.warning(
+            f"Agent {agent.agent_id} committing shares for stock_id='{stock_id}' "
+            f"which is not in positions {list(agent.positions.keys())}. "
+            f"Treating as short sell from zero position. "
+            f"If this is unexpected, it may indicate a stock_id mismatch bug."
+        )
+        current_shares = 0
+    else:
+        current_shares = agent.positions[stock_id]
 
     # Determine if we need to borrow shares
     shares_needed = max(0, share_amount - current_shares)
@@ -231,13 +245,13 @@ def update_shares_with_covering(
         # Use purchases to cover existing borrowed shares first
         cover = min(amount, current_borrowed)
         agent.borrowed_positions[stock_id] = current_borrowed - cover
-        agent.positions[stock_id] = current_shares + (amount - cover)
+        agent._update_position(stock_id, current_shares + (amount - cover))
         if cover > 0:
             # Release shares to the correct stock's borrowing repository
             borrowing_repo = get_borrowing_repo(stock_id)
             borrowing_repo.release_shares(agent.agent_id, cover)
     else:
-        agent.positions[stock_id] = current_shares + amount
+        agent._update_position(stock_id, current_shares + amount)
 
     LoggingService.get_logger('agents').info(
         f"Updated share balance for agent {agent.agent_id}, stock {stock_id}, new balance: {agent.positions[stock_id]}"
@@ -269,7 +283,7 @@ def redeem_shares_and_return_borrowed(
 
     # Clear positions for ALL stocks (multi-stock support)
     for stock_id in list(agent.positions.keys()):
-        agent.positions[stock_id] = 0
+        agent._update_position(stock_id, 0)
         # NOTE: Don't clear committed_positions - agents may still have active orders!
         # Commitments should only be released when orders are cancelled/filled.
 
