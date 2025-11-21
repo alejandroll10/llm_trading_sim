@@ -159,8 +159,8 @@ class LLMAgent(BaseAgent):
             is_single_stock = 'stocks' not in market_state
             if is_single_stock and response.decision.get('orders'):
                 for order in response.decision['orders']:
-                    if isinstance(order, dict):
-                        order['stock_id'] = 'DEFAULT_STOCK'
+                    # OrderDetails is a Pydantic object, use attribute access
+                    order.stock_id = 'DEFAULT_STOCK'
 
             return response.decision
                 

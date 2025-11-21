@@ -112,4 +112,7 @@ venv.bak/
 dmypy.json
 
 # Pyre type checker
-.pyre/ 
+.pyre/
+
+# Backup files (use git instead)
+*.backup
