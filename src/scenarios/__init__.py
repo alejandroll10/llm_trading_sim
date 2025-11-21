@@ -17,6 +17,7 @@ Scenarios are organized by category:
 - multi_model: Testing different LLM models competing against each other
 - feature_ab_tests: A/B testing pairs for feature toggle system
 - test_scenarios: Simple test scenarios for development
+- bubbles_professionals: Replicating "Bubbles and Financial Professionals" (Weitzel et al. 2020)
 """
 
 from typing import Dict
@@ -31,6 +32,7 @@ from . import multi_stock
 from . import multi_model
 from . import feature_ab_tests
 from . import test_scenarios
+from . import bubbles_professionals
 
 # Combine all scenarios into a single registry
 SCENARIOS = {
@@ -42,6 +44,7 @@ SCENARIOS = {
     **multi_model.MULTI_MODEL_SCENARIOS,
     **feature_ab_tests.SCENARIOS,
     **test_scenarios.SCENARIOS,
+    **bubbles_professionals.SCENARIOS,
 }
 
 # Backwards-compatible API

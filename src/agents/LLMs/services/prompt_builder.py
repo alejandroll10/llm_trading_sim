@@ -25,8 +25,9 @@ class PromptBuilder:
     FEATURE_INSTRUCTIONS = {
         Feature.MEMORY: """
 MEMORY SYSTEM:
-You can optionally write notes to yourself in the 'notes_to_self' field - these will be shown to you in future rounds.
-Use this to track patterns, record what works/doesn't work, and improve your strategy over time.""",
+Use 'notes_to_self' to record your strategic thinking and learnings.
+What are you trying? What did you learn from previous rounds?
+Don't repeat trades or prices.""",
 
         Feature.SOCIAL: """
 MESSAGING:

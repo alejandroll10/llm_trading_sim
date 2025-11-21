@@ -19,7 +19,7 @@ from .base import (
 
 SCENARIOS = {
     # ========================================================================
-    # A/B Test 1: Memory Impact on Social Manipulation
+    # A/B Test 1: Memory Impact on Social Manipulation (Llama 3.1 70B)
     # ========================================================================
     "social_with_memory": SimulationScenario(
         name="social_with_memory",
@@ -241,6 +241,67 @@ SCENARIOS = {
                 'agent_composition': {
                     'momentum': 6,
                     'value': 2,
+                }
+            }
+        }
+    ),
+
+    # ========================================================================
+    # A/B Test 5: Memory Impact with GPT-OSS 120B (Reasoning Model)
+    # ========================================================================
+    "gptoss_social_with_memory": SimulationScenario(
+        name="gptoss_social_with_memory",
+        description="Social manipulation WITH memory - GPT-OSS 120B reasoning model",
+        parameters={
+            **DEFAULT_PARAMS,
+            "MODEL_OPEN_AI": "gpt-oss-120b",  # Override model
+            "NUM_ROUNDS": 15,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                # BOTH features enabled
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': True,
+
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'influencer': 2,
+                    'herd_follower': 4,
+                    'value': 2,
+                    'contrarian': 1,
+                }
+            }
+        }
+    ),
+
+    "gptoss_social_without_memory": SimulationScenario(
+        name="gptoss_social_without_memory",
+        description="Social manipulation WITHOUT memory - GPT-OSS 120B reasoning model",
+        parameters={
+            **DEFAULT_PARAMS,
+            "MODEL_OPEN_AI": "gpt-oss-120b",  # Override model
+            "NUM_ROUNDS": 15,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                # Only SOCIAL enabled, MEMORY disabled
+                'MEMORY_ENABLED': False,
+                'SOCIAL_ENABLED': True,
+
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'influencer': 2,
+                    'herd_follower': 4,
+                    'value': 2,
+                    'contrarian': 1,
                 }
             }
         }
