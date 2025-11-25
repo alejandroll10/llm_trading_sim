@@ -40,6 +40,8 @@ class AgentContext:
     leverage_margin_ratio: float = None
     available_borrowing_power: float = None
     maintenance_margin: float = None
+    # Short selling support
+    allow_short_selling: bool = False
 
 class MarketStateFormatter:
     """Formats market state information for LLM consumption"""
@@ -106,6 +108,12 @@ class MarketStateFormatter:
             else:
                 leverage_note = " (Cash borrowing is not allowed)"
 
+            # Determine short selling note
+            if agent_context.allow_short_selling:
+                short_selling_note = "- Short selling is ALLOWED: You can sell shares you don't own by borrowing them"
+            else:
+                short_selling_note = "- Short selling is NOT allowed: You can only sell shares you currently own"
+
             context = {
                 # Market data from signals
                 'price': price_signal.value,
@@ -120,7 +128,8 @@ class MarketStateFormatter:
                 'committed_cash': agent_context.committed_cash,
                 'committed_shares': agent_context.committed_shares,
                 'position_display': position_display,  # Multi-stock aware display
-                'leverage_note': leverage_note,  # NEW: Leverage information
+                'leverage_note': leverage_note,  # Leverage information
+                'short_selling_note': short_selling_note,  # Short selling information
 
                 # Calculated display values
                 'volume_display': MarketStateFormatter._format_volume(volume_signal),
@@ -175,13 +184,16 @@ class MarketStateFormatter:
             leverage_info = ""
             if agent_context.leverage_ratio > 1.0 and agent_context.equity is not None:
                 # Determine margin status
+                # leverage_margin_ratio = borrowed_cash / equity (higher = more leveraged = riskier)
+                # max_leverage = (1 - maintenance_margin) / maintenance_margin
                 if agent_context.leverage_margin_ratio is not None and agent_context.maintenance_margin is not None:
-                    if agent_context.leverage_margin_ratio < agent_context.maintenance_margin:
-                        margin_status = "⚠️ MARGIN CALL - Below maintenance margin! Liquidation imminent"
-                    elif agent_context.leverage_margin_ratio < agent_context.maintenance_margin * 1.5:
-                        margin_status = "⚠️ WARNING - Approaching margin call threshold"
+                    max_leverage = (1 - agent_context.maintenance_margin) / agent_context.maintenance_margin if agent_context.maintenance_margin > 0 else float('inf')
+                    if agent_context.leverage_margin_ratio > max_leverage:
+                        margin_status = "⚠️ MARGIN CALL - Leverage exceeds maximum! Liquidation imminent"
+                    elif agent_context.leverage_margin_ratio > max_leverage * 0.8:
+                        margin_status = "⚠️ WARNING - Approaching max leverage threshold"
                     else:
-                        margin_status = "✓ Healthy - Above maintenance margin"
+                        margin_status = "✓ Healthy - Leverage within limits"
                 else:
                     margin_status = "N/A"
 

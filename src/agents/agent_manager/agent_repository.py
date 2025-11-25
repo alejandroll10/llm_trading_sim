@@ -379,6 +379,27 @@ class AgentRepository:
         if changes.shares_change != 0:
             self.update_share_balance(agent_id, changes.shares_change, stock_id=changes.stock_id)
 
+        # AUTOMATIC DEBT REPAYMENT: When agent sells shares (receives cash) and has borrowed_cash,
+        # use proceeds to repay debt. This prevents agents from going underwater by selling
+        # all shares while keeping the cash and ignoring their debt.
+        if changes.cash_change > 0 and agent.borrowed_cash > 0:
+            # Calculate how much to repay - use all proceeds up to the debt amount
+            repayment = min(changes.cash_change, agent.borrowed_cash)
+            if repayment > 0:
+                agent.borrowed_cash -= repayment
+                agent.cash -= repayment
+                # Return cash to lending pool
+                if hasattr(agent, 'cash_lending_repo') and agent.cash_lending_repo:
+                    agent.cash_lending_repo.release_cash(agent.agent_id, repayment)
+                # Record repayment for cash conservation tracking
+                if self.context:
+                    self.context.record_leverage_cash_repaid(
+                        amount=repayment,
+                        round_number=self.context.round_number
+                    )
+                print(f"[AUTO_DEBT_REPAY] Agent {agent_id}: Repaid ${repayment:.2f} from sale proceeds. "
+                      f"Remaining debt: ${agent.borrowed_cash:.2f}, Cash after repayment: ${agent.cash:.2f}")
+
         # Replace direct call with LoggingService
         LoggingService.log_agent_state(
             agent_id=agent_id,

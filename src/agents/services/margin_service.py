@@ -314,12 +314,16 @@ class MarginService:
         """
         total_cash = self.agent.total_cash
 
+        # Determine if this is single-stock mode (only DEFAULT_STOCK)
+        is_single_stock = len(prices) == 1 and "DEFAULT_STOCK" in prices
+
         # Calculate net share value across all stocks
+        # For single-stock mode, include DEFAULT_STOCK; for multi-stock, skip it (it's an accumulator)
         share_value = sum(
             (self.agent.positions.get(stock_id, 0) + self.agent.committed_positions.get(stock_id, 0) -
              self.agent.borrowed_positions.get(stock_id, 0)) * price
             for stock_id, price in prices.items()
-            if stock_id != "DEFAULT_STOCK"
+            if is_single_stock or stock_id != "DEFAULT_STOCK"
         )
 
         return total_cash + share_value - self.agent.borrowed_cash
@@ -337,28 +341,40 @@ class MarginService:
         Returns:
             Total value of long positions (including committed)
         """
+        # Determine if this is single-stock mode (only DEFAULT_STOCK)
+        is_single_stock = len(prices) == 1 and "DEFAULT_STOCK" in prices
+
         return sum(
             (self.agent.positions.get(stock_id, 0) + self.agent.committed_positions.get(stock_id, 0)) * price
             for stock_id, price in prices.items()
-            if stock_id != "DEFAULT_STOCK"
+            if is_single_stock or stock_id != "DEFAULT_STOCK"
         )
 
     def get_leverage_margin_ratio(self, prices: Dict[str, float]) -> float:
-        """Calculate current margin ratio for leverage (equity / gross_position_value).
+        """Calculate leverage ratio as borrowed_cash / equity.
 
-        A lower ratio means more leverage is being used. When this falls below
-        maintenance_margin, a margin call is triggered.
+        A higher ratio means more leverage is being used. When this exceeds
+        the max leverage threshold, a margin call is triggered.
 
         Args:
             prices: Dict mapping stock_id to current price
 
         Returns:
-            Margin ratio (0.0 to infinity). Returns infinity if no positions held.
+            Leverage ratio (0.0 to infinity).
+            - 0 if no borrowed cash (no leverage)
+            - infinity if equity <= 0 but has debt (critical violation)
+            - borrowed_cash/equity otherwise
         """
-        position_value = self.get_gross_position_value(prices)
-        if position_value == 0:
+        if self.agent.borrowed_cash <= 0:
+            return 0.0  # No leverage
+
+        equity = self.get_equity(prices)
+
+        if equity <= 0:
+            # Critical: has debt but zero or negative equity
             return float('inf')
-        return self.get_equity(prices) / position_value
+
+        return self.agent.borrowed_cash / equity
 
     def get_available_borrowing_power(self, prices: Dict[str, float]) -> float:
         """Calculate additional cash that can be borrowed for long positions.
@@ -386,10 +402,10 @@ class MarginService:
         return available
 
     def is_under_leverage_margin(self, prices: Dict[str, float]) -> bool:
-        """Check if agent is below maintenance margin for leverage.
+        """Check if agent's leverage exceeds the allowed maximum.
 
-        Returns True if the agent's margin ratio has fallen below the maintenance
-        margin threshold, triggering a margin call.
+        Returns True if the agent's leverage ratio (borrowed_cash/equity) exceeds
+        the maximum allowed, triggering a margin call.
 
         Args:
             prices: Dict mapping stock_id to current price
@@ -399,8 +415,12 @@ class MarginService:
         """
         if self.agent.borrowed_cash <= 0:
             return False
-        margin_ratio = self.get_leverage_margin_ratio(prices)
-        return margin_ratio < self.agent.maintenance_margin
+        leverage_ratio = self.get_leverage_margin_ratio(prices)
+        # Convert maintenance_margin to max_leverage_ratio
+        # maintenance_margin = 0.25 means need 25% equity -> max leverage = 3.0
+        maintenance_margin = self.agent.maintenance_margin
+        max_leverage_ratio = (1 - maintenance_margin) / maintenance_margin if maintenance_margin > 0 else float('inf')
+        return leverage_ratio > max_leverage_ratio
 
     def handle_leverage_margin_call(self, prices: Dict[str, float], round_number: int):
         """Force sell positions when leverage margin requirements violated.
@@ -444,8 +464,13 @@ class MarginService:
         # This maintains the relative composition of the portfolio
         stocks_to_liquidate = []
 
+        # Determine if this is single-stock mode (only DEFAULT_STOCK)
+        is_single_stock = len(prices) == 1 and "DEFAULT_STOCK" in prices
+
         for stock_id, price in prices.items():
-            if stock_id == "DEFAULT_STOCK":
+            # Skip DEFAULT_STOCK in multi-stock mode (it's an accumulator)
+            # But include it in single-stock mode (it's the actual stock)
+            if not is_single_stock and stock_id == "DEFAULT_STOCK":
                 continue
 
             position_shares = self.agent.positions.get(stock_id, 0)

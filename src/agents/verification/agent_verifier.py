@@ -416,12 +416,17 @@ class AgentVerifier:
             try:
                 # Equity should equal wealth (which already subtracts borrowed_cash)
                 calculated_equity = self.agent.get_equity(prices)
+
+                # Determine if this is single-stock mode (only DEFAULT_STOCK)
+                is_single_stock = len(prices) == 1 and "DEFAULT_STOCK" in prices
+
                 # Wealth should be consistent
+                # For single-stock mode, include DEFAULT_STOCK; for multi-stock, skip it (it's an accumulator)
                 share_value = sum(
                     (self.agent.positions.get(stock_id, 0) + self.agent.committed_positions.get(stock_id, 0) -
                      self.agent.borrowed_positions.get(stock_id, 0)) * price
                     for stock_id, price in prices.items()
-                    if stock_id != "DEFAULT_STOCK"
+                    if is_single_stock or stock_id != "DEFAULT_STOCK"
                 )
                 expected_wealth = self.agent.total_cash + share_value - self.agent.borrowed_cash
 

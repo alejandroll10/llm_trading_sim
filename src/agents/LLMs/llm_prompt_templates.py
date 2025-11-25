@@ -13,7 +13,7 @@ Trading Options:
      - Market order: Set order_type='market'
      - Limit order: Set order_type='limit' and specify price_limit
    - IMPORTANT: Sell orders may require borrowing shares if you don't hold enough
-   - Short selling is allowed when borrowing is available
+   {short_selling_note}
 
 2. Cancel Orders (replace_decision='Cancel'):
    - Return an empty orders list: orders=[]

@@ -86,8 +86,8 @@ SCENARIOS = {
                 'initial_shares': BASE_INITIAL_SHARES,
                 'max_order_size': BASE_MAX_ORDER_SIZE,
                 'agent_composition': {
-                    'leverage_trader': 2,
-                    'default': 2
+                    'optimistic': 2,    # LLM agents that buy (will use leverage if available)
+                    'pessimistic': 2    # LLM agents that sell their shares
                 },
                 'leverage_params': {
                     'enabled': True,

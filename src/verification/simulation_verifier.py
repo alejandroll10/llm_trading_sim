@@ -128,6 +128,7 @@ class SimulationVerifier:
         self.verify_order_book_consistency()
         self.verify_wealth_conservation(pre_round_states)
         self.verify_commitment_order_matching()
+        self.verify_agent_equity_non_negative()  # CRITICAL: Check no agent has negative equity
 
         # Multi-stock specific invariants
         if self.is_multi_stock:
@@ -680,6 +681,12 @@ class SimulationVerifier:
                 for payment in context.market_history.leverage_interest_charged
                 if payment['round'] == current_round - 1
             )
+            leverage_cash_repaid = sum(
+                payment['amount']
+                for context in self.contexts.values()
+                for payment in context.market_history.leverage_cash_repaid
+                if payment['round'] == current_round - 1
+            )
         else:
             dividend_payment = sum(
                 payment['amount']
@@ -706,8 +713,13 @@ class SimulationVerifier:
                 for payment in self.context.market_history.leverage_interest_charged
                 if payment['round'] == current_round - 1
             )
+            leverage_cash_repaid = sum(
+                payment['amount']
+                for payment in self.context.market_history.leverage_cash_repaid
+                if payment['round'] == current_round - 1
+            )
 
-        expected_wealth_change = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged
+        expected_wealth_change = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid
         actual_wealth_change = post_wealth - pre_wealth
 
         self.logger.info(f"Pre-round cash: ${pre_wealth:.2f}")
@@ -982,6 +994,12 @@ class SimulationVerifier:
                 for payment in context.market_history.leverage_interest_charged
                 if payment['round'] == current_round - 1
             )
+            leverage_cash_repaid = sum(
+                payment['amount']
+                for context in self.contexts.values()
+                for payment in context.market_history.leverage_cash_repaid
+                if payment['round'] == current_round - 1
+            )
         else:
             dividend_payment = sum(
                 payment['amount']
@@ -1008,6 +1026,11 @@ class SimulationVerifier:
                 for payment in self.context.market_history.leverage_interest_charged
                 if payment['round'] == current_round - 1
             )
+            leverage_cash_repaid = sum(
+                payment['amount']
+                for payment in self.context.market_history.leverage_cash_repaid
+                if payment['round'] == current_round - 1
+            )
 
         # DEBUG: Add detailed logging for payment breakdown
         self.logger.warning(
@@ -1017,13 +1040,14 @@ class SimulationVerifier:
             f"  Borrow Fees: ${borrow_fee_payment:.2f}\n"
             f"  Leverage Cash Borrowed: ${leverage_cash_borrowed:.2f}\n"
             f"  Leverage Interest Charged: ${leverage_interest_charged:.2f}\n"
+            f"  Leverage Cash Repaid: ${leverage_cash_repaid:.2f}\n"
             f"  Total Cash Pre-Round: ${total_cash_pre:.2f}\n"
             f"  Total Cash Post-Round: ${total_cash_post:.2f}"
         )
 
         # Verify round-by-round changes
         cash_difference = total_cash_post - total_cash_pre
-        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged
+        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid
 
         self.logger.warning(
             f"[CASH_DEBUG] Cash Verification:\n"
@@ -1071,16 +1095,22 @@ class SimulationVerifier:
                 for context in self.contexts.values()
                 for payment in context.market_history.leverage_interest_charged
             )
+            total_historical_leverage_cash_repaid = sum(
+                payment['amount']
+                for context in self.contexts.values()
+                for payment in context.market_history.leverage_cash_repaid
+            )
         else:
             total_historical_dividends = sum(payment['amount'] for payment in self.context.market_history.dividends_paid)
             total_historical_interest = sum(payment['amount'] for payment in self.context.market_history.interest_paid)
             total_historical_borrow_fees = sum(payment['amount'] for payment in self.context.market_history.borrow_fees_paid)
             total_historical_leverage_cash_borrowed = sum(payment['amount'] for payment in self.context.market_history.leverage_cash_borrowed)
             total_historical_leverage_interest_charged = sum(payment['amount'] for payment in self.context.market_history.leverage_interest_charged)
+            total_historical_leverage_cash_repaid = sum(payment['amount'] for payment in self.context.market_history.leverage_cash_repaid)
 
         expected_total_cash = (
             initial_cash + total_historical_dividends + total_historical_interest - total_historical_borrow_fees
-            + total_historical_leverage_cash_borrowed - total_historical_leverage_interest_charged
+            + total_historical_leverage_cash_borrowed - total_historical_leverage_interest_charged - total_historical_leverage_cash_repaid
         )
 
         self.logger.info(f"\n=== System-wide cash verification ===")
@@ -1090,6 +1120,7 @@ class SimulationVerifier:
         self.logger.info(f"Total historical borrow fees: ${total_historical_borrow_fees:.2f}")
         self.logger.info(f"Total historical leverage cash borrowed: ${total_historical_leverage_cash_borrowed:.2f}")
         self.logger.info(f"Total historical leverage interest charged: ${total_historical_leverage_interest_charged:.2f}")
+        self.logger.info(f"Total historical leverage cash repaid: ${total_historical_leverage_cash_repaid:.2f}")
         self.logger.info(f"Current total cash: ${total_cash_post:.2f}")
         self.logger.info(f"Expected total: ${expected_total_cash:.2f}")
 
@@ -1206,3 +1237,67 @@ class SimulationVerifier:
                 msg += f"\nAgent {agent_id}: {pre_shares[agent_id]} -> {post_shares[agent_id]} (Δ{change})"
             self.logger.error(msg)
             raise ValueError(msg)
+
+    def verify_agent_equity_non_negative(self):
+        """
+        CRITICAL INVARIANT: Verify no agent has negative equity (total value).
+
+        An agent's equity = total_cash + share_value - borrowed_cash
+        This should NEVER be negative. If it is, it means:
+        1. Margin calls were not properly enforced
+        2. An agent owes more than they own
+
+        This is a critical accounting invariant that must be maintained.
+        """
+        self.logger.info("\n=== Agent Equity Non-Negative Verification ===")
+
+        violations = []
+
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+
+            # Calculate total share value across all positions
+            total_share_value = 0
+            if self.is_multi_stock:
+                for stock_id, shares in agent.positions.items():
+                    if stock_id in self.contexts:
+                        price = self.contexts[stock_id].current_price
+                        total_share_value += shares * price
+            else:
+                total_share_value = agent.total_shares * self.context.current_price
+
+            # Calculate equity: cash + share_value - borrowed_cash
+            total_cash = agent.total_cash
+            borrowed_cash = getattr(agent, 'borrowed_cash', 0)
+            equity = total_cash + total_share_value - borrowed_cash
+
+            self.logger.info(
+                f"Agent {agent_id}: cash=${total_cash:.2f}, shares_value=${total_share_value:.2f}, "
+                f"borrowed_cash=${borrowed_cash:.2f}, equity=${equity:.2f}"
+            )
+
+            if equity < -0.01:  # Small tolerance for floating point errors
+                violations.append({
+                    'agent_id': agent_id,
+                    'cash': total_cash,
+                    'share_value': total_share_value,
+                    'borrowed_cash': borrowed_cash,
+                    'equity': equity
+                })
+
+        if violations:
+            msg = "CRITICAL INVARIANT VIOLATION: Agent(s) have negative equity!\n"
+            msg += "This indicates margin calls were not properly enforced.\n\n"
+            for v in violations:
+                msg += f"Agent {v['agent_id']}:\n"
+                msg += f"  Cash: ${v['cash']:.2f}\n"
+                msg += f"  Share Value: ${v['share_value']:.2f}\n"
+                msg += f"  Borrowed Cash: ${v['borrowed_cash']:.2f}\n"
+                msg += f"  Equity: ${v['equity']:.2f} (NEGATIVE!)\n\n"
+
+            self.logger.error(msg)
+            # Log as warning but don't raise - allow simulation to complete for analysis
+            # TODO: Once margin call enforcement is fixed, change this to raise ValueError
+            self.logger.warning("⚠️ NEGATIVE EQUITY DETECTED - See issue #80 for fix")
+        else:
+            self.logger.info("✓ All agents have non-negative equity")
