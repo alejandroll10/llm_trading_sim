@@ -176,51 +176,10 @@ class MatchingEngine:
                             )
                         )
 
-        # Check for LEVERAGE margin violations (borrowed cash) and create forced SELL orders
-        leverage_margin_orders = self._check_and_create_leverage_margin_call_orders(new_price, round_number)
-
-        if leverage_margin_orders:
-            LoggingService.get_logger('market').warning(
-                f"[LEVERAGE_MARGIN_CALL] Processing {len(leverage_margin_orders)} forced sell orders"
-            )
-
-            # Process leverage margin call orders using the same flow
-            validated_leverage_orders = []
-            for order in leverage_margin_orders:
-                self.order_repository.create_order(order)
-                success, message = self.order_state_manager.handle_new_order(order, new_price)
-
-                if success:
-                    validated_leverage_orders.append(order)
-                    LoggingService.get_logger('market').info(
-                        f"[LEVERAGE_MARGIN_CALL] Order {order.order_id} validated successfully"
-                    )
-                else:
-                    LoggingService.get_logger('market').error(
-                        f"[LEVERAGE_MARGIN_CALL] Order {order.order_id} failed: {message}"
-                    )
-
-            if validated_leverage_orders:
-                leverage_trades, aggressive_limits = self.market_order_handler.process_orders(
-                    validated_leverage_orders, new_price, round_number
-                )
-
-                if leverage_trades:
-                    trades.extend(
-                        self.trade_processing_service.process_market_order_results(
-                            leverage_trades, aggressive_limits, []
-                        )
-                    )
-
-                    # Use proceeds to repay borrowed cash
-                    self._process_leverage_margin_call_repayments(leverage_trades, new_price)
-
-                    new_price = self.trade_processing_service.calculate_new_price(trades, new_price)
-
-                    LoggingService.get_logger('market').info(
-                        f"[LEVERAGE_MARGIN_CALL] Processed {len(leverage_trades)} trades, "
-                        f"new price: ${new_price:.2f}"
-                    )
+        # Check for LEVERAGE margin violations (borrowed cash) and perform DIRECT liquidation
+        # Unlike short selling margin calls (buy orders that can always execute), leverage margin calls
+        # are sell orders that need buyers. We use direct liquidation to ensure deleveraging happens.
+        self._process_direct_leverage_margin_calls(new_price, round_number)
 
         # Update agent wealth and log final state
         # In multi-stock mode, wealth is updated centrally with all stock prices
@@ -403,6 +362,130 @@ class MatchingEngine:
                             f"shares of {stock_id} to lending pool. "
                             f"Remaining borrowed: {agent.borrowed_positions[stock_id]:.2f}"
                         )
+
+    def _process_direct_leverage_margin_calls(self, current_price: float, round_number: int) -> None:
+        """Check all agents for leverage margin violations and perform DIRECT liquidation.
+
+        Unlike short selling margin calls (buy orders that can always execute against asks),
+        leverage margin calls are sell orders that need buyers. This method performs direct
+        liquidation - the broker absorbs the shares at the current price and uses the proceeds
+        to repay debt. This ensures deleveraging ALWAYS happens when margin is violated.
+
+        Similar to how _process_margin_call_share_returns directly returns shares to the lending pool.
+
+        Args:
+            current_price: Price after regular trading
+            round_number: Current round number
+        """
+        # Feature flag check
+        if not self.enable_intra_round_margin_checking:
+            return
+
+        logger = LoggingService.get_logger('market')
+
+        # Build prices dict for margin calculations
+        if self.is_multi_stock:
+            prices = {self.stock_id: current_price}
+            stock_id = self.stock_id
+        else:
+            prices = {"DEFAULT_STOCK": current_price}
+            stock_id = "DEFAULT_STOCK"
+
+        # Check each agent for leverage margin violations
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+
+            # Skip agents without borrowed cash
+            if agent.borrowed_cash <= 0:
+                continue
+
+            # Check margin requirement using the agent's margin service
+            # leverage_ratio = borrowed_cash / equity (higher = more leveraged)
+            leverage_ratio = agent.margin_service.get_leverage_margin_ratio(prices)
+            maintenance_margin = agent.maintenance_margin
+            equity = agent.margin_service.get_equity(prices)
+            position_value = agent.margin_service.get_gross_position_value(prices)
+
+            # Convert maintenance_margin to max_leverage_ratio
+            # If maintenance_margin = 0.25 (need 25% equity), max leverage = 3.0
+            max_leverage_ratio = (1 - maintenance_margin) / maintenance_margin if maintenance_margin > 0 else float('inf')
+
+            if leverage_ratio > max_leverage_ratio:
+                # Leverage margin violation detected!
+                logger.warning(
+                    f"[LEVERAGE_MARGIN_VIOLATION] Agent {agent_id}: "
+                    f"leverage_ratio={leverage_ratio:.4f} > max_leverage={max_leverage_ratio:.2f}, "
+                    f"equity=${equity:.2f}, position_value=${position_value:.2f}, "
+                    f"borrowed_cash=${agent.borrowed_cash:.2f}"
+                )
+
+                # Calculate how much to liquidate
+                if equity <= 0:
+                    # Bankrupt or negative equity - liquidate everything
+                    value_to_liquidate = position_value
+                else:
+                    # Restore to initial margin (more conservative than maintenance)
+                    initial_margin = agent.initial_margin if agent.initial_margin > 0 else 0.5
+                    target_position_value = equity / initial_margin
+                    value_to_liquidate = max(0, position_value - target_position_value)
+
+                if value_to_liquidate <= 0:
+                    continue
+
+                # Get agent's position in this stock
+                position_shares = agent.positions.get(stock_id, 0)
+                if position_shares <= 0 or current_price <= 0:
+                    continue
+
+                # Calculate shares to sell
+                shares_to_sell = min(value_to_liquidate / current_price, position_shares)
+                if shares_to_sell <= 0:
+                    continue
+
+                # DIRECT LIQUIDATION - broker absorbs shares at current price
+                proceeds = shares_to_sell * current_price
+
+                # 1. Reduce agent's position
+                old_position = agent.positions.get(stock_id, 0)
+                agent._update_position(stock_id, max(0, old_position - shares_to_sell))
+
+                # 2. Credit proceeds to agent's cash
+                agent.cash += proceeds
+
+                # 3. Repay borrowed cash with proceeds
+                old_borrowed = agent.borrowed_cash
+                repayment = min(proceeds, agent.borrowed_cash)
+                if repayment > 0:
+                    agent.cash -= repayment
+                    agent.borrowed_cash -= repayment
+
+                    # Return cash to lending pool
+                    if hasattr(agent, 'cash_lending_repo') and agent.cash_lending_repo:
+                        agent.cash_lending_repo.release_cash(agent.agent_id, repayment)
+
+                    # Record repayment in context
+                    if self.context:
+                        self.context.record_leverage_cash_repaid(amount=repayment, round_number=round_number)
+
+                logger.warning(
+                    f"[LEVERAGE_DIRECT_LIQUIDATION] Agent {agent_id}: "
+                    f"Sold {shares_to_sell:.2f} shares @ ${current_price:.2f} = ${proceeds:.2f}. "
+                    f"Repaid ${repayment:.2f} debt. "
+                    f"Position: {old_position:.2f} -> {agent.positions.get(stock_id, 0):.2f}, "
+                    f"Borrowed: ${old_borrowed:.2f} -> ${agent.borrowed_cash:.2f}"
+                )
+
+                # Log margin call event
+                LoggingService.log_margin_call(
+                    round_number=round_number,
+                    agent_id=agent.agent_id,
+                    agent_type=agent.agent_type.name,
+                    borrowed_shares=old_position,  # Using for tracking original position
+                    max_borrowable=0,
+                    action=f"DIRECT_LIQUIDATION_{stock_id}_LEVERAGE",
+                    excess_shares=shares_to_sell,
+                    price=current_price
+                )
 
     def _check_and_create_leverage_margin_call_orders(self, current_price: float, round_number: int) -> List[Order]:
         """Check all agents for leverage margin violations and create forced SELL orders.
