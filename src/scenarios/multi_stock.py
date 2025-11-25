@@ -500,4 +500,84 @@ SCENARIOS = {
             }
         }
     ),
+
+    "multi_stock_margin_call_test": SimulationScenario(
+        name="multi_stock_margin_call_test",
+        description="Multi-stock margin call test - short squeeze triggers margin calls on multiple stocks",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 8,  # Extended to see margin calls execute after price spike
+            "IS_MULTI_STOCK": True,
+            "HIDE_FUNDAMENTAL_PRICE": False,
+            "ENABLE_INTRA_ROUND_MARGIN_CHECKING": True,  # Enable margin checking
+            "STOCKS": {
+                "STOCK_A": {
+                    "INITIAL_PRICE": 50.0,  # Low starting price
+                    "FUNDAMENTAL_PRICE": 150.0,  # HIGH fundamental - buyers push hard toward this
+                    "REDEMPTION_VALUE": 150.0,
+                    "TRANSACTION_COST": 0.0,
+                    "LENDABLE_SHARES": 10000,  # Plenty of shares for shorting
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 0.0,  # No dividends - clean test
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.0,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                },
+                "STOCK_B": {
+                    "INITIAL_PRICE": 50.0,  # Same starting price
+                    "FUNDAMENTAL_PRICE": 150.0,  # HIGH fundamental
+                    "REDEMPTION_VALUE": 150.0,
+                    "TRANSACTION_COST": 0.0,
+                    "LENDABLE_SHARES": 10000,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 0.0,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.0,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': True,  # ENABLE SHORT SELLING
+                'position_limit': BASE_POSITION_LIMIT * 2,
+                'initial_cash': 100000.0,  # MORE CASH to build larger short positions
+                'initial_positions': {
+                    "STOCK_A": 100,  # Small initial - forces borrowing
+                    "STOCK_B": 100
+                },
+                'max_order_size': 1000,  # Larger orders allowed
+                'agent_composition': {
+                    'multi_stock_short_seller': 1,  # Builds large short position
+                    'multi_stock_squeeze_buyer': 1,  # ACTIVATES round 3: massive squeeze!
+                    'multi_stock_market_maker': 2,  # Provides liquidity
+                },
+                'margin_requirement': 0.5,  # LOW margin (50%) - easy to violate when price spikes!
+                'borrow_model': {
+                    'rate': 0.0,  # No borrow fees
+                    'payment_frequency': 1,
+                    'allow_partial_borrows': True
+                },
+                'interest_model': {
+                    'rate': 0.0,  # No interest to keep cash predictable
+                    'compound_frequency': 1
+                },
+                'leverage_params': {
+                    'enabled': True,
+                    'max_leverage_ratio': 4.0,  # Higher leverage allowed
+                    'initial_margin': 0.25,
+                    'maintenance_margin': 0.1,
+                    'interest_rate': 0.0,
+                    'cash_lending_pool': float('inf'),
+                    'allow_partial_borrows': True,
+                }
+            }
+        }
+    ),
 }

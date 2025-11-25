@@ -174,7 +174,9 @@ class DividendPaymentProcessor:
             if self.stock_id in agent.borrowed_positions and agent.borrowed_positions[self.stock_id] > 0:
                 borrowed = agent.borrowed_positions[self.stock_id]
                 agent.borrowed_positions[self.stock_id] = 0
-                self.agent_repository.borrowing_repository.release_shares(agent_id, borrowed)
+                # Use per-stock borrowing repo for multi-stock mode
+                borrowing_repo = self.agent_repository._get_borrowing_repo(self.stock_id)
+                borrowing_repo.release_shares(agent_id, borrowed)
 
         # After all positions are cleared, ensure aggregate short interest
         # reflects the forced covering that occurred during redemption.

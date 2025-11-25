@@ -13,6 +13,9 @@ from .squeeze_buyer_agent import SqueezeBuyerAgent
 from .multi_stock_value_trader import MultiStockValueTrader
 from .multi_stock_buy_agent import MultiStockBuyAgent
 from .multi_stock_sell_agent import MultiStockSellAgent
+from .multi_stock_short_seller import MultiStockShortSeller
+from .multi_stock_squeeze_buyer import MultiStockSqueezeBuyer
+from .multi_stock_market_maker import MultiStockMarketMaker
 
 DETERMINISTIC_AGENTS = {
     "gap_trader": ProportionalGapTrader,
@@ -31,5 +34,8 @@ DETERMINISTIC_AGENTS = {
     "multi_stock_test": MultiStockValueTrader,
     "multi_stock_value": MultiStockValueTrader,
     "multi_stock_buy": MultiStockBuyAgent,
-    "multi_stock_sell": MultiStockSellAgent
+    "multi_stock_sell": MultiStockSellAgent,
+    "multi_stock_short_seller": MultiStockShortSeller,
+    "multi_stock_squeeze_buyer": MultiStockSqueezeBuyer,
+    "multi_stock_market_maker": MultiStockMarketMaker
 }

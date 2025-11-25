@@ -215,7 +215,76 @@ class SimulationVerifier:
             self.logger.error(msg)
             raise ValueError(msg)
 
+        # INVARIANT CHECK: Per-agent-per-stock borrowed positions must match pool records
+        self._verify_borrowed_positions_match_pool()
+
         self.logger.info("✓ Borrowing pool consistency verified")
+
+    def _verify_borrowed_positions_match_pool(self):
+        """Verify each agent's borrowed_positions matches what the pool says they borrowed.
+
+        This is a critical invariant:
+        - agent.borrowed_positions[stock_id] == pool.borrowed[agent_id] for each stock
+        - borrowed + available == total_lendable (pool accounting)
+        """
+        errors = []
+
+        if self.is_multi_stock:
+            for stock_id, borrowing_repo in self.borrowing_repositories.items():
+                # Check pool accounting invariant: borrowed + available == total_lendable
+                total_borrowed_in_pool = sum(borrowing_repo.borrowed.values())
+                expected_total = borrowing_repo.available_shares + total_borrowed_in_pool
+                if expected_total != borrowing_repo.total_lendable:
+                    errors.append(
+                        f"[{stock_id}] Pool accounting broken: "
+                        f"available({borrowing_repo.available_shares}) + "
+                        f"borrowed({total_borrowed_in_pool}) = {expected_total} "
+                        f"!= total_lendable({borrowing_repo.total_lendable})"
+                    )
+
+                # Check each agent's borrowed_positions matches pool
+                for agent_id in self.agent_repository.get_all_agent_ids():
+                    agent = self.agent_repository.get_agent(agent_id)
+                    agent_says_borrowed = agent.borrowed_positions.get(stock_id, 0)
+                    pool_says_borrowed = borrowing_repo.borrowed.get(agent_id, 0)
+
+                    if agent_says_borrowed != pool_says_borrowed:
+                        errors.append(
+                            f"[{stock_id}] Agent {agent_id} mismatch: "
+                            f"agent.borrowed_positions={agent_says_borrowed}, "
+                            f"pool.borrowed={pool_says_borrowed}"
+                        )
+        else:
+            borrowing_repo = self.agent_repository.borrowing_repository
+
+            # Check pool accounting invariant
+            total_borrowed_in_pool = sum(borrowing_repo.borrowed.values())
+            expected_total = borrowing_repo.available_shares + total_borrowed_in_pool
+            if expected_total != borrowing_repo.total_lendable:
+                errors.append(
+                    f"Pool accounting broken: "
+                    f"available({borrowing_repo.available_shares}) + "
+                    f"borrowed({total_borrowed_in_pool}) = {expected_total} "
+                    f"!= total_lendable({borrowing_repo.total_lendable})"
+                )
+
+            # Check each agent's borrowed_positions matches pool
+            for agent_id in self.agent_repository.get_all_agent_ids():
+                agent = self.agent_repository.get_agent(agent_id)
+                agent_says_borrowed = agent.borrowed_positions.get("DEFAULT_STOCK", 0)
+                pool_says_borrowed = borrowing_repo.borrowed.get(agent_id, 0)
+
+                if agent_says_borrowed != pool_says_borrowed:
+                    errors.append(
+                        f"Agent {agent_id} mismatch: "
+                        f"agent.borrowed_positions={agent_says_borrowed}, "
+                        f"pool.borrowed={pool_says_borrowed}"
+                    )
+
+        if errors:
+            error_msg = "BORROWED POSITION INVARIANT VIOLATIONS:\n" + "\n".join(errors)
+            self.logger.error(error_msg)
+            raise ValueError(error_msg)
 
     def verify_dividend_accumulation(self):
         """Verify dividend cash accumulation matches payments"""

@@ -100,14 +100,53 @@ Match Engine Flow (match_engine.py):
 8. ✅ **Test Infrastructure** - Reproducible test scenarios
 9. ✅ **Aggressive Limits** - Unfilled orders properly converted
 
-## 🚀 Future Enhancements (Optional)
+## 🚀 Multi-Stock Support - IMPLEMENTED ✅
 
-1. **Multi-stock support**
-   - Extend to portfolio-wide margin checking
-   - Cross-stock collateral calculations
+Multi-stock margin call support has been fully implemented. Each stock's matching engine now handles margin checking independently.
 
-2. **Additional test scenarios**
-   - Multiple simultaneous margin calls
+### Implementation Details
+
+1. **MatchingEngine Enhancement**
+   - Added `stock_id` parameter to constructor
+   - Each engine knows which stock it manages
+   - Passed from `base_sim.py` when creating multi-stock engines
+
+2. **Per-Stock Margin Checking**
+   - Each engine checks margin for ITS OWN stock only
+   - Accesses `agent.borrowed_positions[stock_id]` for per-stock borrowed shares
+   - Uses stock-specific price for max borrowable calculation
+   - Creates margin call orders with correct `stock_id`
+
+3. **Share Returns**
+   - `_process_margin_call_share_returns()` uses `agent_repository._get_borrowing_repo(stock_id)`
+   - Correctly routes share returns to the right per-stock borrowing pool
+
+4. **New Test Infrastructure**
+   - `MultiStockShortSeller` - builds short positions across multiple stocks
+   - `MultiStockSqueezeBuyer` - triggers price spikes across multiple stocks
+   - `MultiStockMarketMaker` - provides liquidity for multi-stock trading
+   - `multi_stock_margin_call_test` scenario in `scenarios/multi_stock.py`
+
+### Files Modified for Multi-Stock
+
+1. **`src/market/engine/match_engine.py`**
+   - Added `stock_id` parameter (default: "DEFAULT_STOCK")
+   - Multi-stock margin checking logic in `_check_and_create_margin_call_orders()`
+   - Fixed `_process_margin_call_share_returns()` to use correct borrowing repo
+
+2. **`src/base_sim.py`**
+   - Passes `stock_id=stock_id` when creating multi-stock matching engines
+
+3. **`src/agents/deterministic/multi_stock_short_seller.py`** - NEW
+4. **`src/agents/deterministic/multi_stock_squeeze_buyer.py`** - NEW
+5. **`src/agents/deterministic/multi_stock_market_maker.py`** - NEW
+6. **`src/agents/deterministic/deterministic_registry.py`** - Updated with new agents
+7. **`src/scenarios/multi_stock.py`** - Added `multi_stock_margin_call_test` scenario
+
+## 🔮 Future Enhancements (Optional)
+
+1. **Additional test scenarios**
+   - Multiple simultaneous margin calls across stocks
    - Cascading margin calls
    - Insufficient funds edge cases
 

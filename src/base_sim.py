@@ -371,7 +371,8 @@ class BaseSimulation:
                     agent_repository=self.agent_repository,
                     context=self.contexts[stock_id],
                     is_multi_stock=True,  # Flag multi-stock mode
-                    enable_intra_round_margin_checking=self.enable_intra_round_margin_checking
+                    enable_intra_round_margin_checking=self.enable_intra_round_margin_checking,
+                    stock_id=stock_id  # Pass stock identifier for margin checking
                 )
             # For backwards compatibility
             self.matching_engine = list(self.matching_engines.values())[0]

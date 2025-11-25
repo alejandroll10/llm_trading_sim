@@ -9,7 +9,7 @@ from market.engine.services.trade_processing_service import TradeProcessingServi
 from services.logging_service import LoggingService
 
 class MatchingEngine:
-    def __init__(self, order_book, agent_manager, agent_repository, order_repository, context, order_state_manager = None, logger=None, trades_logger=None, trade_execution_service=None, is_multi_stock=False, enable_intra_round_margin_checking=False):
+    def __init__(self, order_book, agent_manager, agent_repository, order_repository, context, order_state_manager = None, logger=None, trades_logger=None, trade_execution_service=None, is_multi_stock=False, enable_intra_round_margin_checking=False, stock_id="DEFAULT_STOCK"):
         self.order_book = order_book
         self.agent_manager = agent_manager
         self.order_repository = order_repository
@@ -19,6 +19,7 @@ class MatchingEngine:
         self.context = context
         self.is_multi_stock = is_multi_stock  # Flag to indicate multi-stock mode
         self.enable_intra_round_margin_checking = enable_intra_round_margin_checking  # Flag to enable margin checking during matching
+        self.stock_id = stock_id  # Stock identifier for this engine (used in multi-stock margin checking)
         
         # Initialize services
         self.order_processing_service = OrderProcessingService(order_book)
@@ -247,10 +248,41 @@ class MatchingEngine:
                     margin_orders.append(order)
 
         else:
-            # Multi-stock case: TODO - implement in Phase 4
-            LoggingService.get_logger('market').info(
-                "[MARGIN_CHECK] Multi-stock margin checking not yet implemented"
-            )
+            # Multi-stock case: check margin for THIS stock only
+            # Each matching engine handles its own stock independently
+            for agent_id in self.agent_repository.get_all_agent_ids():
+                agent = self.agent_repository.get_agent(agent_id)
+
+                # Get borrowed shares for THIS SPECIFIC stock
+                borrowed_for_stock = agent.borrowed_positions.get(self.stock_id, 0)
+
+                # Skip agents without short positions for this stock
+                if borrowed_for_stock <= 0:
+                    continue
+
+                # Check margin requirement at current price for this stock
+                max_borrowable = agent.margin_service.get_max_borrowable_shares(current_price)
+
+                if borrowed_for_stock > max_borrowable:
+                    # Margin violation for this stock!
+                    excess = borrowed_for_stock - max_borrowable
+
+                    LoggingService.get_logger('market').warning(
+                        f"[MARGIN_VIOLATION] Agent {agent_id} on {self.stock_id}: "
+                        f"borrowed {borrowed_for_stock:.2f}, "
+                        f"max allowed {max_borrowable:.2f}, "
+                        f"excess {excess:.2f} shares"
+                    )
+
+                    # Create forced buy order for this specific stock
+                    order = self._create_margin_call_order(
+                        agent=agent,
+                        quantity=excess,
+                        price=current_price,
+                        round_number=round_number,
+                        stock_id=self.stock_id
+                    )
+                    margin_orders.append(order)
 
         return margin_orders
 
@@ -317,7 +349,7 @@ class MatchingEngine:
                         agent.borrowed_positions[stock_id] -= shares_to_return
 
                         # Return shares to lending pool
-                        borrowing_repo = self.borrowing_service_provider.get_borrowing_repo(stock_id)
+                        borrowing_repo = self.agent_repository._get_borrowing_repo(stock_id)
                         borrowing_repo.release_shares(agent.agent_id, shares_to_return)
 
                         logger.warning(
