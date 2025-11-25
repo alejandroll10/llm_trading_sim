@@ -9,7 +9,7 @@ from market.engine.services.trade_processing_service import TradeProcessingServi
 from services.logging_service import LoggingService
 
 class MatchingEngine:
-    def __init__(self, order_book, agent_manager, agent_repository, order_repository, context, order_state_manager = None, logger=None, trades_logger=None, trade_execution_service=None, is_multi_stock=False):
+    def __init__(self, order_book, agent_manager, agent_repository, order_repository, context, order_state_manager = None, logger=None, trades_logger=None, trade_execution_service=None, is_multi_stock=False, enable_intra_round_margin_checking=False):
         self.order_book = order_book
         self.agent_manager = agent_manager
         self.order_repository = order_repository
@@ -18,6 +18,7 @@ class MatchingEngine:
         self.trade_execution_service = trade_execution_service
         self.context = context
         self.is_multi_stock = is_multi_stock  # Flag to indicate multi-stock mode
+        self.enable_intra_round_margin_checking = enable_intra_round_margin_checking  # Flag to enable margin checking during matching
         
         # Initialize services
         self.order_processing_service = OrderProcessingService(order_book)
@@ -101,7 +102,79 @@ class MatchingEngine:
         # Log trades and calculate new price
         LoggingService.log_trades(trades, round_number)
         new_price = self.trade_processing_service.calculate_new_price(trades, current_price)
-        
+
+        # Check for margin violations and create forced orders (if enabled)
+        margin_orders = self._check_and_create_margin_call_orders(new_price, round_number)
+
+        if margin_orders:
+            LoggingService.get_logger('market').warning(
+                f"[MARGIN_CALL] Processing {len(margin_orders)} forced margin call orders"
+            )
+
+            # Process margin call orders using the same flow as regular agent orders:
+            # 1. Register in repository
+            # 2. Validate and commit resources via handle_new_order()
+            # 3. Pass to market handler for matching
+            validated_margin_orders = []
+            for order in margin_orders:
+                self.order_repository.create_order(order)
+
+                # Use the same flow as regular orders - validate and commit resources
+                success, message = self.order_state_manager.handle_new_order(order, new_price)
+
+                if success:
+                    validated_margin_orders.append(order)
+                    LoggingService.get_logger('market').info(
+                        f"[MARGIN_CALL] Order {order.order_id} validated and committed successfully"
+                    )
+                else:
+                    LoggingService.get_logger('market').error(
+                        f"[MARGIN_CALL] Order {order.order_id} failed: {message}"
+                    )
+
+            if not validated_margin_orders:
+                LoggingService.get_logger('market').warning(
+                    "[MARGIN_CALL] No margin call orders could be validated"
+                )
+            else:
+                # Now process the committed orders through the market handler
+                # The handler will validate commitments (should pass) and match
+                margin_trades, aggressive_limits = self.market_order_handler.process_orders(
+                    validated_margin_orders, new_price, round_number
+                )
+
+                if margin_trades:
+                    # Add to trades list
+                    trades.extend(
+                        self.trade_processing_service.process_market_order_results(
+                            margin_trades, aggressive_limits, []
+                        )
+                    )
+
+                    # Return shares to lending pool for filled margin call trades
+                    self._process_margin_call_share_returns(margin_trades)
+
+                    # Recalculate price after margin call trades
+                    new_price = self.trade_processing_service.calculate_new_price(trades, new_price)
+
+                    LoggingService.get_logger('market').info(
+                        f"[MARGIN_CALL] Processed {len(margin_trades)} margin call trades, "
+                        f"new price: ${new_price:.2f}"
+                    )
+                else:
+                    LoggingService.get_logger('market').warning(
+                        f"[MARGIN_CALL] No margin call trades executed. "
+                        f"Converted {len(aggressive_limits)} orders to aggressive limits"
+                    )
+
+                    # Still process aggressive limits even if no trades
+                    if aggressive_limits:
+                        trades.extend(
+                            self.trade_processing_service.process_market_order_results(
+                                [], aggressive_limits, []
+                            )
+                        )
+
         # Update agent wealth and log final state
         # In multi-stock mode, wealth is updated centrally with all stock prices
         if not self.is_multi_stock:
@@ -113,3 +186,142 @@ class MatchingEngine:
             price=new_price,
             volume=sum(t.quantity for t in trades)
         )
+
+    def _check_and_create_margin_call_orders(self, current_price: float, round_number: int) -> List[Order]:
+        """Check all agents for margin violations and create forced orders.
+
+        This method is only active when enable_intra_round_margin_checking=True.
+        It checks agents' margin requirements at the current price and creates
+        forced market buy orders to cover any violations.
+
+        Args:
+            current_price: Price after regular trading (for single stock) or dict of prices (multi-stock)
+            round_number: Current round number
+
+        Returns:
+            List of forced market orders to resolve margin violations (empty if feature disabled)
+        """
+        # Feature flag check - return early if disabled
+        if not self.enable_intra_round_margin_checking:
+            return []
+
+        # Log that we're checking margins
+        LoggingService.get_logger('market').info(
+            f"[MARGIN_CHECK] Checking margins at price ${current_price:.2f}"
+        )
+
+        margin_orders = []
+
+        # Single-stock case: simple margin check
+        if not self.is_multi_stock:
+            # Check each agent for margin violations
+            for agent_id in self.agent_repository.get_all_agent_ids():
+                agent = self.agent_repository.get_agent(agent_id)
+
+                # Skip agents without short positions
+                if agent.borrowed_shares <= 0:
+                    continue
+
+                # Check margin requirement at current price
+                max_borrowable = agent.margin_service.get_max_borrowable_shares(current_price)
+
+                if agent.borrowed_shares > max_borrowable:
+                    # Margin violation detected!
+                    excess = agent.borrowed_shares - max_borrowable
+
+                    LoggingService.get_logger('market').warning(
+                        f"[MARGIN_VIOLATION] Agent {agent_id}: "
+                        f"borrowed {agent.borrowed_shares:.2f}, "
+                        f"max allowed {max_borrowable:.2f}, "
+                        f"excess {excess:.2f} shares"
+                    )
+
+                    # Create forced buy order for excess shares
+                    order = self._create_margin_call_order(
+                        agent=agent,
+                        quantity=excess,
+                        price=current_price,
+                        round_number=round_number,
+                        stock_id="DEFAULT_STOCK"
+                    )
+                    margin_orders.append(order)
+
+        else:
+            # Multi-stock case: TODO - implement in Phase 4
+            LoggingService.get_logger('market').info(
+                "[MARGIN_CHECK] Multi-stock margin checking not yet implemented"
+            )
+
+        return margin_orders
+
+    def _create_margin_call_order(self, agent, quantity: float, price: float,
+                                   round_number: int, stock_id: str) -> Order:
+        """Create a forced market buy order for margin call.
+
+        Args:
+            agent: Agent that violated margin
+            quantity: Number of shares to buy (excess borrowed)
+            price: Current market price
+            round_number: Current round number
+            stock_id: Stock identifier
+
+        Returns:
+            Order instance marked as margin call
+        """
+        order = Order(
+            agent_id=agent.agent_id,
+            order_type='market',
+            side='buy',
+            quantity=quantity,
+            round_placed=round_number,
+            stock_id=stock_id,
+            is_margin_call=True  # Mark as forced order
+        )
+
+        LoggingService.get_logger('market').warning(
+            f"[MARGIN_CALL] Created forced buy order: "
+            f"Agent {agent.agent_id}, {quantity:.2f} shares @ ${price:.2f}, "
+            f"total cost ~${quantity * price:.2f}"
+        )
+
+        return order
+
+    def _process_margin_call_share_returns(self, margin_trades: List) -> None:
+        """Process margin call trades and automatically return shares to lending pool.
+
+        When margin call orders fill (agent buys shares to cover short), those shares
+        should immediately be used to return borrowed shares to the lending pool.
+
+        Args:
+            margin_trades: List of filled margin call trades
+        """
+        if not margin_trades:
+            return
+
+        logger = LoggingService.get_logger('market')
+
+        for trade in margin_trades:
+            # Only process buyer side (agent covering their short)
+            if hasattr(trade, 'buyer_id'):
+                agent = self.agent_repository.get_agent(trade.buyer_id)
+                stock_id = trade.stock_id
+                shares_bought = trade.quantity
+
+                # Check if agent has borrowed shares for this stock
+                if stock_id in agent.borrowed_positions and agent.borrowed_positions[stock_id] > 0:
+                    # Calculate how many shares to return (min of bought vs borrowed)
+                    shares_to_return = min(shares_bought, agent.borrowed_positions[stock_id])
+
+                    if shares_to_return > 0:
+                        # Reduce borrowed position
+                        agent.borrowed_positions[stock_id] -= shares_to_return
+
+                        # Return shares to lending pool
+                        borrowing_repo = self.borrowing_service_provider.get_borrowing_repo(stock_id)
+                        borrowing_repo.release_shares(agent.agent_id, shares_to_return)
+
+                        logger.warning(
+                            f"[MARGIN_CALL_RETURN] Agent {agent.agent_id} returned {shares_to_return:.2f} "
+                            f"shares of {stock_id} to lending pool. "
+                            f"Remaining borrowed: {agent.borrowed_positions[stock_id]:.2f}"
+                        )

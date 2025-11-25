@@ -514,4 +514,10 @@ AGENT_TYPES = {
         user_prompt_template="",
         type_id="deterministic_market_maker"
     ),
+    "squeeze_buyer": AgentType(
+        name="Squeeze Buyer",
+        system_prompt="Deterministic agent - no prompt needed",
+        user_prompt_template="",
+        type_id="squeeze_buyer"
+    ),
 }

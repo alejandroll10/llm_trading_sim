@@ -67,7 +67,8 @@ class BaseSimulation:
                  borrow_params: dict = None,
                  infinite_rounds: bool = False,
                  sim_type: str = "default",
-                 stock_configs: dict = None):
+                 stock_configs: dict = None,
+                 enable_intra_round_margin_checking: bool = False):
         SharedServiceFactory.reset()
 
         self.infinite_rounds = infinite_rounds
@@ -87,6 +88,7 @@ class BaseSimulation:
         self.dividend_params = dividend_params
         self.initial_price = initial_price
         self.lendable_shares = lendable_shares
+        self.enable_intra_round_margin_checking = enable_intra_round_margin_checking
         self.order_repository = OrderRepository()
 
         # MULTI-STOCK SUPPORT: Detect if this is a multi-stock scenario
@@ -368,7 +370,8 @@ class BaseSimulation:
                     order_state_manager=self.order_state_manager,
                     agent_repository=self.agent_repository,
                     context=self.contexts[stock_id],
-                    is_multi_stock=True  # Flag multi-stock mode
+                    is_multi_stock=True,  # Flag multi-stock mode
+                    enable_intra_round_margin_checking=self.enable_intra_round_margin_checking
                 )
             # For backwards compatibility
             self.matching_engine = list(self.matching_engines.values())[0]
@@ -383,7 +386,8 @@ class BaseSimulation:
                 order_repository=self.order_repository,
                 order_state_manager=self.order_state_manager,
                 agent_repository=self.agent_repository,
-                context=self.context
+                context=self.context,
+                enable_intra_round_margin_checking=self.enable_intra_round_margin_checking
             )
 
         # Initialize agent-dependent structures

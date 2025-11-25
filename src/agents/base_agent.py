@@ -543,8 +543,12 @@ class BaseAgent(ABC):
             LoggingService.get_logger('agents').warning(
                 f"Agent {self.agent_id} committing shares for stock_id='{stock_id}' "
                 f"which is not in positions {list(self.positions.keys())}. "
-                f"This may indicate a stock_id mismatch bug."
+                f"This may indicate a stock_id mismatch bug. Initializing to 0."
             )
+            # Initialize the position to 0 to ensure it exists for later operations
+            self.positions[stock_id] = 0
+            self.committed_positions[stock_id] = 0
+            self.borrowed_positions[stock_id] = 0
             current_shares = 0
         else:
             current_shares = self.positions[stock_id]
@@ -640,7 +644,17 @@ class BaseAgent(ABC):
         # Only reduce by what we actually have of this stock (not borrowed amount)
         owned_shares = min(quantity, current_shares)
         if owned_shares > 0:
+            LoggingService.get_logger('agents').info(
+                f"[SHARE_TRACE] Agent {self.agent_id} commit_shares: "
+                f"REDUCING {stock_id} from {current_shares} to {current_shares - owned_shares} "
+                f"(committed: {quantity}, borrowed: {shares_to_borrow})"
+            )
             self._update_position(stock_id, current_shares - owned_shares)
+        else:
+            LoggingService.get_logger('agents').info(
+                f"[SHARE_TRACE] Agent {self.agent_id} commit_shares: "
+                f"NO REDUCTION for {stock_id} (owned_shares=0, all borrowed: {shares_to_borrow})"
+            )
 
         # Log final state
         LoggingService.log_agent_state(
@@ -696,11 +710,33 @@ class BaseAgent(ABC):
                 shares_to_restore = max(0, quantity - shares_to_return)
                 if shares_to_restore > 0:
                     current_position = self.positions.get(stock_id, 0)
+                    LoggingService.get_logger('agents').info(
+                        f"[SHARE_TRACE] Agent {self.agent_id} release_shares(return_borrowed=True): "
+                        f"RESTORING {stock_id} from {current_position} to {current_position + shares_to_restore} "
+                        f"(returned to pool: {shares_to_return})"
+                    )
                     self._update_position(stock_id, current_position + shares_to_restore)
+                else:
+                    LoggingService.get_logger('agents').info(
+                        f"[SHARE_TRACE] Agent {self.agent_id} release_shares(return_borrowed=True): "
+                        f"All {quantity} returned to pool for {stock_id}, no position change"
+                    )
             else:
                 # No borrowed shares, so just add everything back to this stock
                 current_position = self.positions.get(stock_id, 0)
+                LoggingService.get_logger('agents').info(
+                    f"[SHARE_TRACE] Agent {self.agent_id} release_shares(return_borrowed=True): "
+                    f"RESTORING {stock_id} from {current_position} to {current_position + quantity} (no borrowed)"
+                )
                 self._update_position(stock_id, current_position + quantity)
+        else:
+            # Sell trade filled: shares already reduced during commit, just log
+            LoggingService.get_logger('agents').info(
+                f"[SHARE_TRACE] Agent {self.agent_id} release_shares(return_borrowed=False): "
+                f"SELL FILLED for {stock_id}, quantity={quantity}, "
+                f"positions[{stock_id}]={self.positions.get(stock_id, 'NOT_IN_DICT')}, "
+                f"no position change (already reduced during commit)"
+            )
 
         LoggingService.log_agent_state(
             agent_id=self.agent_id,
@@ -772,8 +808,10 @@ class BaseAgent(ABC):
             # MODIFIED: Subtract borrowed cash
             self.wealth = self.total_cash + (net_shares * current_price) - self.borrowed_cash
 
-            # Automatically handle margin requirements after price update
-            self.handle_margin_call(current_price, self.last_update_round)
+            # OLD SYSTEM: Direct manipulation margin calls (DEPRECATED)
+            # New system handles margin calls via orders at match engine level
+            # Keeping this commented for backwards compatibility
+            # self.handle_margin_call(current_price, self.last_update_round)
 
             # NEW: Check leverage for single stock
             if self.borrowed_cash > 0:

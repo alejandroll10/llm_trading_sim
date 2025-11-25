@@ -173,6 +173,7 @@ def run_scenario(
             dividend_params=None,  # Per-stock dividend params in stock_configs
             model_open_ai=params["MODEL_OPEN_AI"],
             interest_params=params["INTEREST_MODEL"],
+            enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False),
             hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
             sim_type=scenario.name,
@@ -195,7 +196,8 @@ def run_scenario(
             interest_params=params["INTEREST_MODEL"],
             hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
-            sim_type=scenario.name
+            sim_type=scenario.name,
+            enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False)
         )
 
     # Save parameters and run simulation

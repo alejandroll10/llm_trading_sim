@@ -151,7 +151,16 @@ class MarginService:
         }
 
     def handle_margin_call(self, current_price: float, round_number: int):
-        """Force buy-to-cover when margin requirements are violated."""
+        """Force buy-to-cover when margin requirements are violated.
+
+        Note: This is the OLD direct manipulation system. It's disabled when the NEW order-based
+        system is active (enable_intra_round_margin_checking=True).
+        """
+        # Skip if new order-based margin checking is enabled (handled at match engine level)
+        # The new system creates real orders instead of direct manipulation
+        if hasattr(self.agent, 'params') and self.agent.params.get('enable_intra_round_margin_checking', True):
+            return
+
         if self.agent.borrowed_shares <= 0:
             return
 

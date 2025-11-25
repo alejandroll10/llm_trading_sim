@@ -55,7 +55,7 @@ class PositionCalculator:
             ),
             seller=PositionChange(
                 cash_change=trade_value,
-                shares_change=0,  # Share reduction handled during commitment release
+                shares_change=0,  # Share reduction already handled during commitment creation (commit_shares)
                 stock_id=trade.stock_id  # Include stock_id for multi-stock support
             )
         )

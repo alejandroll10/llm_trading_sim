@@ -34,7 +34,7 @@ class OrderHistoryEntry:
     notes: Optional[str] = None
 
 class Order:
-    def __init__(self, agent_id, order_type, side, quantity, round_placed, stock_id=None, price=None, timestamp=None, order_id=None, replace_decision = None):
+    def __init__(self, agent_id, order_type, side, quantity, round_placed, stock_id=None, price=None, timestamp=None, order_id=None, replace_decision=None, is_margin_call=False):
         if side not in ['buy', 'sell']:
             raise ValueError(f"Invalid side: {side}. Must be 'buy' or 'sell'")
         if order_type not in ['market', 'limit']:
@@ -67,6 +67,7 @@ class Order:
         self.released_cash = 0              # Total cash released so far
         self.released_shares = 0            # Total shares released so far
         self.replace_decision = replace_decision
+        self.is_margin_call = is_margin_call  # Flag for forced margin call orders
         # Let handlers manage commitments during validation
         # Don't commit anything at creation time
 

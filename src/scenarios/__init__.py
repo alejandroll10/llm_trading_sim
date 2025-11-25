@@ -18,6 +18,7 @@ Scenarios are organized by category:
 - feature_ab_tests: A/B testing pairs for feature toggle system
 - test_scenarios: Simple test scenarios for development
 - bubbles_professionals: Replicating "Bubbles and Financial Professionals" (Weitzel et al. 2020)
+- comprehensive_tests: Systematic tests for all feature combinations (single/multi × leverage/short)
 """
 
 from typing import Dict
@@ -33,6 +34,7 @@ from . import multi_model
 from . import feature_ab_tests
 from . import test_scenarios
 from . import bubbles_professionals
+from . import comprehensive_tests
 
 # Combine all scenarios into a single registry
 SCENARIOS = {
@@ -45,6 +47,7 @@ SCENARIOS = {
     **feature_ab_tests.SCENARIOS,
     **test_scenarios.SCENARIOS,
     **bubbles_professionals.SCENARIOS,
+    **comprehensive_tests.SCENARIOS,
 }
 
 # Backwards-compatible API

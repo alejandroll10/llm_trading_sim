@@ -98,7 +98,7 @@ class MarketOrderHandler(BaseOrderHandler):
                 validated_orders.append(order)
             else:
                 self.order_state_manager.handle_single_order_cancellation(
-                    order=order, 
+                    order=order,
                     message=validation_result.message
                 )
 

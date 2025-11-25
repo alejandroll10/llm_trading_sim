@@ -9,6 +9,7 @@ from .deterministic_market_maker import DeterministicMarketMaker
 from .hold_agent import HoldTrader
 from .short_sell_agent import ShortSellTrader
 from .buy_to_close_agent import BuyToCloseTrader
+from .squeeze_buyer_agent import SqueezeBuyerAgent
 from .multi_stock_value_trader import MultiStockValueTrader
 from .multi_stock_buy_agent import MultiStockBuyAgent
 from .multi_stock_sell_agent import MultiStockSellAgent
@@ -26,6 +27,7 @@ DETERMINISTIC_AGENTS = {
     "short_sell_trader": ShortSellTrader,
     "short_seller": ShortSellTrader,  # Alias for consistency with agent_types.py
     "buy_to_close_trader": BuyToCloseTrader,
+    "squeeze_buyer": SqueezeBuyerAgent,
     "multi_stock_test": MultiStockValueTrader,
     "multi_stock_value": MultiStockValueTrader,
     "multi_stock_buy": MultiStockBuyAgent,

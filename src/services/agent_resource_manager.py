@@ -47,9 +47,7 @@ def commit_shares_with_borrowing(
     if stock_id not in agent.positions:
         # Log warning but continue (might be legitimate short sell from empty position)
         # However, this could indicate a stock_id mismatch bug
-        from services.logging_models import LoggingService
-        logger = LoggingService.get_logger('agents')
-        logger.warning(
+        LoggingService.get_logger('agents').warning(
             f"Agent {agent.agent_id} committing shares for stock_id='{stock_id}' "
             f"which is not in positions {list(agent.positions.keys())}. "
             f"Treating as short sell from zero position. "
@@ -67,8 +65,22 @@ def commit_shares_with_borrowing(
         # Get the correct borrowing repository for this stock
         borrowing_repo = get_borrowing_repo(stock_id)
 
+        # DEBUG: Log pool state before allocation
+        LoggingService.get_logger('borrowing').warning(
+            f"[BORROW_FLOW] Agent {agent.agent_id} requesting {shares_needed} shares of {stock_id}. "
+            f"Pool state: available={borrowing_repo.available_shares}, "
+            f"already borrowed by agent={borrowing_repo.borrowed.get(agent.agent_id, 0)}"
+        )
+
         # Try to allocate shares (respects allow_partial_borrows setting)
         allocated_shares = borrowing_repo.allocate_shares(agent.agent_id, shares_needed)
+
+        # DEBUG: Log allocation result
+        LoggingService.get_logger('borrowing').warning(
+            f"[BORROW_FLOW] Pool allocated {allocated_shares} shares to agent {agent.agent_id}. "
+            f"Pool state after: available={borrowing_repo.available_shares}, "
+            f"total borrowed by agent={borrowing_repo.borrowed.get(agent.agent_id, 0)}"
+        )
 
         if allocated_shares == 0:
             # No shares available and/or partial fills disabled
@@ -94,7 +106,23 @@ def commit_shares_with_borrowing(
             )
 
     try:
+        # DEBUG: Log agent state before commit
+        LoggingService.get_logger('borrowing').warning(
+            f"[BORROW_FLOW] Agent {agent.agent_id} before commit_shares: "
+            f"borrowed_positions={agent.borrowed_positions.get(stock_id, 0)}, "
+            f"committed_positions={agent.committed_positions.get(stock_id, 0)}, "
+            f"positions={agent.positions.get(stock_id, 0)}"
+        )
+
         agent.commit_shares(share_amount, round_number=round_number, current_price=current_price, stock_id=stock_id)
+
+        # DEBUG: Log agent state after commit
+        LoggingService.get_logger('borrowing').warning(
+            f"[BORROW_FLOW] Agent {agent.agent_id} after commit_shares: "
+            f"borrowed_positions={agent.borrowed_positions.get(stock_id, 0)}, "
+            f"committed_positions={agent.committed_positions.get(stock_id, 0)}, "
+            f"positions={agent.positions.get(stock_id, 0)}"
+        )
 
         # Determine if this was a partial fill
         partial_fill = shares_needed > 0 and allocated_shares < shares_needed
@@ -108,9 +136,23 @@ def commit_shares_with_borrowing(
         )
     except ValueError as e:
         # Roll back any allocated shares on failure
+        LoggingService.get_logger('borrowing').error(
+            f"[BORROW_FLOW] commit_shares FAILED for agent {agent.agent_id}: {e}. "
+            f"Rolling back {allocated_shares} allocated shares."
+        )
         if allocated_shares > 0:
             borrowing_repo = get_borrowing_repo(stock_id)
+            LoggingService.get_logger('borrowing').warning(
+                f"[BORROW_FLOW] Pool before rollback: "
+                f"available={borrowing_repo.available_shares}, "
+                f"borrowed by agent={borrowing_repo.borrowed.get(agent.agent_id, 0)}"
+            )
             borrowing_repo.release_shares(agent.agent_id, allocated_shares)
+            LoggingService.get_logger('borrowing').warning(
+                f"[BORROW_FLOW] Pool after rollback: "
+                f"available={borrowing_repo.available_shares}, "
+                f"borrowed by agent={borrowing_repo.borrowed.get(agent.agent_id, 0)}"
+            )
         return CommitmentResult(False, str(e), requested_amount=original_requested)
 
 
@@ -244,14 +286,43 @@ def update_shares_with_covering(
     if amount > 0 and current_borrowed > 0:
         # Use purchases to cover existing borrowed shares first
         cover = min(amount, current_borrowed)
+
+        # DEBUG: Log covering transaction
+        borrowing_repo = get_borrowing_repo(stock_id)
+        LoggingService.get_logger('borrowing').warning(
+            f"[SHORT_COVER] Agent {agent.agent_id} buying {amount} shares, covering {cover} borrowed. "
+            f"Before: positions={current_shares}, borrowed={current_borrowed}. "
+            f"Pool before: available={borrowing_repo.available_shares}, "
+            f"borrowed by agent={borrowing_repo.borrowed.get(agent.agent_id, 0)}"
+        )
+
         agent.borrowed_positions[stock_id] = current_borrowed - cover
-        agent._update_position(stock_id, current_shares + (amount - cover))
+        new_position = current_shares + (amount - cover)
+        LoggingService.get_logger('agents').info(
+            f"[SHARE_TRACE] Agent {agent.agent_id} update_shares_with_covering(BUY): "
+            f"INCREASING {stock_id} from {current_shares} to {new_position} "
+            f"(amount: {amount}, covered borrowed: {cover})"
+        )
+        agent._update_position(stock_id, new_position)
         if cover > 0:
             # Release shares to the correct stock's borrowing repository
-            borrowing_repo = get_borrowing_repo(stock_id)
             borrowing_repo.release_shares(agent.agent_id, cover)
+
+            # DEBUG: Log pool state after cover
+            LoggingService.get_logger('borrowing').warning(
+                f"[SHORT_COVER] After returning {cover} shares to pool. "
+                f"Agent: positions={new_position}, borrowed={agent.borrowed_positions[stock_id]}. "
+                f"Pool after: available={borrowing_repo.available_shares}, "
+                f"borrowed by agent={borrowing_repo.borrowed.get(agent.agent_id, 0)}"
+            )
     else:
-        agent._update_position(stock_id, current_shares + amount)
+        new_position = current_shares + amount
+        LoggingService.get_logger('agents').info(
+            f"[SHARE_TRACE] Agent {agent.agent_id} update_shares_with_covering(BUY): "
+            f"INCREASING {stock_id} from {current_shares} to {new_position} "
+            f"(amount: {amount}, no borrowed to cover)"
+        )
+        agent._update_position(stock_id, new_position)
 
     LoggingService.get_logger('agents').info(
         f"Updated share balance for agent {agent.agent_id}, stock {stock_id}, new balance: {agent.positions[stock_id]}"

@@ -137,25 +137,52 @@ class SimulationVerifier:
         """Verify borrowing pool accounting is consistent"""
         self.logger.info("\n=== Borrowing Pool Consistency Verification ===")
 
-        borrowing_repo = self.agent_repository.borrowing_repository
+        # Handle both single-stock and multi-stock modes
+        if self.is_multi_stock:
+            # Multi-stock: check each stock's borrowing pool
+            total_borrowed_from_pool = 0
+            total_lendable = 0
+            total_available = 0
 
-        # Borrowing pool invariant: available + sum(borrowed) == total_lendable
-        total_borrowed_from_pool = sum(borrowing_repo.borrowed.values())
-        expected_available = borrowing_repo.total_lendable - total_borrowed_from_pool
+            for stock_id, borrowing_repo in self.borrowing_repositories.items():
+                stock_borrowed = sum(borrowing_repo.borrowed.values())
+                total_borrowed_from_pool += stock_borrowed
+                total_lendable += borrowing_repo.total_lendable
+                total_available += borrowing_repo.available_shares
 
-        self.logger.info(f"Total lendable: {borrowing_repo.total_lendable}")
-        self.logger.info(f"Available in pool: {borrowing_repo.available_shares}")
-        self.logger.info(f"Total borrowed from pool: {total_borrowed_from_pool}")
-        self.logger.info(f"Expected available: {expected_available}")
+                # Verify each stock's pool individually
+                expected_available = borrowing_repo.total_lendable - stock_borrowed
+                if borrowing_repo.available_shares != expected_available:
+                    msg = f"Borrowing pool accounting error for {stock_id}:\n"
+                    msg += f"Available: {borrowing_repo.available_shares}\n"
+                    msg += f"Expected: {expected_available}\n"
+                    msg += f"Total lendable: {borrowing_repo.total_lendable}\n"
+                    msg += f"Total borrowed: {stock_borrowed}"
+                    self.logger.error(msg)
+                    raise ValueError(msg)
 
-        if borrowing_repo.available_shares != expected_available:
-            msg = f"Borrowing pool accounting error:\n"
-            msg += f"Available: {borrowing_repo.available_shares}\n"
-            msg += f"Expected: {expected_available}\n"
-            msg += f"Total lendable: {borrowing_repo.total_lendable}\n"
-            msg += f"Total borrowed: {total_borrowed_from_pool}"
-            self.logger.error(msg)
-            raise ValueError(msg)
+            self.logger.info(f"Total lendable (all stocks): {total_lendable}")
+            self.logger.info(f"Total available (all stocks): {total_available}")
+            self.logger.info(f"Total borrowed from pools (all stocks): {total_borrowed_from_pool}")
+        else:
+            # Single-stock: check the single borrowing pool
+            borrowing_repo = self.agent_repository.borrowing_repository
+            total_borrowed_from_pool = sum(borrowing_repo.borrowed.values())
+            expected_available = borrowing_repo.total_lendable - total_borrowed_from_pool
+
+            self.logger.info(f"Total lendable: {borrowing_repo.total_lendable}")
+            self.logger.info(f"Available in pool: {borrowing_repo.available_shares}")
+            self.logger.info(f"Total borrowed from pool: {total_borrowed_from_pool}")
+            self.logger.info(f"Expected available: {expected_available}")
+
+            if borrowing_repo.available_shares != expected_available:
+                msg = f"Borrowing pool accounting error:\n"
+                msg += f"Available: {borrowing_repo.available_shares}\n"
+                msg += f"Expected: {expected_available}\n"
+                msg += f"Total lendable: {borrowing_repo.total_lendable}\n"
+                msg += f"Total borrowed: {total_borrowed_from_pool}"
+                self.logger.error(msg)
+                raise ValueError(msg)
 
         # Verify agent borrowed shares match pool
         total_agent_borrowed = 0
@@ -163,9 +190,23 @@ class SimulationVerifier:
             agent = self.agent_repository.get_agent(agent_id)
             # Sum across all stocks
             for stock_id in agent.borrowed_positions.keys():
-                total_agent_borrowed += agent.borrowed_positions.get(stock_id, 0)
+                agent_borrowed = agent.borrowed_positions.get(stock_id, 0)
+                total_agent_borrowed += agent_borrowed
+                if agent_borrowed > 0:
+                    self.logger.warning(f"[BORROW_DEBUG] Agent {agent_id} has {agent_borrowed} borrowed shares of {stock_id}")
 
         self.logger.info(f"Total borrowed by agents: {total_agent_borrowed}")
+
+        # DEBUG: Show pool's records of who borrowed
+        if self.is_multi_stock:
+            for stock_id, borrowing_repo in self.borrowing_repositories.items():
+                for agent_id, amount in borrowing_repo.borrowed.items():
+                    if amount > 0:
+                        self.logger.warning(f"[BORROW_DEBUG] Pool records agent {agent_id} borrowed {amount} shares of {stock_id}")
+        else:
+            for agent_id, amount in borrowing_repo.borrowed.items():
+                if amount > 0:
+                    self.logger.warning(f"[BORROW_DEBUG] Pool records agent {agent_id} borrowed {amount} shares")
 
         if total_agent_borrowed != total_borrowed_from_pool:
             msg = f"Agent borrowed shares don't match pool:\n"
@@ -899,16 +940,28 @@ class SimulationVerifier:
                 if payment['round'] == current_round - 1
             )
 
-        self.logger.info(
-            f"Round payments - Dividends: ${dividend_payment:.2f}, Interest: ${interest_payment:.2f}, "
-            f"Borrow Fees: ${borrow_fee_payment:.2f}, Leverage Cash Borrowed: ${leverage_cash_borrowed:.2f}, "
-            f"Leverage Interest Charged: ${leverage_interest_charged:.2f}"
+        # DEBUG: Add detailed logging for payment breakdown
+        self.logger.warning(
+            f"[CASH_DEBUG] Round {current_round} Payment Breakdown:\n"
+            f"  Dividends: ${dividend_payment:.2f}\n"
+            f"  Interest: ${interest_payment:.2f}\n"
+            f"  Borrow Fees: ${borrow_fee_payment:.2f}\n"
+            f"  Leverage Cash Borrowed: ${leverage_cash_borrowed:.2f}\n"
+            f"  Leverage Interest Charged: ${leverage_interest_charged:.2f}\n"
+            f"  Total Cash Pre-Round: ${total_cash_pre:.2f}\n"
+            f"  Total Cash Post-Round: ${total_cash_post:.2f}"
         )
 
         # Verify round-by-round changes
         cash_difference = total_cash_post - total_cash_pre
         total_round_payments = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged
-        self.logger.info(f"Cash change: ${cash_difference:.2f}, Expected: ${total_round_payments:.2f}")
+
+        self.logger.warning(
+            f"[CASH_DEBUG] Cash Verification:\n"
+            f"  Actual Change: ${cash_difference:.2f}\n"
+            f"  Expected Change: ${total_round_payments:.2f}\n"
+            f"  Difference: ${abs(cash_difference - total_round_payments):.2f}"
+        )
 
         if abs(cash_difference - total_round_payments) > 0.01:
             msg = (f"Round cash change doesn't match round payments:\n"
@@ -1015,12 +1068,45 @@ class SimulationVerifier:
         }
         for agent_id, shares in post_shares.items():
             agent = self.agent_repository.get_agent(agent_id)
-            self.logger.info(f"Agent {agent_id}: {shares} (available: {agent.shares}, committed: {agent.committed_shares})")
+            # DEBUG: Show detailed breakdown including borrowed
+            self.logger.warning(
+                f"[SHARE_DEBUG] Agent {agent_id}: total_shares={shares}, "
+                f"positions={dict(agent.positions)}, "
+                f"committed={dict(agent.committed_positions)}, "
+                f"borrowed={dict(agent.borrowed_positions)}"
+            )
 
         total_shares_current = sum(post_shares.values())
         self.logger.info(f"Post-round total: {total_shares_current}")
 
-        borrowed_total = self.agent_repository.borrowing_repository.total_lendable - self.agent_repository.borrowing_repository.available_shares
+        # Calculate total borrowed shares across all stocks
+        if self.is_multi_stock:
+            # Sum borrowed shares from all stock repositories
+            borrowed_total = sum(
+                repo.total_lendable - repo.available_shares
+                for repo in self.borrowing_repositories.values()
+            )
+            # DEBUG: Log pool states
+            for stock_id, repo in self.borrowing_repositories.items():
+                self.logger.warning(
+                    f"[SHARE_DEBUG] Pool for {stock_id}: "
+                    f"total_lendable={repo.total_lendable}, "
+                    f"available={repo.available_shares}, "
+                    f"borrowed_total={repo.total_lendable - repo.available_shares}, "
+                    f"borrowed_by_agent={dict(repo.borrowed)}"
+                )
+        else:
+            # Single stock: use the single repository
+            repo = self.agent_repository.borrowing_repository
+            borrowed_total = repo.total_lendable - repo.available_shares
+            # DEBUG: Log pool state
+            self.logger.warning(
+                f"[SHARE_DEBUG] Pool (single stock): "
+                f"total_lendable={repo.total_lendable}, "
+                f"available={repo.available_shares}, "
+                f"borrowed_total={borrowed_total}, "
+                f"borrowed_by_agent={dict(repo.borrowed)}"
+            )
         expected_total_shares = initial_shares + borrowed_total
 
         # Verification logic
