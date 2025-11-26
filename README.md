@@ -190,12 +190,64 @@ scenario = {
 
 ### Agent Types
 The simulation supports multiple agent types with different trading strategies:
-- **LLM Agents:** Use language models to make trading decisions with natural language reasoning
-- **Momentum Traders:** Follow price trends
-- **Value Investors:** Buy undervalued assets
-- **Market Makers:** Provide liquidity
-- **Mean Reversion Traders:** Bet on price reversions
-- **Custom Agents:** Define your own strategies
+
+**LLM Agent Types** (defined in `src/agents/agent_types.py`):
+- **default:** Balanced, analytical trader
+- **speculator:** Risk-seeking, momentum-focused
+- **optimistic:** Bullish bias, sees upside potential
+- **pessimistic:** Bearish bias, focuses on risks
+- **short_seller:** Actively shorts overvalued assets
+- **leverage_trader:** Uses maximum leverage for amplified returns
+- **long_short:** Pairs trading - long undervalued, short overvalued simultaneously
+
+**Deterministic Agent Types** (defined in `src/agents/deterministic/`):
+- **buy_trader / sell_trader:** Simple directional traders
+- **margin_buyer:** Uses leverage to buy aggressively
+- **multi_stock_buy_agent / multi_stock_sell_agent:** Multi-stock traders
+
+### Memory and Social Features
+Agents can be configured with memory and social messaging capabilities:
+
+```python
+"MEMORY_ENABLED": True,   # Agents can write notes_to_self between rounds
+"SOCIAL_ENABLED": True,   # Agents can post messages to a shared feed
+```
+
+When enabled, agents receive their previous notes and can read messages from other agents, enabling more sophisticated multi-round strategies and emergent social dynamics.
+
+## Testing
+
+Run the health check script to verify all features work correctly:
+
+```bash
+# Quick test (single-stock scenarios only, ~5 minutes)
+python scripts/health_check.py --quick
+
+# Full test (all 8 systematic scenarios, ~15 minutes)
+python scripts/health_check.py
+
+# Verbose output
+python scripts/health_check.py --verbose
+```
+
+The health check verifies:
+- ✅ Trading execution (trades happen)
+- ✅ Short selling (borrowed_shares > 0)
+- ✅ Leverage (borrowed_cash > 0)
+- ✅ Multi-stock mode
+
+### Systematic Test Scenarios
+
+| Scenario | Leverage | Short Selling | Multi-Stock |
+|----------|----------|---------------|-------------|
+| `single_basic` | ❌ | ❌ | ❌ |
+| `single_short` | ❌ | ✅ | ❌ |
+| `single_leverage` | ✅ | ❌ | ❌ |
+| `single_leverage_short` | ✅ | ✅ | ❌ |
+| `multi_basic` | ❌ | ❌ | ✅ |
+| `multi_short` | ❌ | ✅ | ✅ |
+| `multi_leverage` | ✅ | ❌ | ✅ |
+| `multi_leverage_short` | ✅ | ✅ | ✅ |
 
 ## Adding New Scenarios
 
