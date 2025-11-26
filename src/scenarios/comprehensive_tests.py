@@ -560,4 +560,60 @@ SCENARIOS = {
             }
         }
     ),
+
+    # ==================== STRESS TEST: LEVERAGE MARGIN CALLS ====================
+
+    "leverage_stress_test": SimulationScenario(
+        name="leverage_stress_test",
+        description="Stress test: Force leverage usage and margin calls with deterministic agents (fast)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 50.0,   # LOW price - undervalued
+            # Fundamental = expected_dividend / interest_rate = 5 / 0.05 = 100
+            "DIVIDEND_PARAMS": {
+                'type': 'fixed',
+                'base_dividend': 5.0,
+                'dividend_frequency': 1,
+                'dividend_growth': 0.0,
+                'dividend_probability': 1.0,  # Deterministic dividends
+                'dividend_variation': 0.0,
+                'destination': 'dividend'
+            },
+            "ENABLE_INTRA_ROUND_MARGIN_CHECKING": True,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': 50000,
+                'initial_cash': 50000,    # Very LOW cash to force leverage
+                'initial_shares': 5000,
+                'max_order_size': 2000,   # High order size
+                'agent_composition': {
+                    'gap_trader': 2,      # Buyers who will use leverage
+                    'sell_trader': 2,     # Deterministic sellers to provide liquidity
+                },
+                'type_specific_params': {
+                    'sell_trader': {
+                        'initial_cash': 500000,   # Lots of cash
+                        'initial_shares': 20000,  # Lots of shares to sell
+                    }
+                },
+                'deterministic_params': {
+                    'gap_trader': {
+                        'threshold': 0.05,       # Buy when price < 95% of fundamental
+                        'max_proportion': 0.8,   # Aggressive - use 80% of buying power
+                        'scaling_factor': 3.0    # Scale up orders
+                    }
+                },
+                'leverage_params': {
+                    'enabled': True,
+                    'max_leverage_ratio': 3.0,
+                    'initial_margin': 0.5,
+                    'maintenance_margin': 0.25,
+                    'interest_rate': 0.05,
+                    'cash_lending_pool': float('inf'),
+                    'allow_partial_borrows': True,
+                }
+            }
+        }
+    ),
 }

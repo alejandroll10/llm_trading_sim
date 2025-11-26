@@ -56,8 +56,15 @@ class ProportionalGapTrader(BaseAgent):
 
         # Decide whether to buy or sell
         if gap_percentage > 0:  # Undervalued -> Buy
+            # Use total buying power (cash + borrowing power) if leverage enabled
             available_cash = self.available_cash
-            max_shares = int(available_cash / price)
+            if self.leverage_ratio > 1.0:
+                prices = {"DEFAULT_STOCK": price}  # For margin calculations
+                borrowing_power = self.get_available_borrowing_power(prices)
+                total_buying_power = available_cash + borrowing_power
+            else:
+                total_buying_power = available_cash
+            max_shares = int(total_buying_power / price)
             quantity = int(max_shares * proportion)
 
             if quantity == 0:
