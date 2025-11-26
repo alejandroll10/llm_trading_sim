@@ -472,8 +472,9 @@ class BaseSimulation:
 
         # Handle both single-stock (initial_shares) and multi-stock (initial_positions)
         if 'initial_positions' in agent_params:
-            # Multi-stock: use initial_positions dict
-            initial_shares_value = sum(agent_params['initial_positions'].values())
+            # Multi-stock: check type_specific_params first, then fall back to agent_params
+            positions = type_specific_params.get('initial_positions', agent_params['initial_positions'])
+            initial_shares_value = sum(positions.values())
         else:
             # Single-stock: use initial_shares
             initial_shares_value = type_specific_params.get('initial_shares', agent_params['initial_shares'])
@@ -536,13 +537,16 @@ class BaseSimulation:
 
                 # For multi-stock scenarios, set positions dict
                 if 'initial_positions' in agent_params:
-                    agent.positions = agent_params['initial_positions'].copy()
+                    # Check type_specific_params first, then fall back to agent_params
+                    type_specific = agent_params.get('type_specific_params', {}).get(agent_type, {})
+                    positions = type_specific.get('initial_positions', agent_params['initial_positions'])
+                    agent.positions = positions.copy()
                     # NOTE: Do NOT add DEFAULT_STOCK in multi-stock mode - only actual stocks exist
                     # Reset committed and borrowed positions for all stocks
                     agent.committed_positions = {stock_id: 0 for stock_id in agent.positions.keys()}
                     agent.borrowed_positions = {stock_id: 0 for stock_id in agent.positions.keys()}
                     # Update initial_shares to be the sum across all stocks for verification
-                    agent.initial_shares = sum(agent_params['initial_positions'].values())
+                    agent.initial_shares = sum(positions.values())
 
                 agents.append(agent)
                 agent_id += 1

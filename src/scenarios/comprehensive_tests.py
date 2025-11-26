@@ -63,8 +63,14 @@ SCENARIOS = {
                 'initial_shares': BASE_INITIAL_SHARES,
                 'max_order_size': BASE_MAX_ORDER_SIZE,
                 'agent_composition': {
-                    'speculator': 2,
-                    'optimistic': 2
+                    'short_seller': 2,  # LLM short sellers
+                    'buy_trader': 2  # Deterministic buyers as counterparty
+                },
+                'type_specific_params': {
+                    'short_seller': {
+                        'initial_shares': 0,  # No shares - MUST borrow to short
+                        'initial_cash': 500000  # Extra cash for margin
+                    }
                 }
             }
         }
@@ -86,8 +92,18 @@ SCENARIOS = {
                 'initial_shares': BASE_INITIAL_SHARES,
                 'max_order_size': BASE_MAX_ORDER_SIZE,
                 'agent_composition': {
-                    'optimistic': 2,    # LLM agents that buy (will use leverage if available)
-                    'pessimistic': 2    # LLM agents that sell their shares
+                    'margin_buyer': 2,    # Deterministic margin buyers that use leverage
+                    'sell_trader': 2    # Deterministic sellers as counterparty
+                },
+                'type_specific_params': {
+                    'margin_buyer': {
+                        'initial_cash': 100000,  # Some cash, but will borrow more
+                        'initial_shares': 10000  # Equity for borrowing power
+                    },
+                    'sell_trader': {
+                        'initial_cash': 500000,
+                        'initial_shares': 20000  # Lots of shares to sell
+                    }
                 },
                 'leverage_params': {
                     'enabled': True,
@@ -125,10 +141,28 @@ SCENARIOS = {
                 'initial_shares': BASE_INITIAL_SHARES,
                 'max_order_size': BASE_MAX_ORDER_SIZE,
                 'agent_composition': {
-                    'leverage_trader': 1,
-                    'speculator': 1,
-                    'optimistic': 1,
-                    'pessimistic': 1
+                    'margin_buyer': 1,      # Deterministic: uses leverage (borrowed_cash)
+                    'short_seller': 1,      # Deterministic: uses short selling (borrowed_shares)
+                    'buy_trader': 1,        # Counterparty for short sellers
+                    'sell_trader': 1        # Counterparty for margin buyers
+                },
+                'type_specific_params': {
+                    'margin_buyer': {
+                        'initial_cash': 100000,  # Some cash, will borrow more
+                        'initial_shares': 10000  # Equity for borrowing power
+                    },
+                    'short_seller': {
+                        'initial_shares': 0,     # No shares - must borrow to short
+                        'initial_cash': 500000   # Cash for margin
+                    },
+                    'buy_trader': {
+                        'initial_cash': 500000,
+                        'initial_shares': 5000
+                    },
+                    'sell_trader': {
+                        'initial_cash': 500000,
+                        'initial_shares': 20000  # Lots of shares to sell
+                    }
                 },
                 'leverage_params': {
                     'enabled': True,
@@ -335,13 +369,29 @@ SCENARIOS = {
                 'position_limit': BASE_POSITION_LIMIT,
                 'initial_cash': BASE_INITIAL_CASH * 2,
                 'initial_positions': {
-                    "TECH_OVERVALUED": 1000,
-                    "PHARMA_UNDERVALUED": 1000
+                    "TECH_OVERVALUED": 0,
+                    "PHARMA_UNDERVALUED": 0
                 },
                 'max_order_size': BASE_MAX_ORDER_SIZE,
                 'agent_composition': {
-                    'speculator': 2,
-                    'optimistic': 2
+                    'multi_stock_short_seller': 2,  # Deterministic short sellers
+                    'multi_stock_squeeze_buyer': 2  # Buyers as counterparty
+                },
+                'type_specific_params': {
+                    'multi_stock_short_seller': {
+                        'initial_positions': {
+                            "TECH_OVERVALUED": 0,  # 0 shares - must borrow to short
+                            "PHARMA_UNDERVALUED": 0
+                        },
+                        'initial_cash': 1000000   # Cash for margin
+                    },
+                    'multi_stock_squeeze_buyer': {
+                        'initial_positions': {
+                            "TECH_OVERVALUED": 0,  # Will buy from short sellers
+                            "PHARMA_UNDERVALUED": 0
+                        },
+                        'initial_cash': 2000000  # Cash to buy shares
+                    }
                 }
             }
         }
@@ -463,15 +513,29 @@ SCENARIOS = {
                 'position_limit': BASE_POSITION_LIMIT * 2,
                 'initial_cash': BASE_INITIAL_CASH * 2,
                 'initial_positions': {
-                    "TECH_OVERVALUED": 1000,
-                    "PHARMA_UNDERVALUED": 1000
+                    "TECH_OVERVALUED": 0,
+                    "PHARMA_UNDERVALUED": 0
                 },
                 'max_order_size': BASE_MAX_ORDER_SIZE,
                 'agent_composition': {
-                    'leverage_trader': 1,
-                    'speculator': 1,
-                    'optimistic': 1,
-                    'default': 1
+                    'leverage_trader': 2,          # LLM agents that use leverage (borrowed_cash)
+                    'multi_stock_short_seller': 2  # Deterministic short sellers (borrowed_shares)
+                },
+                'type_specific_params': {
+                    'leverage_trader': {
+                        'initial_positions': {
+                            "TECH_OVERVALUED": 0,
+                            "PHARMA_UNDERVALUED": 0
+                        },
+                        'initial_cash': 2000000  # Lots of cash, will borrow more
+                    },
+                    'multi_stock_short_seller': {
+                        'initial_positions': {
+                            "TECH_OVERVALUED": 0,  # No shares - must borrow to short
+                            "PHARMA_UNDERVALUED": 0
+                        },
+                        'initial_cash': 1000000  # Cash for margin
+                    }
                 },
                 'leverage_params': {
                     'enabled': True,
@@ -607,6 +671,56 @@ SCENARIOS = {
                 'leverage_params': {
                     'enabled': True,
                     'max_leverage_ratio': 3.0,
+                    'initial_margin': 0.5,
+                    'maintenance_margin': 0.25,
+                    'interest_rate': 0.05,
+                    'cash_lending_pool': float('inf'),
+                    'allow_partial_borrows': True,
+                }
+            }
+        }
+    ),
+
+    # ==================== DIVERSE LLM SCENARIO ====================
+
+    "llm_diverse": SimulationScenario(
+        name="llm_diverse",
+        description="Diverse LLM agents: All features enabled with variety of agent personalities",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "INITIAL_PRICE": 100.0,
+            "FUNDAMENTAL_PRICE": 100.0,
+            "REDEMPTION_VALUE": 100.0,
+            "LENDABLE_SHARES": 50000,  # Share lending pool for short selling
+            "AGENT_PARAMS": {
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.02,
+                    'payment_frequency': 1
+                },
+                'position_limit': BASE_POSITION_LIMIT * 2,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'leverage_trader': 1,   # Aggressive leverage user
+                    'short_seller': 1,      # Short selling specialist
+                    'optimistic': 1,        # Bullish buyer
+                    'pessimistic': 1,       # Bearish seller
+                    'speculator': 1,        # Market inefficiency hunter
+                    'default': 1            # Neutral baseline
+                },
+                'type_specific_params': {
+                    'short_seller': {
+                        'initial_shares': 0,    # No shares - MUST borrow to short
+                        'initial_cash': 500000  # Extra cash for margin
+                    }
+                },
+                'leverage_params': {
+                    'enabled': True,
+                    'max_leverage_ratio': 2.0,
                     'initial_margin': 0.5,
                     'maintenance_margin': 0.25,
                     'interest_rate': 0.05,
