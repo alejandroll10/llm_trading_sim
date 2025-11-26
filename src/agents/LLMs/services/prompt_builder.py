@@ -25,8 +25,14 @@ class PromptBuilder:
     FEATURE_INSTRUCTIONS = {
         Feature.MEMORY: """
 MEMORY SYSTEM:
-Use 'notes_to_self' to record what you LEARNED this round (what worked/failed).
-Don't repeat trade history or prices - you'll see those next round.""",
+Use 'notes_to_self' ONLY for genuine insights - what you LEARNED vs what you EXPECTED.
+Compare your last reasoning to what actually happened:
+- Did your prediction come true? Why or why not?
+- What surprised you? What would you do differently?
+- Any NEW hypothesis to test next round?
+
+DON'T write: "Monitor price" or generic reminders (you'll see all data next round)
+DO write: "Expected price drop but it rose - others more bullish than I thought" """,
 
         Feature.SOCIAL: """
 MESSAGING:
@@ -141,6 +147,43 @@ Strategic Considerations:
             return f"\n\nSocial Feed (previous round):\n{formatted_messages}\n{strategic_instructions}"
         else:
             return f"\n\nSocial Feed: No messages yet.\n{strategic_instructions}"
+
+    @staticmethod
+    def build_last_reasoning_section(last_reasoning: dict) -> str:
+        """
+        Build section showing agent's reasoning from last round.
+
+        This provides continuity by showing the agent WHY they made
+        their previous decision, so they can build on their strategy.
+
+        Args:
+            last_reasoning: Dict with 'round', 'reasoning', 'valuation_reasoning',
+                          'price_target_reasoning' keys
+
+        Returns:
+            Formatted string showing last round's reasoning, or empty if none
+        """
+        if not last_reasoning or not last_reasoning.get('reasoning'):
+            return ""
+
+        round_num = last_reasoning.get('round', '?')
+        reasoning = last_reasoning.get('reasoning', '')
+        valuation_reasoning = last_reasoning.get('valuation_reasoning', '')
+        price_target_reasoning = last_reasoning.get('price_target_reasoning', '')
+
+        lines = ["\n\n=== YOUR LAST ROUND REASONING ==="]
+        lines.append(f"(Round {round_num})")
+        lines.append("")
+
+        if valuation_reasoning:
+            lines.append(f"Valuation: {valuation_reasoning}")
+        if price_target_reasoning:
+            lines.append(f"Price Target: {price_target_reasoning}")
+        if reasoning:
+            lines.append(f"Decision: {reasoning}")
+
+        lines.append("")
+        return "\n".join(lines)
 
     @staticmethod
     def get_all_instructions() -> str:

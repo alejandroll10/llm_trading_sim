@@ -335,4 +335,90 @@ SCENARIOS = {
             }
         }
     ),
+
+    # ========================================================================
+    # A/B Test 6: Last Reasoning Impact on Memory Quality
+    # Test if showing agents their prior reasoning reduces notes_to_self redundancy
+    # ========================================================================
+    "memory_with_last_reasoning": SimulationScenario(
+        name="memory_with_last_reasoning",
+        description="Memory WITH last reasoning shown - agents see their prior decision rationale",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 35.0,  # Above fundamental to generate activity
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                # Memory + Last Reasoning enabled
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': True,
+
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'value': 3,
+                    'momentum': 2,
+                    'speculator': 2,
+                }
+            }
+        }
+    ),
+
+    "memory_without_last_reasoning": SimulationScenario(
+        name="memory_without_last_reasoning",
+        description="Memory WITHOUT last reasoning - agents must use notes_to_self for continuity",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 35.0,  # Above fundamental to generate activity
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                # Memory enabled, Last Reasoning disabled
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': False,
+
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'value': 3,
+                    'momentum': 2,
+                    'speculator': 2,
+                }
+            }
+        }
+    ),
+
+    # Quick 3-round test for faster iteration
+    "quick_memory_test": SimulationScenario(
+        name="quick_memory_test",
+        description="Quick 3-round test for memory/last_reasoning features",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 3,
+            "INITIAL_PRICE": 35.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': True,
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'value': 2,
+                    'momentum': 2,
+                }
+            }
+        }
+    ),
 }

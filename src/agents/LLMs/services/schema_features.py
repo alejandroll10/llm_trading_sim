@@ -28,6 +28,7 @@ class Feature(str, Enum):
     """Available agent features that can be toggled on/off"""
     MEMORY = "memory"
     SOCIAL = "social"
+    LAST_REASONING = "last_reasoning"  # Show agent their reasoning from last round
     # Future features can be added here:
     # ADVANCED_ORDERS = "advanced_orders"
     # PORTFOLIO_ANALYSIS = "portfolio_analysis"
@@ -206,7 +207,7 @@ class FeatureRegistry:
     @staticmethod
     def get_all_features() -> Set[Feature]:
         """Get all available features (for backward compatibility mode)"""
-        return {Feature.MEMORY, Feature.SOCIAL}
+        return {Feature.MEMORY, Feature.SOCIAL, Feature.LAST_REASONING}
 
     @staticmethod
     def extract_features_from_config(config: Dict[str, Any]) -> Set[Feature]:
@@ -232,6 +233,9 @@ class FeatureRegistry:
 
         if config.get('SOCIAL_ENABLED', True):  # Default True for backward compatibility
             features.add(Feature.SOCIAL)
+
+        if config.get('LAST_REASONING_ENABLED', True):  # Default True for backward compatibility
+            features.add(Feature.LAST_REASONING)
 
         return features
 

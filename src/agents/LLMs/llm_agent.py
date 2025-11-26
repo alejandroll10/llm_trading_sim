@@ -28,6 +28,9 @@ class LLMAgent(BaseAgent):
         # Default to all features for backward compatibility if not specified
         self.enabled_features = enabled_features if enabled_features is not None else FeatureRegistry.get_all_features()
 
+        # Store last round's reasoning for continuity (always enabled)
+        self.last_reasoning: Dict[str, Any] = {}  # {round, reasoning, valuation_reasoning, price_target_reasoning}
+
         # Conditionally initialize memory based on feature flags
         if Feature.MEMORY in self.enabled_features:
             self.memory_notes = []  # List of (round_number, note) tuples for agent memory
@@ -39,6 +42,13 @@ class LLMAgent(BaseAgent):
 
             # Prepare context using signals + market_state
             context = self.prepare_context_llm()
+
+            # Build last reasoning section (if feature enabled - provides continuity)
+            last_reasoning_section = ""
+            if Feature.LAST_REASONING in self.enabled_features:
+                last_reasoning_section = PromptBuilder.build_last_reasoning_section(
+                    self.last_reasoning
+                )
 
             # Build memory section using PromptBuilder (only if memory enabled)
             memory_section = ""
@@ -61,10 +71,15 @@ class LLMAgent(BaseAgent):
             # Detect if this is a multi-stock scenario
             is_multi_stock = 'stocks' in market_state
 
+            # Build feature instructions (tells agent HOW to use memory/social)
+            feature_instructions = PromptBuilder.build_instructions(self.enabled_features)
+
             user_prompt = (
                 self.agent_type.user_prompt_template.format(**context)
+                + last_reasoning_section
                 + memory_section
                 + messages_section
+                + ("\n\n" + feature_instructions if feature_instructions else "")
             )
 
             # Create LLM request with enabled features
@@ -96,6 +111,14 @@ class LLMAgent(BaseAgent):
             
             # Store replace_decision in the agent instance
             self.last_replace_decision = response.decision['replace_decision']
+
+            # Store reasoning for next round's context
+            self.last_reasoning = {
+                'round': round_number,
+                'reasoning': response.decision.get('reasoning', ''),
+                'valuation_reasoning': response.decision.get('valuation_reasoning', ''),
+                'price_target_reasoning': response.decision.get('price_target_reasoning', ''),
+            }
 
             # Store memory notes with validation (only if memory feature enabled)
             if Feature.MEMORY in self.enabled_features:

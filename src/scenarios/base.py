@@ -6,7 +6,7 @@ from calculate_fundamental import calculate_fundamental_price, calibrate_redempt
 # =============================================================================
 # Default LLM provider settings
 DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"  # UF Hypergator endpoint
-DEFAULT_LLM_MODEL = "llama-3.1-70b-instruct"           # Default model
+DEFAULT_LLM_MODEL = "llama-3.1-70b-instruct"              # Default model (faster)
 
 # Alternative configurations (comment/uncomment to switch):
 # OpenAI:
