@@ -683,6 +683,79 @@ SCENARIOS = {
 
     # ==================== DIVERSE LLM SCENARIO ====================
 
+    "llm_long_short": SimulationScenario(
+        name="llm_long_short",
+        description="Multi-stock long-short: LLMs can go long one stock, short another",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "IS_MULTI_STOCK": True,
+            "STOCKS": {
+                "UNDERVALUED": {
+                    "INITIAL_PRICE": 80.0,       # Trading below fundamental
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "LENDABLE_SHARES": 20000,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'fixed',
+                        'base_dividend': 5.0,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 1.0,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                },
+                "OVERVALUED": {
+                    "INITIAL_PRICE": 120.0,      # Trading above fundamental
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "LENDABLE_SHARES": 20000,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'fixed',
+                        'base_dividend': 5.0,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 1.0,
+                        'dividend_variation': 0.0,
+                        'destination': 'dividend'
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': True,
+                'margin_requirement': 0.5,
+                'borrow_model': {
+                    'rate': 0.02,
+                    'payment_frequency': 1
+                },
+                'position_limit': BASE_POSITION_LIMIT * 2,
+                'initial_cash': BASE_INITIAL_CASH * 2,
+                'initial_positions': {
+                    "UNDERVALUED": 0,
+                    "OVERVALUED": 0
+                },
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'long_short': 2,    # Specialized pairs trader: long UNDERVALUED, short OVERVALUED
+                    'speculator': 1,    # Should identify mispricing
+                    'optimistic': 1     # Counterparty: buys
+                },
+                'leverage_params': {
+                    'enabled': True,
+                    'max_leverage_ratio': 2.0,
+                    'initial_margin': 0.5,
+                    'maintenance_margin': 0.25,
+                    'interest_rate': 0.05,
+                    'cash_lending_pool': float('inf'),
+                    'allow_partial_borrows': True,
+                }
+            }
+        }
+    ),
+
     "llm_diverse": SimulationScenario(
         name="llm_diverse",
         description="Diverse LLM agents: All features enabled with variety of agent personalities",

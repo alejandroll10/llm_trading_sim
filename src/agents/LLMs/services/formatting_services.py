@@ -510,15 +510,22 @@ Cash in Orders: ${agent_context.committed_cash:.2f}"""
             # Skip if essential signals are missing or have None values
             if not price_signal or price_signal.value is None:
                 continue
-            if not fundamental_signal or fundamental_signal.value is None:
+            # Use fundamental value if available, otherwise use redemption value
+            fundamental_value = None
+            if fundamental_signal:
+                fundamental_value = fundamental_signal.value
+                if fundamental_value is None:
+                    # Fall back to redemption value
+                    fundamental_value = fundamental_signal.metadata.get('redemption_value')
+            if fundamental_value is None:
                 continue
 
             lines.append(f"\n{stock_id}:")
             lines.append(f"  Current Price: ${price_signal.value:.2f}")
-            lines.append(f"  Fundamental Value: ${fundamental_signal.value:.2f}")
+            lines.append(f"  Fundamental Value: ${fundamental_value:.2f}")
 
             # Calculate and show price/fundamental ratio
-            ratio = price_signal.value / fundamental_signal.value if fundamental_signal.value else 0
+            ratio = price_signal.value / fundamental_value if fundamental_value else 0
             if ratio > 1.0:
                 lines.append(f"  Status: OVERVALUED ({ratio:.2%} of fundamental)")
             elif ratio < 1.0:
