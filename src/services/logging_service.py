@@ -308,11 +308,34 @@ class LoggingService:
         return cls._data_dir
 
     @classmethod
-    def get_logger(cls, name: str) -> Optional[logging.Logger]:
-        """Get logger by name."""
+    def get_logger(cls, name: str) -> logging.Logger:
+        """Get logger by name. Creates a default logger if not found."""
         if not cls._loggers:
             raise RuntimeError("LoggingService not initialized. Call initialize() first.")
-        return cls._loggers.get(name)
+
+        if name not in cls._loggers:
+            # Create a default logger for unregistered names
+            # This prevents None returns and crashes
+            logger = logging.getLogger(name)
+            logger.setLevel(logging.DEBUG)
+
+            # Add file handler if run_dir is available
+            if cls._run_dir:
+                file_handler = logging.FileHandler(cls._run_dir / f'{name}.log', mode='w')
+                file_handler.setLevel(logging.DEBUG)
+                file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+                logger.addHandler(file_handler)
+
+            # Add console handler for warnings and above
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.WARNING)
+            console_handler.setFormatter(logging.Formatter('%(levelname)s - %(name)s - %(message)s'))
+            logger.addHandler(console_handler)
+
+            logger.propagate = False
+            cls._loggers[name] = logger
+
+        return cls._loggers[name]
 
     @classmethod
     def log_agent_state(
