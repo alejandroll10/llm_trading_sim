@@ -1032,6 +1032,12 @@ class SimulationVerifier:
                 if payment['round'] == current_round - 1
             )
 
+        # Get margin call costs from all agents (cash that "leaves" system for buy-to-cover)
+        margin_call_costs = sum(
+            agent.margin_call_cost_this_round
+            for agent in self.agent_repository.get_all_agents()
+        )
+
         # DEBUG: Add detailed logging for payment breakdown
         self.logger.warning(
             f"[CASH_DEBUG] Round {current_round} Payment Breakdown:\n"
@@ -1041,13 +1047,15 @@ class SimulationVerifier:
             f"  Leverage Cash Borrowed: ${leverage_cash_borrowed:.2f}\n"
             f"  Leverage Interest Charged: ${leverage_interest_charged:.2f}\n"
             f"  Leverage Cash Repaid: ${leverage_cash_repaid:.2f}\n"
+            f"  Margin Call Costs: ${margin_call_costs:.2f}\n"
             f"  Total Cash Pre-Round: ${total_cash_pre:.2f}\n"
             f"  Total Cash Post-Round: ${total_cash_post:.2f}"
         )
 
         # Verify round-by-round changes
+        # Margin call costs are subtracted because buy-to-cover creates shares without going through market
         cash_difference = total_cash_post - total_cash_pre
-        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid
+        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid - margin_call_costs
 
         self.logger.warning(
             f"[CASH_DEBUG] Cash Verification:\n"

@@ -432,6 +432,10 @@ class BaseSimulation:
         # Log initial states
         self._log_round_start(round_number)
 
+        # Reset margin call costs for this round (for verification tracking)
+        for agent in self.agent_repository.get_all_agents():
+            agent.margin_call_cost_this_round = 0.0
+
         # Store pre-round states for verification
         pre_round_states = self.verifier.store_pre_round_states()
 

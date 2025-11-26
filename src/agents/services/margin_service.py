@@ -175,6 +175,8 @@ class MarginService:
             self.agent.shares += excess
             self.agent.cash -= cost
             self.agent.record_payment('main', -cost, 'trade', round_number)
+            # Track margin call cost for cash verification
+            self.agent.margin_call_cost_this_round += cost
 
             LoggingService.log_margin_call(
                 round_number=round_number,
@@ -281,9 +283,11 @@ class MarginService:
                 price=price
             )
 
-        # Record the payment
+        # Record the payment and track for verification
         if total_cost > 0:
             self.agent.record_payment('main', -total_cost, 'trade', round_number)
+            # Track margin call cost for cash verification (cash "leaves" system)
+            self.agent.margin_call_cost_this_round += total_cost
 
         # Log overall margin call event
         LoggingService.log_agent_state(

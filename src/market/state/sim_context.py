@@ -22,6 +22,7 @@ class MarketHistory:
     leverage_cash_borrowed: List[float]  # Track cash borrowed for leverage
     leverage_interest_charged: List[float]  # Track interest paid on borrowed cash
     leverage_cash_repaid: List[float]  # Track cash repaid on leverage debt
+    margin_call_costs: List[float]  # Track cash spent on forced buy-to-cover margin calls
 
 class SimulationContext:
     """
@@ -62,7 +63,8 @@ class SimulationContext:
             borrow_fees_paid=[],
             leverage_cash_borrowed=[],
             leverage_interest_charged=[],
-            leverage_cash_repaid=[]
+            leverage_cash_repaid=[],
+            margin_call_costs=[]
         )
         
         # Public market information (observable by all)
@@ -139,6 +141,14 @@ class SimulationContext:
     def record_leverage_cash_repaid(self, amount: float, round_number: int):
         """Record cash repaid on leverage debt"""
         self.market_history.leverage_cash_repaid.append({
+            'round': round_number,
+            'amount': amount,
+            'timestamp': datetime.now().isoformat()
+        })
+
+    def record_margin_call_cost(self, amount: float, round_number: int):
+        """Record cash spent on forced buy-to-cover margin calls"""
+        self.market_history.margin_call_costs.append({
             'round': round_number,
             'amount': amount,
             'timestamp': datetime.now().isoformat()

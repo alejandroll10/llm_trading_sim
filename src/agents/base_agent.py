@@ -129,6 +129,10 @@ class BaseAgent(ABC):
             'redemption': [],
             'other': []
         }
+        # Track margin call costs for this round (reset each round)
+        # This is needed because margin call buy-to-cover creates shares
+        # without going through the market, so cash "leaves" the system
+        self.margin_call_cost_this_round: float = 0.0
 
         # Initialize services (issue #57 refactoring)
         self.verifier = AgentVerifier(self)  # Phase 1
