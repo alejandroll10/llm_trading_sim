@@ -611,10 +611,7 @@ Cash in Orders: ${agent_context.committed_cash:.2f}"""
             # Add content
             lines.append(f"   {item.content}")
 
-            # Add affected stocks tag (only shown for stock-specific news)
-            # Note: Generic names are filtered by Pydantic validator in NewsItem
-            if item.affected_stocks:
-                lines.append(f"   [Affects: {', '.join(item.affected_stocks)}]")
+            # Note: For single-stock, we don't show [Affects: ...] since there's only one stock
 
         lines.append("")  # Empty line at end
         return "\n".join(lines)

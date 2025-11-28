@@ -149,7 +149,9 @@ def create_news_user_prompt(context: Dict[str, Any]) -> str:
         prompt_parts.append("- Multi-stock news (affected_stocks=[\"STOCK_A\", \"STOCK_B\"])")
 
     else:
-        # Single-stock format (original)
+        # Single-stock format
+        stock_id = context.get('stock_id') or 'DEFAULT_STOCK'
+        prompt_parts.append(f"Stock: {stock_id}")
         prompt_parts.append(f"Current Price: ${context['current_price']:.2f}")
         if context.get('previous_price'):
             change = context['current_price'] - context['previous_price']
@@ -187,13 +189,13 @@ def create_news_user_prompt(context: Dict[str, Any]) -> str:
         low = min(prices)
         prompt_parts.append(f"\nPrice Range (session): ${low:.2f} - ${high:.2f}")
 
-    # Multi-stock info
-    if context.get('stock_id'):
-        prompt_parts.insert(1, f"Stock: {context['stock_id']}")
-
     prompt_parts.append("\n\n=== TASK ===")
     prompt_parts.append("Based on the market conditions above, generate appropriate news items.")
     prompt_parts.append("Generate 0-3 news items. If the market is quiet, an empty list is fine.")
+
+    # For single-stock, tell LLM to leave affected_stocks as null
+    if not context.get('is_multi_stock'):
+        prompt_parts.append("This is a single-stock market, so leave affected_stocks as null.")
 
     return "\n".join(prompt_parts)
 
