@@ -19,7 +19,7 @@ It must NOT use:
 """
 
 from typing import List, Dict, Any, Optional, Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from dataclasses import dataclass
 import openai
 import logging
@@ -45,8 +45,29 @@ class NewsItem(BaseModel):
         ..., description="How significant is this news for the market"
     )
     affected_stocks: Optional[List[str]] = Field(
-        None, description="List of stock IDs affected, or null for whole market news"
+        None, description="List of specific stock IDs (e.g. 'TECH', 'ENERGY') affected. Use null for market-wide news."
     )
+
+    @field_validator('affected_stocks', mode='before')
+    @classmethod
+    def filter_generic_stock_names(cls, v):
+        """Convert generic/placeholder stock names to None (market-wide news)"""
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            return None
+
+        # Generic names that LLMs tend to hallucinate
+        generic_names = {
+            'generic stock', 'unnamed stock', 'the stock', 'stock',
+            'all', 'market', 'all stocks', 'general market', 'n/a', 'none'
+        }
+
+        # Filter out generic names
+        real_stocks = [s for s in v if s and s.lower().strip() not in generic_names]
+
+        # Return None if no real stocks remain (treat as market-wide)
+        return real_stocks if real_stocks else None
 
 
 class NewsGenerationOutput(BaseModel):

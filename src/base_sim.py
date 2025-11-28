@@ -564,6 +564,11 @@ class BaseSimulation:
     def run(self):
         """Base simulation run logic"""
         try:
+            # Clear any cached news from previous simulations (if running multiple in same process)
+            if self.news_enabled:
+                from market.information.information_providers import NewsProvider
+                NewsProvider._multi_stock_cache.clear()
+
             for round_number in range(self.context._num_rounds):
                 self.execute_round(round_number)
             self.data_recorder.save_simulation_data()
