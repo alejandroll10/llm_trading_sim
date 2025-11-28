@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Dict, Any
 from .information_types import InformationType, InformationSignal, SignalCategory, DEFAULT_CAPABILITIES
 
 @dataclass
@@ -295,3 +296,147 @@ class VolumeProvider(BaseProvider):
                 'trade_history': state['market']['trade_history']
             }
         )
+
+
+class NewsProvider(BaseProvider):
+    """
+    Provider for LLM-generated market news.
+
+    Unlike other providers, this one actively generates content via LLM
+    rather than just reading market state. The news service handles the
+    actual LLM call and ensures only PUBLIC information is used.
+
+    For multi-stock scenarios, news is generated ONCE for all stocks
+    (single LLM call) and cached. The returned news may include:
+    - Market-wide news (affected_stocks=None)
+    - Stock-specific news (affected_stocks=["STOCK_A"])
+    - Multi-stock news (affected_stocks=["STOCK_A", "STOCK_B"])
+    """
+
+    # Class-level cache for multi-stock scenarios (shared across instances)
+    _multi_stock_cache: Dict[int, list] = {}
+
+    def __init__(self, market_state_manager, config: ProviderConfig = ProviderConfig(),
+                 news_service=None, total_rounds: int = 20):
+        super().__init__(market_state_manager, config)
+        self.total_rounds = total_rounds
+        self._news_service = news_service
+        self._price_history = []  # Track prices for context
+        self._news_cache = {}     # Cache: {round_number: [NewsItem, ...]} for single-stock
+
+    @property
+    def news_service(self):
+        """Lazy initialization of news service"""
+        if self._news_service is None:
+            from services.news_service import NewsService
+            self._news_service = NewsService()
+        return self._news_service
+
+    def _update_price_history(self):
+        """Update price history from market state"""
+        try:
+            state = self.market_state
+            current_price = state.get('market', {}).get('price')
+            if current_price and (not self._price_history or
+                                  self._price_history[-1] != current_price):
+                self._price_history.append(current_price)
+                # Keep last 10 prices
+                if len(self._price_history) > 10:
+                    self._price_history = self._price_history[-10:]
+        except Exception:
+            pass  # Ignore price history errors
+
+    def generate_signal(self, round_number: int) -> InformationSignal:
+        """Get news as an InformationSignal (single-stock mode)"""
+        if round_number not in self._news_cache:
+            self._update_price_history()
+            state = self.market_state
+            news_items = self.news_service.generate_news(
+                round_number=round_number,
+                total_rounds=self.total_rounds,
+                market_state=state,
+                price_history=self._price_history,
+                stock_id=None
+            )
+            self._news_cache[round_number] = news_items
+
+        news_items = self._news_cache[round_number]
+
+        return InformationSignal(
+            type=InformationType.NEWS,
+            value=news_items,
+            reliability=self.config.reliability,
+            metadata={
+                'round': round_number,
+                'item_count': len(news_items),
+                'sentiments': [item.sentiment for item in news_items] if news_items else [],
+            }
+        )
+
+    def generate_news_for_all_stocks(self, round_number: int, managers: Dict[str, Any]) -> list:
+        """
+        Generate news for all stocks in one LLM call (multi-stock mode).
+
+        Args:
+            round_number: Current round
+            managers: Dict of {stock_id: market_state_manager}
+
+        Returns:
+            List of NewsItem objects (cached at class level)
+        """
+        if round_number not in NewsProvider._multi_stock_cache:
+            # Collect market state from all managers
+            stocks_data = {}
+            for stock_id, manager in managers.items():
+                stocks_data[stock_id] = manager.get_observable_state()
+
+            # Single LLM call for all stocks
+            news_items = self.news_service.generate_news_multi_stock(
+                round_number=round_number,
+                total_rounds=self.total_rounds,
+                stocks_data=stocks_data
+            )
+            NewsProvider._multi_stock_cache[round_number] = news_items
+
+        return NewsProvider._multi_stock_cache[round_number]
+
+    def generate_signal_for_manager(self, manager, round_number: int) -> InformationSignal:
+        """
+        Generate signal for a specific market manager (multi-stock).
+
+        In multi-stock mode, this returns ALL news (market-wide + stock-specific).
+        Agents see all news and can decide what's relevant.
+        """
+        stock_id = getattr(manager, 'stock_id', None)
+
+        # Check if we have multi-stock cached news for this round
+        if round_number in NewsProvider._multi_stock_cache:
+            news_items = NewsProvider._multi_stock_cache[round_number]
+        else:
+            # Fallback: generate for single stock (shouldn't happen in proper multi-stock flow)
+            state = manager.get_observable_state()
+            news_items = self.news_service.generate_news(
+                round_number=round_number,
+                total_rounds=self.total_rounds,
+                market_state=state,
+                price_history=self._price_history,
+                stock_id=stock_id
+            )
+
+        return InformationSignal(
+            type=InformationType.NEWS,
+            value=news_items,
+            reliability=self.config.reliability,
+            metadata={
+                'round': round_number,
+                'stock_id': stock_id,
+                'item_count': len(news_items),
+                'sentiments': [item.sentiment for item in news_items] if news_items else [],
+            }
+        )
+
+    def clear_cache(self):
+        """Clear news cache (call between simulations if reusing provider)"""
+        self._news_cache.clear()
+        self._price_history.clear()
+        NewsProvider._multi_stock_cache.clear()

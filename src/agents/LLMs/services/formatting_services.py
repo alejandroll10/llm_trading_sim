@@ -209,6 +209,9 @@ class MarketStateFormatter:
                     margin_status=margin_status
                 )
 
+            # Format news information if available
+            news_info = MarketStateFormatter._format_news_info(agent_signals)
+
             # Use templates consistently
             sections = {
                 'base_market_state': BASE_MARKET_TEMPLATE.format(**context),
@@ -219,7 +222,8 @@ class MarketStateFormatter:
                 'interest_info': INTEREST_INFO_TEMPLATE.format(**context),
                 'redemption_info': REDEMPTION_INFO_TEMPLATE.format(**context),
                 'trading_options': TRADING_OPTIONS_TEMPLATE,
-                'multi_stock_info': multi_stock_info  # From signals or market_state
+                'multi_stock_info': multi_stock_info,  # From signals or market_state
+                'news_info': news_info  # LLM-generated market news
             }
 
             return sections
@@ -550,4 +554,104 @@ Cash in Orders: ${agent_context.committed_cash:.2f}"""
                     lines.append(f"  Order Book: {buy_orders} buy levels, {sell_orders} sell levels")
 
         lines.append("\n" + "="*45)
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_news_info(agent_signals: Dict) -> str:
+        """Format news information from signals for display in agent prompt"""
+        # Handle multi-stock signals
+        if isinstance(agent_signals, dict) and agent_signals.get('is_multi_stock'):
+            # For multi-stock, aggregate news from all stocks
+            all_news = []
+            for stock_id, signals in agent_signals.get('multi_stock_signals', {}).items():
+                news_signal = signals.get(InformationType.NEWS)
+                if news_signal and news_signal.value:
+                    for item in news_signal.value:
+                        # Tag news with stock if stock-specific
+                        all_news.append((stock_id, item))
+            if not all_news:
+                return ""
+            return MarketStateFormatter._format_news_items_multi(all_news)
+        else:
+            # Single stock
+            news_signal = agent_signals.get(InformationType.NEWS)
+            if not news_signal or not news_signal.value:
+                return ""
+            return MarketStateFormatter._format_news_items(news_signal.value)
+
+    @staticmethod
+    def _format_news_items(news_items) -> str:
+        """Format a list of NewsItem objects for display"""
+        if not news_items:
+            return ""
+
+        lines = ["=== MARKET NEWS ==="]
+
+        for i, item in enumerate(news_items, 1):
+            # Sentiment indicator
+            sentiment_indicator = {
+                "positive": "📈",
+                "negative": "📉",
+                "neutral": "➡️"
+            }.get(item.sentiment, "•")
+
+            # Magnitude indicator
+            magnitude_indicator = {
+                "major": "🔥 BREAKING:",
+                "moderate": "⚡",
+                "minor": ""
+            }.get(item.magnitude, "")
+
+            # Format headline
+            if magnitude_indicator:
+                lines.append(f"\n{i}. {magnitude_indicator} {sentiment_indicator} {item.headline}")
+            else:
+                lines.append(f"\n{i}. {sentiment_indicator} {item.headline}")
+
+            # Add content
+            lines.append(f"   {item.content}")
+
+            # Add affected stocks only for multi-stock (skip generic placeholders)
+            if item.affected_stocks and len(item.affected_stocks) > 0:
+                # Filter out generic placeholder names
+                real_stocks = [s for s in item.affected_stocks
+                              if s and s.lower() not in ('generic stock', 'all', 'market')]
+                if real_stocks:
+                    lines.append(f"   [Affects: {', '.join(real_stocks)}]")
+
+        lines.append("")  # Empty line at end
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_news_items_multi(news_with_stock: list) -> str:
+        """Format news items with stock context for multi-stock scenarios"""
+        if not news_with_stock:
+            return ""
+
+        lines = ["=== MARKET NEWS ==="]
+
+        for i, (stock_id, item) in enumerate(news_with_stock, 1):
+            sentiment_indicator = {
+                "positive": "📈",
+                "negative": "📉",
+                "neutral": "➡️"
+            }.get(item.sentiment, "•")
+
+            magnitude_indicator = {
+                "major": "🔥 BREAKING:",
+                "moderate": "⚡",
+                "minor": ""
+            }.get(item.magnitude, "")
+
+            # Include stock context
+            stock_tag = f"[{stock_id}]" if stock_id else ""
+
+            if magnitude_indicator:
+                lines.append(f"\n{i}. {magnitude_indicator} {sentiment_indicator} {stock_tag} {item.headline}")
+            else:
+                lines.append(f"\n{i}. {sentiment_indicator} {stock_tag} {item.headline}")
+
+            lines.append(f"   {item.content}")
+
+        lines.append("")
         return "\n".join(lines)

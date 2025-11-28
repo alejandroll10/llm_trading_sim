@@ -8,7 +8,8 @@ from market.information.information_providers import (
     DividendProvider,
     InterestProvider,
     VolumeProvider,
-    BorrowRateProvider
+    BorrowRateProvider,
+    NewsProvider
 )
 from services.logging_service import LoggingService
 
@@ -19,7 +20,8 @@ class ProviderRegistry:
     @staticmethod
     def register_providers(information_service, market_state_manager,
                           dividend_service=None, interest_service=None,
-                          borrow_service=None, hide_fundamental_price=False):
+                          borrow_service=None, hide_fundamental_price=False,
+                          news_enabled=False, news_service=None, total_rounds=20):
         """Register all information providers with the information service
 
         Args:
@@ -79,6 +81,15 @@ class ProviderRegistry:
             providers[InformationType.BORROW_FEE] = BorrowRateProvider(
                 market_state_manager=market_state_manager,
                 config=base_config
+            )
+
+        # News provider (LLM-generated market news)
+        if news_enabled:
+            providers[InformationType.NEWS] = NewsProvider(
+                market_state_manager=market_state_manager,
+                config=base_config,
+                news_service=news_service,
+                total_rounds=total_rounds
             )
 
         # Register all providers

@@ -177,7 +177,8 @@ def run_scenario(
             hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
             sim_type=scenario.name,
-            stock_configs=params["STOCKS"]  # NEW: Pass stock configurations
+            stock_configs=params["STOCKS"],  # NEW: Pass stock configurations
+            news_enabled=params.get("NEWS_ENABLED", False)
         )
     else:
         # Single-stock scenario: original behavior (backwards compatible)
@@ -197,7 +198,8 @@ def run_scenario(
             hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
             sim_type=scenario.name,
-            enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False)
+            enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False),
+            news_enabled=params.get("NEWS_ENABLED", False)
         )
 
     # Save parameters and run simulation

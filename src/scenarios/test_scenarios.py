@@ -241,5 +241,92 @@ SCENARIOS = {
             }
         }
     ),
+    "test_news_trading": SimulationScenario(
+        name="test_news_trading",
+        description="Test LLM-generated market news with news trader agents",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,  # Short test
+            "NEWS_ENABLED": True,  # Enable LLM-generated news
+            "INITIAL_PRICE": 28.0,
+            "HIDE_FUNDAMENTAL_PRICE": True,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'news': 2,         # News traders who react to news
+                    'value': 1,        # Value investor (ignores news, focuses on fundamentals)
+                    'market_maker': 1  # Provides liquidity
+                },
+                'deterministic_params': {
+                    'gap_trader': {
+                        'threshold': 0.05,
+                        'max_proportion': 0.5,
+                        'scaling_factor': 2.0
+                    }
+                }
+            }
+        }
+    ),
+    "test_news_multi_stock": SimulationScenario(
+        name="test_news_multi_stock",
+        description="Test LLM-generated news with multiple stocks (single LLM call for all)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 3,  # Short test
+            "NEWS_ENABLED": True,  # Enable LLM-generated news
+            "IS_MULTI_STOCK": True,
+            "HIDE_FUNDAMENTAL_PRICE": False,
+            "STOCKS": {
+                "TECH": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 95.0,  # Slightly overvalued
+                    "REDEMPTION_VALUE": 95.0,
+                    "TRANSACTION_COST": 0.0,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 4.75,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 1.0,
+                        'destination': 'dividend'
+                    }
+                },
+                "ENERGY": {
+                    "INITIAL_PRICE": 50.0,
+                    "FUNDAMENTAL_PRICE": 55.0,  # Undervalued
+                    "REDEMPTION_VALUE": 55.0,
+                    "TRANSACTION_COST": 0.0,
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.75,
+                        'dividend_frequency': 1,
+                        'dividend_growth': 0.0,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.5,
+                        'destination': 'dividend'
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH * 2,
+                'initial_positions': {
+                    "TECH": 5000,
+                    "ENERGY": 5000
+                },
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'news': 2,   # News traders
+                    'value': 1   # Value investor
+                }
+            }
+        }
+    ),
 }
 

@@ -68,7 +68,8 @@ class BaseSimulation:
                  infinite_rounds: bool = False,
                  sim_type: str = "default",
                  stock_configs: dict = None,
-                 enable_intra_round_margin_checking: bool = False):
+                 enable_intra_round_margin_checking: bool = False,
+                 news_enabled: bool = False):
         SharedServiceFactory.reset()
 
         self.infinite_rounds = infinite_rounds
@@ -129,6 +130,7 @@ class BaseSimulation:
         # Basic simulation parameters
         self.fundamental_volatility = fundamental_volatility
         self.hide_fundamental_price = hide_fundamental_price
+        self.news_enabled = news_enabled
         self.model_open_ai = model_open_ai
         
         # Set default agent parameters if none provided
@@ -305,7 +307,8 @@ class BaseSimulation:
                     dividend_service=self.dividend_services.get(stock_id),
                     interest_service=self.interest_service,
                     borrow_service=self.borrow_service,
-                    hide_fundamental_price=self.hide_fundamental_price
+                    hide_fundamental_price=self.hide_fundamental_price,
+                    news_enabled=self.news_enabled
                 )
             # For backwards compatibility, expose first stock's manager
             self.market_state_manager = list(self.market_state_managers.values())[0]
@@ -331,7 +334,8 @@ class BaseSimulation:
                 dividend_service=self.dividend_service,
                 interest_service=self.interest_service,
                 borrow_service=self.borrow_service,
-                hide_fundamental_price=self.hide_fundamental_price
+                hide_fundamental_price=self.hide_fundamental_price,
+                news_enabled=self.news_enabled
             )
 
         # Create data recorder with repository
@@ -702,7 +706,19 @@ class BaseSimulation:
                         dividend_service=manager.dividend_service,
                         interest_service=manager.interest_service,
                         borrow_service=manager.borrow_service,
-                        hide_fundamental_price=self.hide_fundamental_price
+                        hide_fundamental_price=self.hide_fundamental_price,
+                        news_enabled=self.news_enabled,
+                        total_rounds=self.context._num_rounds
+                    )
+
+            # Generate news for all stocks in ONE LLM call (if news enabled)
+            if self.news_enabled:
+                from market.information.information_types import InformationType
+                news_provider = information_service.providers.get(InformationType.NEWS)
+                if news_provider:
+                    news_provider.generate_news_for_all_stocks(
+                        round_number=round_number,
+                        managers=self.market_state_managers
                     )
 
             # Distribute information for all stocks

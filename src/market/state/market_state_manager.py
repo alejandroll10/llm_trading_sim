@@ -23,13 +23,15 @@ class MarketStateManager:
     def __init__(self, context, order_book, agent_repository, logger,  information_service,
                  dividend_service, interest_service,
                  borrow_service=None,
-                 hide_fundamental_price=False):
+                 hide_fundamental_price=False,
+                 news_enabled=False):
         self.context = context
         self.order_book = order_book
         self.agent_repository = agent_repository
         self.information_service = information_service
         self.interest_service = interest_service
         self.hide_fundamental_price = hide_fundamental_price
+        self.news_enabled = news_enabled
 
         # Create component manager to handle updates and formatting
         self.component_manager = ComponentManager(
@@ -91,7 +93,9 @@ class MarketStateManager:
                 dividend_service=self.component_manager.dividend_service,
                 interest_service=self.interest_service,
                 borrow_service=self.component_manager.borrow_service,
-                hide_fundamental_price=self.hide_fundamental_price
+                hide_fundamental_price=self.hide_fundamental_price,
+                news_enabled=self.news_enabled,
+                total_rounds=self.context._num_rounds
             )
 
         # Distribute information

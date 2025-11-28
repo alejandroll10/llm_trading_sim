@@ -24,26 +24,40 @@ class AgentDecisionService:
         self.context = context
 
     def collect_decisions(self, market_state, history, round_number):
-        agent_ids = self.agent_repository.get_shuffled_agent_ids()  
+        agent_ids = self.agent_repository.get_shuffled_agent_ids()
         new_orders = []
 
-        # Collect all decisions in parallel
+        # Check if we should use serial execution (for gpt-oss models which have parallel issues)
+        from scenarios.base import DEFAULT_LLM_MODEL
+        use_serial = 'gpt-oss' in DEFAULT_LLM_MODEL.lower()
+
         decisions = {}
-        with ThreadPoolExecutor(max_workers=min(len(agent_ids), 10)) as executor:
-            future_to_agent = {
-                executor.submit(
-                    self.agent_repository.get_agent_decision,
+        if use_serial:
+            # Serial execution for gpt-oss (more reliable)
+            for agent_id in agent_ids:
+                decisions[agent_id] = self.agent_repository.get_agent_decision(
                     agent_id=agent_id,
                     market_state=market_state,
                     history=history,
                     round_number=round_number
-                ): agent_id 
-                for agent_id in agent_ids
-            }
-            
-            for future in as_completed(future_to_agent):
-                agent_id = future_to_agent[future]
-                decisions[agent_id] = future.result()
+                )
+        else:
+            # Parallel execution for other models (faster)
+            with ThreadPoolExecutor(max_workers=min(len(agent_ids), 10)) as executor:
+                future_to_agent = {
+                    executor.submit(
+                        self.agent_repository.get_agent_decision,
+                        agent_id=agent_id,
+                        market_state=market_state,
+                        history=history,
+                        round_number=round_number
+                    ): agent_id
+                    for agent_id in agent_ids
+                }
+
+                for future in as_completed(future_to_agent):
+                    agent_id = future_to_agent[future]
+                    decisions[agent_id] = future.result()
 
         # Process decisions sequentially in random order
         for agent_id in agent_ids:

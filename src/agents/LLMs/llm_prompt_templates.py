@@ -83,6 +83,7 @@ Redemption Information:
 
 # Standard user prompt template for all agents
 STANDARD_USER_TEMPLATE = """{base_market_state}
+{news_info}
 {multi_stock_info}
 {price_history}
 {dividend_info}

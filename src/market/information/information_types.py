@@ -12,6 +12,7 @@ class InformationType(Enum):
     INTEREST = "interest"
     BORROW_FEE = "borrow_fee"
     INSIDER = "insider"
+    NEWS = "news"  # LLM-generated market news based on public information
 
 class SignalCategory(Enum):
     PUBLIC = "public"      # Always visible, perfect info (price, volume, round)
@@ -51,7 +52,8 @@ SIGNAL_CATEGORIES = {
     InformationType.DIVIDEND: SignalCategory.FUNDAMENTAL,
     InformationType.INTEREST: SignalCategory.PUBLIC,
     InformationType.BORROW_FEE: SignalCategory.PUBLIC,
-    InformationType.INSIDER: SignalCategory.RESTRICTED
+    InformationType.INSIDER: SignalCategory.RESTRICTED,
+    InformationType.NEWS: SignalCategory.PUBLIC,  # News is public to all agents
 }
 
 DEFAULT_CAPABILITIES = {

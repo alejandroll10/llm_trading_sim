@@ -1,11 +1,15 @@
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List, Literal, Set
 import openai
+import time
+import logging
 from agents.agents_api import TradeDecision, OrderDetails
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from scenarios.base import DEFAULT_LLM_BASE_URL
 from .schema_features import Feature, FeatureRegistry
+
+logger = logging.getLogger("llm_timing")
 
 # NOTE: OrderSchema and TradeDecisionSchema are now dynamically generated
 # in schema_features.py based on enabled features and stock mode.
@@ -99,13 +103,35 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
         )
 
         # Get the response using the parse method with our dynamic schema
-        completion = self.client.beta.chat.completions.parse(
-            model=request.model,
-            messages=messages,
-            response_format=dynamic_schema,
-            temperature=0.0,
-            seed=self.seed
-        )
+        # Use timeout + retry for flaky APIs (e.g., UF Hypergator)
+        start_time = time.time()
+        prompt_len = len(request.system_prompt) + len(request.user_prompt)
+
+        max_retries = 3
+        timeout_seconds = 60  # 60s timeout per attempt
+
+        for attempt in range(max_retries):
+            try:
+                logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Calling {request.model} (~{prompt_len//4} tokens){'...' if attempt == 0 else f' (retry {attempt})...'}")
+                completion = self.client.beta.chat.completions.parse(
+                    model=request.model,
+                    messages=messages,
+                    response_format=dynamic_schema,
+                    temperature=0.0,
+                    seed=self.seed,
+                    timeout=timeout_seconds
+                )
+                elapsed = time.time() - start_time
+                logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Response in {elapsed:.1f}s")
+                break  # Success, exit retry loop
+            except Exception as e:
+                elapsed = time.time() - start_time
+                if attempt < max_retries - 1:
+                    logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Timeout/error after {elapsed:.1f}s, retrying...")
+                    continue
+                else:
+                    logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Failed after {max_retries} attempts ({elapsed:.1f}s total)")
+                    raise e
 
         # Get raw response from LLM
         raw_response = completion.choices[0].message.content

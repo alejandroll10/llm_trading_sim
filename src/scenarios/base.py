@@ -6,7 +6,7 @@ from calculate_fundamental import calculate_fundamental_price, calibrate_redempt
 # =============================================================================
 # Default LLM provider settings
 DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"  # UF Hypergator endpoint
-DEFAULT_LLM_MODEL = "llama-3.1-70b-instruct"              # Default model (faster)
+DEFAULT_LLM_MODEL = "gpt-oss-120b"                            # UF Hypergator reasoning model (120b more reliable than 20b)
 
 # Alternative configurations (comment/uncomment to switch):
 # OpenAI:
@@ -109,6 +109,7 @@ DEFAULT_PARAMS = {
     "NUM_ROUNDS": BASE_NUM_ROUNDS,
     "INFINITE_ROUNDS": False,
     "HIDE_FUNDAMENTAL_PRICE": True,
+    "NEWS_ENABLED": False,  # LLM-generated market news (requires extra API calls)
 
     # Market parameters
     "INITIAL_PRICE": FUNDAMENTAL_WITH_DEFAULT_PARAMS,
