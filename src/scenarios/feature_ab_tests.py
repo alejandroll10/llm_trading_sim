@@ -480,4 +480,86 @@ SCENARIOS = {
             }
         }
     ),
+
+    # Stress test for self-modification with agents designed to modify
+    "self_modify_stress_test": SimulationScenario(
+        name="self_modify_stress_test",
+        description="Stress test with strategy_experimenter agents that MUST modify every round",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 8,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'SELF_MODIFY_ENABLED': True,
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': True,
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'strategy_experimenter': 2,  # These MUST modify every round
+                    'adaptive_learner': 1,        # This is encouraged to modify
+                    'value': 1,                   # Baseline - unlikely to modify
+                }
+            }
+        }
+    ),
+
+    # Quick 3-round stress test
+    "quick_stress_test": SimulationScenario(
+        name="quick_stress_test",
+        description="Quick 3-round stress test with strategy_experimenter",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 3,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'SELF_MODIFY_ENABLED': True,
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': True,
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'strategy_experimenter': 2,  # These MUST modify every round
+                }
+            }
+        }
+    ),
+
+    # Adaptive learners in volatile market (more likely to modify)
+    "adaptive_volatile_market": SimulationScenario(
+        name="adaptive_volatile_market",
+        description="Adaptive learners in a market with optimistic/pessimistic agents creating volatility",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'SELF_MODIFY_ENABLED': True,
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': True,
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'adaptive_learner': 2,  # Should learn from the chaos
+                    'optimistic': 2,        # Push prices up
+                    'pessimistic': 2,       # Push prices down
+                }
+            }
+        }
+    ),
 }
