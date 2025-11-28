@@ -35,6 +35,11 @@ class LLMAgent(BaseAgent):
         if Feature.MEMORY in self.enabled_features:
             self.memory_notes = []  # List of (round_number, note) tuples for agent memory
 
+        # Conditionally initialize self-modification based on feature flags
+        if Feature.SELF_MODIFY in self.enabled_features:
+            self.current_system_prompt = self.agent_type.system_prompt
+            self.prompt_history = [(0, self.agent_type.system_prompt)]  # (round, prompt) tuples
+
     def make_decision(self, market_state, history, round_number):
         try:
             # Store market_state for multi-stock support
@@ -68,10 +73,20 @@ class LLMAgent(BaseAgent):
                     self.enabled_features
                 )
 
+            # Build self-modify section using PromptBuilder (only if self-modify enabled)
+            self_modify_section = ""
+            if Feature.SELF_MODIFY in self.enabled_features:
+                prompt_history = getattr(self, 'prompt_history', [])
+                current_prompt = self.get_current_system_prompt()
+                self_modify_section = PromptBuilder.build_self_modify_section(
+                    prompt_history,
+                    current_prompt
+                )
+
             # Detect if this is a multi-stock scenario
             is_multi_stock = 'stocks' in market_state
 
-            # Build feature instructions (tells agent HOW to use memory/social)
+            # Build feature instructions (tells agent HOW to use memory/social/self-modify)
             feature_instructions = PromptBuilder.build_instructions(self.enabled_features)
 
             user_prompt = (
@@ -79,12 +94,16 @@ class LLMAgent(BaseAgent):
                 + last_reasoning_section
                 + memory_section
                 + messages_section
+                + self_modify_section
                 + ("\n\n" + feature_instructions if feature_instructions else "")
             )
 
+            # Determine system prompt: use mutable version if self-modify enabled
+            system_prompt = self.get_current_system_prompt()
+
             # Create LLM request with enabled features
             request = LLMRequest(
-                system_prompt=self.agent_type.system_prompt,
+                system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 model=self.model,
                 agent_id=self.agent_id,
@@ -142,6 +161,13 @@ class LLMAgent(BaseAgent):
                         f"Round {round_number}: {note}\n"
                         f"Total notes in memory: {len(self.memory_notes)}"
                     )
+
+            # Process prompt modification (only if self-modify feature enabled)
+            if Feature.SELF_MODIFY in self.enabled_features:
+                modification = response.decision.get('prompt_modification', '')
+                reasoning = response.decision.get('modification_reasoning', '')
+                if modification and modification.strip():
+                    self._apply_prompt_modification(modification, reasoning, round_number)
 
             # Get price signal for logging (handle multi-stock format)
             if isinstance(self.private_signals, dict) and self.private_signals.get('is_multi_stock'):
@@ -321,4 +347,69 @@ class LLMAgent(BaseAgent):
                 for round_num, note in self.memory_notes
             ]
         return []
+
+    # ==================== Self-Modification Methods ====================
+
+    def _apply_prompt_modification(self, modification: str, reasoning: str, round_number: int) -> None:
+        """Apply a prompt modification proposed by the agent.
+
+        Currently uses 'append' mode - modifications are added to the base prompt.
+        This preserves the original identity while allowing strategy evolution.
+
+        Args:
+            modification: The proposed modification text
+            reasoning: Why the agent wants this modification
+            round_number: Current simulation round
+        """
+        if not modification or not modification.strip():
+            return
+
+        # Append modification to current prompt
+        modification_block = f"\n\n[Strategy Update - Round {round_number}]: {modification.strip()}"
+        self.current_system_prompt = self.current_system_prompt + modification_block
+
+        # Record in history
+        self.prompt_history.append((round_number, self.current_system_prompt))
+
+        LoggingService.log_decision(
+            f"\n========== Agent {self.agent_id} Prompt Modification ==========\n"
+            f"Round {round_number}\n"
+            f"Reasoning: {reasoning}\n"
+            f"Modification: {modification}\n"
+            f"Total modifications: {len(self.prompt_history) - 1}"
+        )
+
+    def get_prompt_timeline(self) -> List[Dict[str, Any]]:
+        """Export prompt evolution history as structured data for analysis.
+
+        Returns:
+            List of dicts with keys: round, prompt, agent_id
+            Empty list if self-modify feature is not enabled
+        """
+        if Feature.SELF_MODIFY in self.enabled_features and hasattr(self, 'prompt_history'):
+            return [
+                {'round': round_num, 'prompt': prompt, 'agent_id': self.agent_id}
+                for round_num, prompt in self.prompt_history
+            ]
+        return []
+
+    def get_current_system_prompt(self) -> str:
+        """Get the current (possibly modified) system prompt.
+
+        Returns:
+            Modified prompt if self-modify enabled, otherwise original prompt
+        """
+        if Feature.SELF_MODIFY in self.enabled_features and hasattr(self, 'current_system_prompt'):
+            return self.current_system_prompt
+        return self.agent_type.system_prompt
+
+    def get_modification_count(self) -> int:
+        """Get the number of prompt modifications made.
+
+        Returns:
+            Number of modifications (0 if self-modify not enabled)
+        """
+        if Feature.SELF_MODIFY in self.enabled_features and hasattr(self, 'prompt_history'):
+            return len(self.prompt_history) - 1  # Subtract initial prompt
+        return 0
  

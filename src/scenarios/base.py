@@ -122,6 +122,7 @@ DEFAULT_PARAMS = {
         # Feature toggles for agent capabilities (opt-in by default)
         'MEMORY_ENABLED': False,  # Enable memory notes system (notes_to_self field)
         'SOCIAL_ENABLED': False,  # Enable social media messaging (post_message field)
+        'SELF_MODIFY_ENABLED': False,  # Enable self-modification of system prompts (experimental)
 
         'allow_short_selling': False,
         'margin_requirement': 0.5,

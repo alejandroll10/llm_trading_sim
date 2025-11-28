@@ -75,6 +75,9 @@ class LLMService:
             if Feature.SOCIAL in request.enabled_features:
                 decision_dict["message_reasoning"] = None
                 decision_dict["post_message"] = None
+            if Feature.SELF_MODIFY in request.enabled_features:
+                decision_dict["prompt_modification"] = None
+                decision_dict["modification_reasoning"] = None
 
             decision_dict["agent_id"] = request.agent_id
 
@@ -169,6 +172,10 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
                 decision_dict["message_reasoning"] = getattr(parsed_response, 'message_reasoning', None)
                 decision_dict["post_message"] = getattr(parsed_response, 'post_message', None)
 
+            if Feature.SELF_MODIFY in request.enabled_features:
+                decision_dict["prompt_modification"] = getattr(parsed_response, 'prompt_modification', None)
+                decision_dict["modification_reasoning"] = getattr(parsed_response, 'modification_reasoning', None)
+
             decision_dict["agent_id"] = request.agent_id
 
             return LLMResponse(
@@ -205,6 +212,10 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
         if Feature.SOCIAL in enabled_features:
             fallback["message_reasoning"] = None
             fallback["post_message"] = None
+
+        if Feature.SELF_MODIFY in enabled_features:
+            fallback["prompt_modification"] = None
+            fallback["modification_reasoning"] = None
 
         fallback["agent_id"] = agent_id
         return fallback

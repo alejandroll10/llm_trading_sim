@@ -449,6 +449,9 @@ class DataRecorder:
         # Save agent memory timeline (notes_to_self over time)
         self._save_agent_memory_timeline(data_path)
 
+        # Save agent prompt evolution (self-modification history)
+        self._save_agent_prompt_evolution(data_path)
+
         # Create a summary statistics file with safe dividend access
         dividend_model = self.market_state_manager.dividend_model
         
@@ -527,6 +530,69 @@ class DataRecorder:
                     logger.info(
                         f"Saved agent memory timeline: {len(memory_data)} notes from "
                         f"{len(set(m['agent_id'] for m in memory_data))} agents"
+                    )
+                except:
+                    pass  # Logging is optional
+
+    def _save_agent_prompt_evolution(self, data_path: Path):
+        """Export all agent prompt evolution history to a separate CSV file
+
+        This creates a dedicated CSV file showing how each agent's system prompt
+        has evolved over time through self-modification, making it easy to analyze
+        strategy evolution and emergent behaviors.
+
+        Args:
+            data_path: Directory path where CSV should be saved
+        """
+        prompt_data = []
+
+        # Collect prompt history from all agents
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+
+            # Check if agent has prompt_history attribute (only LLMAgents with SELF_MODIFY do)
+            if hasattr(agent, 'prompt_history') and agent.prompt_history:
+                agent_type_name = getattr(agent.agent_type, 'name', 'unknown')
+                original_prompt = agent.agent_type.system_prompt
+
+                for round_num, prompt in agent.prompt_history:
+                    # Determine if this is a modification or the original
+                    is_modification = round_num > 0
+
+                    # Extract just the modification text if applicable
+                    modification_text = ""
+                    if is_modification and "[Strategy Update" in prompt:
+                        # Find the latest modification block
+                        mod_start = prompt.rfind("[Strategy Update")
+                        modification_text = prompt[mod_start:]
+
+                    prompt_data.append({
+                        'agent_id': agent_id,
+                        'agent_type': agent_type_name,
+                        'round': round_num,
+                        'is_modification': is_modification,
+                        'modification_number': len([r for r, _ in agent.prompt_history if r <= round_num and r > 0]),
+                        'modification_text': modification_text if is_modification else "(original)",
+                        'full_prompt_length': len(prompt),
+                        'full_prompt': prompt  # Store full prompt for analysis
+                    })
+
+        # Save to CSV if we have any prompt evolution data
+        if prompt_data:
+            prompt_df = pd.DataFrame(prompt_data)
+            # Sort by agent_id, then round for chronological view per agent
+            prompt_df = prompt_df.sort_values(['agent_id', 'round'])
+            prompt_df.to_csv(data_path / 'agent_prompt_evolution.csv', index=False)
+
+            # Log summary (optional)
+            if hasattr(self, 'loggers') and self.loggers:
+                try:
+                    from services.logging_service import LoggingService
+                    logger = LoggingService.get_logger('simulation')
+                    num_modifications = sum(1 for p in prompt_data if p['is_modification'])
+                    num_agents = len(set(p['agent_id'] for p in prompt_data))
+                    logger.info(
+                        f"Saved agent prompt evolution: {num_modifications} modifications from {num_agents} agents"
                     )
                 except:
                     pass  # Logging is optional

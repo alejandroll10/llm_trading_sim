@@ -421,4 +421,63 @@ SCENARIOS = {
             }
         }
     ),
+
+    # ========================================================================
+    # Self-Modification Tests - Agents evolve their own strategies
+    # ========================================================================
+    "self_modify_test": SimulationScenario(
+        name="self_modify_test",
+        description="Test self-modifying agents that can evolve their trading strategies",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                # Enable self-modification + memory for context
+                'SELF_MODIFY_ENABLED': True,
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': True,
+
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'value': 2,
+                    'momentum': 2,
+                    'contrarian': 1,
+                }
+            }
+        }
+    ),
+
+    # Quick 5-round test for self-modification
+    "quick_self_modify_test": SimulationScenario(
+        name="quick_self_modify_test",
+        description="Quick 5-round test for self-modification feature",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'SELF_MODIFY_ENABLED': True,
+                'MEMORY_ENABLED': True,
+                'SOCIAL_ENABLED': False,
+                'LAST_REASONING_ENABLED': True,
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'value': 2,
+                    'momentum': 1,
+                }
+            }
+        }
+    ),
 }

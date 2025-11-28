@@ -46,6 +46,29 @@ Strategic Considerations:
 - You may signal confidence, uncertainty, or specific views to move prices
 - Consider: What do you want other agents to believe?
 - Be explicit about your messaging strategy in 'message_reasoning'""",
+
+        Feature.SELF_MODIFY: """
+STRATEGY EVOLUTION:
+You can modify your trading strategy over time using 'prompt_modification'.
+If you want to change how you approach trading decisions, propose a modification.
+
+When to modify your strategy:
+- Your current approach isn't working as expected
+- You've discovered a new pattern or insight worth incorporating
+- Market conditions have changed significantly
+- You want to try a different trading style
+
+How to propose modifications:
+1. First explain WHY in 'modification_reasoning' (what you learned, what's not working)
+2. Then write the new strategy text in 'prompt_modification'
+3. Be specific and actionable - vague modifications won't help
+
+Example:
+- modification_reasoning: "My value investing approach keeps missing momentum - prices trend longer than expected"
+- prompt_modification: "Consider momentum signals alongside fundamental value. When price has moved >5% in 3 rounds, weight trend-following more heavily."
+
+Your modifications will be APPENDED to your base strategy, so you don't need to repeat everything.
+Only modify when you have genuine insight - unnecessary changes add noise.""",
     }
 
     @staticmethod
@@ -181,6 +204,49 @@ Strategic Considerations:
             lines.append(f"Price Target: {price_target_reasoning}")
         if reasoning:
             lines.append(f"Decision: {reasoning}")
+
+        lines.append("")
+        return "\n".join(lines)
+
+    @staticmethod
+    def build_self_modify_section(prompt_history: list, current_prompt: str) -> str:
+        """
+        Build section showing agent their prompt evolution history.
+
+        This helps agents understand how their strategy has evolved and
+        make more informed decisions about further modifications.
+
+        Args:
+            prompt_history: List of (round_number, prompt) tuples
+            current_prompt: The current (possibly modified) system prompt
+
+        Returns:
+            Formatted string showing prompt evolution, or empty if no modifications
+        """
+        if not prompt_history or len(prompt_history) <= 1:
+            return "\n\n=== YOUR STRATEGY STATUS ===\nNo modifications yet. You may propose strategy changes if needed.\n"
+
+        num_modifications = len(prompt_history) - 1
+        original_prompt = prompt_history[0][1]
+
+        lines = ["\n\n=== YOUR STRATEGY EVOLUTION ==="]
+        lines.append(f"Total modifications: {num_modifications}")
+        lines.append("")
+        lines.append(f"Original strategy: {original_prompt[:150]}{'...' if len(original_prompt) > 150 else ''}")
+        lines.append("")
+
+        # Show recent modifications (last 3)
+        recent_mods = prompt_history[-3:] if len(prompt_history) > 3 else prompt_history[1:]
+        if recent_mods:
+            lines.append("Recent modifications:")
+            for round_num, prompt in recent_mods:
+                if round_num == 0:
+                    continue  # Skip original
+                # Extract just the modification part (after the last [Strategy Update])
+                if "[Strategy Update" in prompt:
+                    mod_start = prompt.rfind("[Strategy Update")
+                    mod_text = prompt[mod_start:mod_start + 200]
+                    lines.append(f"  {mod_text}{'...' if len(prompt[mod_start:]) > 200 else ''}")
 
         lines.append("")
         return "\n".join(lines)

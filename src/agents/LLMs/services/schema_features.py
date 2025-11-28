@@ -29,6 +29,7 @@ class Feature(str, Enum):
     MEMORY = "memory"
     SOCIAL = "social"
     LAST_REASONING = "last_reasoning"  # Show agent their reasoning from last round
+    SELF_MODIFY = "self_modify"  # Allow agents to modify their own system prompts
     # Future features can be added here:
     # ADVANCED_ORDERS = "advanced_orders"
     # PORTFOLIO_ANALYSIS = "portfolio_analysis"
@@ -117,6 +118,16 @@ class FeatureRegistry:
             'post_message': (
                 Optional[str],
                 Field(None, description="Optional: Post a message to the social feed visible to other agents next round")
+            ),
+        },
+        Feature.SELF_MODIFY: {
+            'prompt_modification': (
+                Optional[str],
+                Field(None, description="Optional: Propose a modification to your trading strategy/system prompt. This will update how you approach future trading decisions. Use this to evolve your strategy based on what you've learned.")
+            ),
+            'modification_reasoning': (
+                Optional[str],
+                Field(None, description="Why you want to modify your strategy - what have you learned that warrants this change?")
             ),
         },
     }
@@ -236,6 +247,10 @@ class FeatureRegistry:
 
         if config.get('LAST_REASONING_ENABLED', True):  # Default True for backward compatibility
             features.add(Feature.LAST_REASONING)
+
+        # Self-modify is opt-in (default False) - experimental feature
+        if config.get('SELF_MODIFY_ENABLED', False):
+            features.add(Feature.SELF_MODIFY)
 
         return features
 
