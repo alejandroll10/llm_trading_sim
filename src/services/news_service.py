@@ -60,7 +60,8 @@ class NewsItem(BaseModel):
         # Generic names that LLMs tend to hallucinate
         generic_names = {
             'generic stock', 'unnamed stock', 'the stock', 'stock',
-            'all', 'market', 'all stocks', 'general market', 'n/a', 'none'
+            'all', 'market', 'all stocks', 'general market', 'n/a', 'none',
+            'xyz', 'abc', 'default_stock', 'default stock', 'company'
         }
 
         # Filter out generic names

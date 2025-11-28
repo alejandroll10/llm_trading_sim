@@ -81,6 +81,7 @@ SCENARIOS = {
         parameters={
             **DEFAULT_PARAMS,
             "NUM_ROUNDS": 3,  # Short scenario with 10 rounds
+            "NEWS_ENABLED": True,  # Enable LLM-generated news
             "INITIAL_PRICE": FUNDAMENTAL_WITH_DEFAULT_PARAMS,
             "HIDE_FUNDAMENTAL_PRICE": True,
             "AGENT_PARAMS": {
