@@ -5,11 +5,14 @@ from market.trade import Trade
 from agents.LLMs.llm_prompt_templates import (
     TRADING_OPTIONS_TEMPLATE, BASE_MARKET_TEMPLATE,
     POSITION_INFO_TEMPLATE, DIVIDEND_INFO_TEMPLATE,
+    DIVIDEND_INFO_REALIZATIONS_TEMPLATE, DIVIDEND_INFO_AVERAGE_TEMPLATE,
+    DIVIDEND_INFO_NONE_TEMPLATE,
     INTEREST_INFO_TEMPLATE, PRICE_HISTORY_TEMPLATE,
     REDEMPTION_INFO_TEMPLATE, LEVERAGE_INFO_TEMPLATE
 )
 from agents.LLMs.signal_extraction.signal_extractor import SignalExtractor
 from agents.LLMs.calculation.market_calculator import MarketCalculator
+from scenarios.base import FundamentalInfoMode
 
 @dataclass
 class AgentContext:
@@ -57,9 +60,18 @@ class MarketStateFormatter:
         agent_signals: Dict[InformationType, InformationSignal],
         agent_context: AgentContext,
         signal_history: Dict[int, Dict[InformationType, InformationSignal]] = None,
-        market_state: Dict = None
+        market_state: Dict = None,
+        fundamental_info_mode: FundamentalInfoMode = FundamentalInfoMode.FULL
     ) -> Dict[str, str]:
-        """Format all sections of the LLM prompt using information signals"""
+        """Format all sections of the LLM prompt using information signals.
+
+        Args:
+            agent_signals: Current market signals
+            agent_context: Agent's current state
+            signal_history: Historical signals
+            market_state: Optional market state dict
+            fundamental_info_mode: Controls what info agents see about fundamentals
+        """
         try:
             # Handle multi-stock signals
             if isinstance(agent_signals, dict) and agent_signals.get('is_multi_stock'):
@@ -142,12 +154,16 @@ class MarketStateFormatter:
                     price_signal, fundamental_signal
                 ),
 
-                # Dividend and interest data
-                **SignalExtractor.extract_dividend_context(dividend_signal),
+                # Dividend and interest data (mode-aware)
+                **SignalExtractor.extract_dividend_context(
+                    dividend_signal, fundamental_info_mode
+                ),
                 **SignalExtractor.extract_interest_context(interest_signal),
 
-                # Add redemption context
-                **SignalExtractor.extract_redemption_context(fundamental_signal),
+                # Add redemption context (mode-aware)
+                **SignalExtractor.extract_redemption_context(
+                    fundamental_signal, fundamental_info_mode
+                ),
 
                 # Add final round message
                 'final_round_message': "\nIn the final round, all shares are redeemed at the fundamental value." if num_rounds != "Infinite" else ""
@@ -212,13 +228,18 @@ class MarketStateFormatter:
             # Format news information if available
             news_info = MarketStateFormatter._format_news_info(agent_signals)
 
+            # Format dividend info based on mode
+            dividend_info = MarketStateFormatter._format_dividend_info_by_mode(
+                context, fundamental_info_mode
+            )
+
             # Use templates consistently
             sections = {
                 'base_market_state': BASE_MARKET_TEMPLATE.format(**context),
                 'position_info': position_display,  # Use pre-formatted multi-stock aware display
                 'leverage_info': leverage_info,  # NEW: Leverage information
                 'price_history': PRICE_HISTORY_TEMPLATE.format(**context),
-                'dividend_info': DIVIDEND_INFO_TEMPLATE.format(**context),
+                'dividend_info': dividend_info,  # Mode-aware dividend info
                 'interest_info': INTEREST_INFO_TEMPLATE.format(**context),
                 'redemption_info': REDEMPTION_INFO_TEMPLATE.format(**context),
                 'trading_options': TRADING_OPTIONS_TEMPLATE,
@@ -305,6 +326,64 @@ class MarketStateFormatter:
             return "Unavailable"
         return f"${fundamental_signal.value:.2f}"
 
+    @staticmethod
+    def _format_dividend_info_by_mode(
+        context: Dict[str, Any],
+        mode: FundamentalInfoMode
+    ) -> str:
+        """Format dividend information based on the fundamental info mode.
+
+        Args:
+            context: Context dict with dividend data from signal extraction
+                     (includes dividend_history from signal metadata)
+            mode: The fundamental info mode controlling what to show
+
+        Returns:
+            Formatted dividend info string
+        """
+        # NONE mode: minimal info
+        if mode == FundamentalInfoMode.NONE:
+            return DIVIDEND_INFO_NONE_TEMPLATE
+
+        # REALIZATIONS_ONLY mode: show past payments only
+        if mode == FundamentalInfoMode.REALIZATIONS_ONLY:
+            # Get history from context (populated from signal metadata)
+            history = context.get('dividend_history', [])
+            if history:
+                history_text = ", ".join([f"${d:.2f}" for d in history[-10:]])  # Last 10
+                if len(history) > 10:
+                    history_text = f"... {history_text}"
+            else:
+                history_text = "No dividends paid yet"
+
+            return DIVIDEND_INFO_REALIZATIONS_TEMPLATE.format(
+                last_paid_text=context.get('last_paid_text', 'N/A'),
+                num_payments=len(history),
+                dividend_history_text=history_text,
+                next_payment_round=context.get('next_payment_round', 'N/A'),
+                dividend_destination=context.get('dividend_destination', 'dividend'),
+                dividend_tradeable=context.get('dividend_tradeable', 'non-tradeable')
+            )
+
+        # AVERAGE mode: show summary statistics
+        if mode == FundamentalInfoMode.AVERAGE:
+            avg = context.get('dividend_average')
+            std = context.get('dividend_std')
+            avg_text = f"${avg:.2f}" if avg is not None else "N/A (no data)"
+            std_text = f"${std:.2f}" if std is not None else "N/A"
+
+            return DIVIDEND_INFO_AVERAGE_TEMPLATE.format(
+                last_paid_text=context.get('last_paid_text', 'N/A'),
+                num_payments=context.get('num_payments', 0),
+                dividend_average_text=avg_text,
+                dividend_std_text=std_text,
+                next_payment_round=context.get('next_payment_round', 'N/A'),
+                dividend_destination=context.get('dividend_destination', 'dividend'),
+                dividend_tradeable=context.get('dividend_tradeable', 'non-tradeable')
+            )
+
+        # FULL and PROCESS_ONLY modes: show full dividend model
+        return DIVIDEND_INFO_TEMPLATE.format(**context)
 
     @staticmethod
     def _format_outstanding_orders(orders: Dict[str, List[Dict[str, Any]]]) -> str:

@@ -9,6 +9,7 @@ from .services.schema_features import Feature, FeatureRegistry
 from .services.prompt_builder import PromptBuilder
 from services.logging_service import LoggingService
 from market.information.information_types import InformationType
+from scenarios.base import FundamentalInfoMode
 
 class LLMAgent(BaseAgent):
     # Memory system constants
@@ -17,12 +18,16 @@ class LLMAgent(BaseAgent):
     def __init__(self, agent_id: str, agent_type: str,
                  model_open_ai: str = "gpt-oss-20b",
                  enabled_features: Set[Feature] = None,
+                 fundamental_info_mode: FundamentalInfoMode = FundamentalInfoMode.FULL,
                  *args, **kwargs):  # Usually set via scenario params
         super().__init__(agent_id, *args, **kwargs)
         self.agent_type = AGENT_TYPES[agent_type]
         self.model = model_open_ai
         self._formatter = MarketStateFormatter()
         self._llm_service = LLMService()
+
+        # Fundamental info mode: controls what agents see about fundamental values
+        self.fundamental_info_mode = fundamental_info_mode
 
         # Feature toggle system: store enabled features
         # Default to all features for backward compatibility if not specified
@@ -312,7 +317,8 @@ class LLMAgent(BaseAgent):
             agent_signals=self.private_signals,
             agent_context=self.prepare_agent_context(),
             signal_history=self.signal_history,
-            market_state=market_state
+            market_state=market_state,
+            fundamental_info_mode=self.fundamental_info_mode
         )
 
     def reset_memory(self):

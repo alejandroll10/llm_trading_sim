@@ -1,5 +1,39 @@
 from typing import Dict, Any
+from enum import Enum
 from calculate_fundamental import calculate_fundamental_price, calibrate_redemption_value
+
+
+class FundamentalInfoMode(str, Enum):
+    """
+    Controls what information agents receive about fundamental values.
+
+    The mode determines how much of the dividend model, interest rate,
+    and redemption value is revealed to agents. This is crucial for
+    experiments testing price discovery under uncertainty.
+
+    Modes:
+        FULL: Agents see everything including computed fundamental value.
+              Use for rational expectations baselines.
+
+        PROCESS_ONLY: Agents see dividend model parameters but not explicit FV.
+                      Redemption value hidden. Agents can still compute FV
+                      from E[d]/r but must do so themselves.
+
+        REALIZATIONS_ONLY: Agents only see past dividend payments, not the
+                           underlying model. Must learn/estimate distribution.
+                           Best for bubbles experiments and learning studies.
+
+        AVERAGE: Agents see running average and std dev of past dividends.
+                 Summary statistics only, no model parameters.
+
+        NONE: No dividend or fundamental information shown.
+              Agents only see price, volume, and their positions.
+    """
+    FULL = "full"
+    PROCESS_ONLY = "process_only"
+    REALIZATIONS_ONLY = "realizations_only"
+    AVERAGE = "average"
+    NONE = "none"
 
 # =============================================================================
 # LLM Configuration (Non-sensitive settings - safe to commit)
@@ -39,8 +73,34 @@ class SimulationScenario:
         self.description = description
         self.parameters = parameters
 
+        # Handle legacy HIDE_FUNDAMENTAL_PRICE -> FUNDAMENTAL_INFO_MODE conversion
+        self._normalize_fundamental_info_mode()
+
         # Calculate and validate fundamental prices
         self._calculate_fundamental_values()
+
+    def _normalize_fundamental_info_mode(self):
+        """Convert legacy HIDE_FUNDAMENTAL_PRICE to FUNDAMENTAL_INFO_MODE if needed."""
+        params = self.parameters
+
+        # If using legacy parameter
+        if "HIDE_FUNDAMENTAL_PRICE" in params and "FUNDAMENTAL_INFO_MODE" not in params:
+            hide = params["HIDE_FUNDAMENTAL_PRICE"]
+            if hide:
+                params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode.PROCESS_ONLY
+            else:
+                params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode.FULL
+            # Remove legacy param to avoid confusion
+            del params["HIDE_FUNDAMENTAL_PRICE"]
+
+        # Ensure we have a valid mode (use default if missing)
+        if "FUNDAMENTAL_INFO_MODE" not in params:
+            params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode.PROCESS_ONLY
+
+        # Convert string to enum if needed
+        mode = params["FUNDAMENTAL_INFO_MODE"]
+        if isinstance(mode, str):
+            params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode(mode)
 
     def _calculate_fundamental_values(self):
         """Calculate and enforce the constant fundamental value principle where:
@@ -108,7 +168,8 @@ DEFAULT_PARAMS = {
     "RANDOM_SEED": 42,
     "NUM_ROUNDS": BASE_NUM_ROUNDS,
     "INFINITE_ROUNDS": False,
-    "HIDE_FUNDAMENTAL_PRICE": True,
+    "FUNDAMENTAL_INFO_MODE": FundamentalInfoMode.PROCESS_ONLY,  # Controls what agents see about fundamentals
+    # Legacy support: HIDE_FUNDAMENTAL_PRICE is converted to FUNDAMENTAL_INFO_MODE in SimulationScenario
     "NEWS_ENABLED": False,  # LLM-generated market news (requires extra API calls)
 
     # Market parameters

@@ -201,12 +201,15 @@ class DividendProvider(BaseProvider):
         """Get dividend information with yields calculated here"""
         if not self._market_state_manager.dividend_service:
             return None
-            
+
         state = self.market_state
         dividend_state = state['dividend']
         current_price = self._market_state_manager.current_price
         model = dividend_state['model']
-        
+
+        # Get full dividend history from the service
+        dividend_history = list(self._market_state_manager.dividend_service.dividend_history)
+
         return InformationSignal(
             type=InformationType.DIVIDEND,
             value=model.expected_dividend,
@@ -216,7 +219,7 @@ class DividendProvider(BaseProvider):
                     'expected': self._calculate_yield(model.expected_dividend, current_price),
                     'max': self._calculate_yield(model.max_dividend, current_price),
                     'min': self._calculate_yield(model.min_dividend, current_price),
-                    'last': self._calculate_yield(dividend_state['last_paid_dividend'], current_price) 
+                    'last': self._calculate_yield(dividend_state['last_paid_dividend'], current_price)
                            if dividend_state['last_paid_dividend'] else None
                 },
                 'max_dividend': model.max_dividend,
@@ -227,7 +230,9 @@ class DividendProvider(BaseProvider):
                 'variation': model.dividend_variation,
                 'probability': model.dividend_probability * 100,  # Convert to percentage
                 'destination': dividend_state.get('destination', 'cash'),
-                'tradeable': dividend_state.get('tradeable', 'non-tradeable')
+                'tradeable': dividend_state.get('tradeable', 'non-tradeable'),
+                # Full dividend history for REALIZATIONS_ONLY and AVERAGE modes
+                'dividend_history': dividend_history
             }
         )
         
@@ -246,6 +251,9 @@ class DividendProvider(BaseProvider):
         dividend_state = state['dividend']
         current_price = manager.current_price
         model = dividend_state['model']
+
+        # Get full dividend history from the service
+        dividend_history = list(manager.dividend_service.dividend_history)
 
         return InformationSignal(
             type=InformationType.DIVIDEND,
@@ -267,7 +275,9 @@ class DividendProvider(BaseProvider):
                 'variation': model.dividend_variation,
                 'probability': model.dividend_probability * 100,
                 'destination': dividend_state.get('destination', 'cash'),
-                'tradeable': dividend_state.get('tradeable', 'non-tradeable')
+                'tradeable': dividend_state.get('tradeable', 'non-tradeable'),
+                # Full dividend history for REALIZATIONS_ONLY and AVERAGE modes
+                'dividend_history': dividend_history
             }
         )
 

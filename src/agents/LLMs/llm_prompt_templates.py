@@ -69,6 +69,40 @@ Payment Schedule:
 - Payment Destination: {dividend_destination} account ({dividend_tradeable})
 """
 
+# Template for REALIZATIONS_ONLY mode - only shows past payments
+DIVIDEND_INFO_REALIZATIONS_TEMPLATE = """
+Dividend Information:
+- Last Paid Dividend: {last_paid_text}
+- Number of Past Payments: {num_payments}
+- Past Dividend Payments: {dividend_history_text}
+
+Payment Schedule:
+- Next Payment in: {next_payment_round} rounds
+- Payment Destination: {dividend_destination} account ({dividend_tradeable})
+
+Note: The dividend amount varies each period. You must estimate the distribution from past observations.
+"""
+
+# Template for AVERAGE mode - shows summary statistics
+DIVIDEND_INFO_AVERAGE_TEMPLATE = """
+Dividend Information:
+- Last Paid Dividend: {last_paid_text}
+- Average Dividend (from {num_payments} payments): {dividend_average_text}
+- Standard Deviation: {dividend_std_text}
+
+Payment Schedule:
+- Next Payment in: {next_payment_round} rounds
+- Payment Destination: {dividend_destination} account ({dividend_tradeable})
+
+Note: Statistics are based on observed dividend payments.
+"""
+
+# Template for NONE mode - no dividend information
+DIVIDEND_INFO_NONE_TEMPLATE = """
+Dividend Information:
+- Dividend information is not available for this market.
+"""
+
 INTEREST_INFO_TEMPLATE = """
 Interest Rate Information:
 - Base Rate: {interest_rate:.1f}%

@@ -174,7 +174,7 @@ def run_scenario(
             model_open_ai=params["MODEL_OPEN_AI"],
             interest_params=params["INTEREST_MODEL"],
             enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False),
-            hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
+            fundamental_info_mode=params["FUNDAMENTAL_INFO_MODE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
             sim_type=scenario.name,
             stock_configs=params["STOCKS"],  # NEW: Pass stock configurations
@@ -195,7 +195,7 @@ def run_scenario(
             dividend_params=params["DIVIDEND_PARAMS"],
             model_open_ai=params["MODEL_OPEN_AI"],
             interest_params=params["INTEREST_MODEL"],
-            hide_fundamental_price=params["HIDE_FUNDAMENTAL_PRICE"],
+            fundamental_info_mode=params["FUNDAMENTAL_INFO_MODE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
             sim_type=scenario.name,
             enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False),

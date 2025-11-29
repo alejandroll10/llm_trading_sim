@@ -14,7 +14,7 @@ from market.state.sim_context import SimulationContext
 from market.orders.order_repository import OrderRepository
 from market.state.services.dividend_service import DividendService
 from agents.agent_manager.agent_repository import AgentRepository
-from typing import Dict
+from typing import Dict, Optional
 from market.state.services.interest_service import InterestService
 from market.state.services.borrow_service import BorrowService
 from market.state.services.leverage_interest_service import LeverageInterestService
@@ -27,6 +27,7 @@ from services.logging_service import LoggingService
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
 from agents.agent_manager.services.cash_lending_repository import CashLendingRepository
 from verification.simulation_verifier import SimulationVerifier
+from scenarios.base import FundamentalInfoMode
 import random
 import warnings
 from wordcloud import WordCloud
@@ -60,7 +61,8 @@ class BaseSimulation:
                  fundamental_volatility: float = 0.0,
                  lendable_shares: int = 0,
                  agent_params: dict = None,
-                 hide_fundamental_price: bool = True,
+                 hide_fundamental_price: bool = True,  # DEPRECATED: use fundamental_info_mode
+                 fundamental_info_mode: Optional[FundamentalInfoMode] = None,
                  model_open_ai = "gpt-oss-20b",  # Usually set via DEFAULT_PARAMS from .env
                  dividend_params: dict = None,
                  interest_params: dict = None,
@@ -129,9 +131,20 @@ class BaseSimulation:
         
         # Basic simulation parameters
         self.fundamental_volatility = fundamental_volatility
-        self.hide_fundamental_price = hide_fundamental_price
         self.news_enabled = news_enabled
         self.model_open_ai = model_open_ai
+
+        # Fundamental info mode: controls what agents see
+        # Handle backwards compatibility with hide_fundamental_price
+        if fundamental_info_mode is not None:
+            self.fundamental_info_mode = fundamental_info_mode
+        elif hide_fundamental_price:
+            self.fundamental_info_mode = FundamentalInfoMode.PROCESS_ONLY
+        else:
+            self.fundamental_info_mode = FundamentalInfoMode.FULL
+
+        # Keep hide_fundamental_price for components that still use it
+        self.hide_fundamental_price = self.fundamental_info_mode != FundamentalInfoMode.FULL
         
         # Set default agent parameters if none provided
         self.agent_params = agent_params
@@ -524,7 +537,8 @@ class BaseSimulation:
             **base_params,
             agent_type=agent_type,
             model_open_ai=model,
-            enabled_features=enabled_features
+            enabled_features=enabled_features,
+            fundamental_info_mode=self.fundamental_info_mode
         )
 
     def initialize_agents(self, agent_params: dict):
