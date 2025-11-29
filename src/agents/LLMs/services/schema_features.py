@@ -123,11 +123,11 @@ class FeatureRegistry:
         Feature.SELF_MODIFY: {
             'prompt_modification': (
                 Optional[str],
-                Field(None, description="Optional: Propose a modification to your trading strategy/system prompt. This will update how you approach future trading decisions. Use this to evolve your strategy based on what you've learned.")
+                Field(None, description="Optional: Write a COMPLETE NEW system prompt to REPLACE your current trading strategy. This must be a full, self-contained strategy description. Your current prompt will be ENTIRELY REPLACED with this text. Do not write partial updates - write your complete new strategy.")
             ),
             'modification_reasoning': (
                 Optional[str],
-                Field(None, description="Why you want to modify your strategy - what have you learned that warrants this change?")
+                Field(None, description="Why you want to replace your current strategy with a new one - what have you learned?")
             ),
         },
     }

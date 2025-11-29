@@ -48,27 +48,27 @@ Strategic Considerations:
 - Be explicit about your messaging strategy in 'message_reasoning'""",
 
         Feature.SELF_MODIFY: """
-STRATEGY EVOLUTION:
-You can modify your trading strategy over time using 'prompt_modification'.
-If you want to change how you approach trading decisions, propose a modification.
+STRATEGY REPLACEMENT:
+You can REPLACE your trading strategy using 'prompt_modification'.
+This is a FULL REPLACEMENT - your current strategy will be entirely overwritten.
 
-When to modify your strategy:
+When to replace your strategy:
 - Your current approach isn't working as expected
 - You've discovered a new pattern or insight worth incorporating
 - Market conditions have changed significantly
-- You want to try a different trading style
+- You want to try a completely different trading style
 
-How to propose modifications:
+How to replace your strategy:
 1. First explain WHY in 'modification_reasoning' (what you learned, what's not working)
-2. Then write the new strategy text in 'prompt_modification'
-3. Be specific and actionable - vague modifications won't help
+2. Then write your COMPLETE NEW STRATEGY in 'prompt_modification'
+3. The new strategy must be self-contained - include everything you want to remember
 
-Example:
-- modification_reasoning: "My value investing approach keeps missing momentum - prices trend longer than expected"
-- prompt_modification: "Consider momentum signals alongside fundamental value. When price has moved >5% in 3 rounds, weight trend-following more heavily."
+IMPORTANT: Write a COMPLETE strategy, not a partial update. Example:
 
-Your modifications will be APPENDED to your base strategy, so you don't need to repeat everything.
-Only modify when you have genuine insight - unnecessary changes add noise.""",
+modification_reasoning: "Pure value investing missed momentum trends - need hybrid approach"
+prompt_modification: "You are a hybrid value-momentum trader. Buy when: (1) price is below fundamental value AND (2) price has upward momentum over last 2 rounds. Sell when: price exceeds fundamental by >10% OR momentum turns negative. Use limit orders 2% from current price."
+
+Your entire current strategy will be replaced with whatever you write in prompt_modification.""",
     }
 
     @staticmethod
@@ -211,44 +211,34 @@ Only modify when you have genuine insight - unnecessary changes add noise.""",
     @staticmethod
     def build_self_modify_section(prompt_history: list, current_prompt: str) -> str:
         """
-        Build section showing agent their prompt evolution history.
+        Build section showing agent their current strategy (for replacement).
 
-        This helps agents understand how their strategy has evolved and
-        make more informed decisions about further modifications.
+        Shows the agent what strategy they currently have, so they can decide
+        whether to replace it with something new.
 
         Args:
             prompt_history: List of (round_number, prompt) tuples
             current_prompt: The current (possibly modified) system prompt
 
         Returns:
-            Formatted string showing prompt evolution, or empty if no modifications
+            Formatted string showing current strategy
         """
-        if not prompt_history or len(prompt_history) <= 1:
-            return "\n\n=== YOUR STRATEGY STATUS ===\nNo modifications yet. You may propose strategy changes if needed.\n"
+        num_replacements = len(prompt_history) - 1 if prompt_history else 0
 
-        num_modifications = len(prompt_history) - 1
-        original_prompt = prompt_history[0][1]
-
-        lines = ["\n\n=== YOUR STRATEGY EVOLUTION ==="]
-        lines.append(f"Total modifications: {num_modifications}")
-        lines.append("")
-        lines.append(f"Original strategy: {original_prompt[:150]}{'...' if len(original_prompt) > 150 else ''}")
+        lines = ["\n\n=== YOUR CURRENT STRATEGY ==="]
+        lines.append(f"(Replaced {num_replacements} time{'s' if num_replacements != 1 else ''})")
         lines.append("")
 
-        # Show recent modifications (last 3)
-        recent_mods = prompt_history[-3:] if len(prompt_history) > 3 else prompt_history[1:]
-        if recent_mods:
-            lines.append("Recent modifications:")
-            for round_num, prompt in recent_mods:
-                if round_num == 0:
-                    continue  # Skip original
-                # Extract just the modification part (after the last [Strategy Update])
-                if "[Strategy Update" in prompt:
-                    mod_start = prompt.rfind("[Strategy Update")
-                    mod_text = prompt[mod_start:mod_start + 200]
-                    lines.append(f"  {mod_text}{'...' if len(prompt[mod_start:]) > 200 else ''}")
+        # Show the current strategy (truncated if very long)
+        if len(current_prompt) > 500:
+            lines.append(f"{current_prompt[:500]}...")
+        else:
+            lines.append(current_prompt)
 
         lines.append("")
+        lines.append("If you want to change your strategy, write a COMPLETE new strategy in 'prompt_modification'.")
+        lines.append("")
+
         return "\n".join(lines)
 
     @staticmethod

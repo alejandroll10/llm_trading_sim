@@ -353,22 +353,21 @@ class LLMAgent(BaseAgent):
     def _apply_prompt_modification(self, modification: str, reasoning: str, round_number: int) -> None:
         """Apply a prompt modification proposed by the agent.
 
-        Currently uses 'append' mode - modifications are added to the base prompt.
-        This preserves the original identity while allowing strategy evolution.
+        Uses REPLACE mode - the modification becomes the new system prompt.
+        The agent must write a complete, self-contained strategy prompt.
 
         Args:
-            modification: The proposed modification text
+            modification: The new complete system prompt to replace the current one
             reasoning: Why the agent wants this modification
             round_number: Current simulation round
         """
         if not modification or not modification.strip():
             return
 
-        # Append modification to current prompt
-        modification_block = f"\n\n[Strategy Update - Round {round_number}]: {modification.strip()}"
-        self.current_system_prompt = self.current_system_prompt + modification_block
+        # Replace current prompt entirely with the new one
+        self.current_system_prompt = modification.strip()
 
-        # Record in history
+        # Record in history (stores the full prompt at each modification point)
         self.prompt_history.append((round_number, self.current_system_prompt))
 
         LoggingService.log_decision(
