@@ -16,12 +16,14 @@ class HoldTrader(BaseAgent):
             reasoning="Always hold strategy",
             valuation=current_price,
             valuation_reasoning="Using current price as valuation baseline",
-            price_target=current_price,
-            price_target_reasoning="No expected price change",
+            price_prediction_reasoning="No expected price change",
+            price_prediction_t=current_price,
+            price_prediction_t1=current_price,
+            price_prediction_t2=current_price,
         )
         self.broadcast_message(round_number, {
             'valuation': decision.valuation,
-            'price_target': decision.price_target,
+            'price_prediction_t1': decision.price_prediction_t1,
             'reasoning': decision.reasoning,
         })
         return decision

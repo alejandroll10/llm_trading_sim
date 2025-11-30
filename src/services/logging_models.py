@@ -93,9 +93,11 @@ class DecisionLogEntry:
     price: float
     reasoning: str
     valuation: float = 0.0  # Agent's estimated fundamental value
-    price_target: float = 0.0  # Agent's predicted price for next round
+    price_prediction_t: float = 0.0  # Agent's predicted price for THIS round
+    price_prediction_t1: float = 0.0  # Agent's predicted price for NEXT round
+    price_prediction_t2: float = 0.0  # Agent's predicted price for round after next
     valuation_reasoning: str = ""  # Separate reasoning for valuation
-    price_target_reasoning: str = ""  # Separate reasoning for price target
+    price_prediction_reasoning: str = ""  # Reasoning for price predictions
     notes_to_self: str = ""  # Agent's memory notes for future rounds
 
     @staticmethod
@@ -115,9 +117,11 @@ class DecisionLogEntry:
         
         # Extract valuation fields, defaulting to 0 if not present
         valuation = decision_dict.get('valuation', 0.0)
-        price_target = decision_dict.get('price_target', 0.0)
+        price_prediction_t = decision_dict.get('price_prediction_t', 0.0)
+        price_prediction_t1 = decision_dict.get('price_prediction_t1', 0.0)
+        price_prediction_t2 = decision_dict.get('price_prediction_t2', 0.0)
         valuation_reasoning = sanitize_for_csv(decision_dict.get('valuation_reasoning', ''))
-        price_target_reasoning = sanitize_for_csv(decision_dict.get('price_target_reasoning', ''))
+        price_prediction_reasoning = sanitize_for_csv(decision_dict.get('price_prediction_reasoning', ''))
 
         # Ensure reasoning is present
         reasoning = sanitize_for_csv(decision_dict.get('reasoning', ''))
@@ -140,9 +144,11 @@ class DecisionLogEntry:
                 price=market_price,
                 reasoning=reasoning,
                 valuation=valuation,
-                price_target=price_target,
+                price_prediction_t=price_prediction_t,
+                price_prediction_t1=price_prediction_t1,
+                price_prediction_t2=price_prediction_t2,
                 valuation_reasoning=valuation_reasoning,
-                price_target_reasoning=price_target_reasoning,
+                price_prediction_reasoning=price_prediction_reasoning,
                 notes_to_self=notes_to_self
             ))
             return entries
@@ -161,9 +167,11 @@ class DecisionLogEntry:
                 price=order.price_limit if order.price_limit is not None else market_price,
                 reasoning=reasoning,
                 valuation=valuation,
-                price_target=price_target,
+                price_prediction_t=price_prediction_t,
+                price_prediction_t1=price_prediction_t1,
+                price_prediction_t2=price_prediction_t2,
                 valuation_reasoning=valuation_reasoning,
-                price_target_reasoning=price_target_reasoning,
+                price_prediction_reasoning=price_prediction_reasoning,
                 notes_to_self=notes_to_self
             ))
         
@@ -175,7 +183,8 @@ class DecisionLogEntry:
             f"{self.timestamp},{self.round_number},{self.agent_id},"
             f"{self.agent_type_name},{self.agent_type_id},{self.decision},"
             f"{self.order_type},{self.quantity},{self.price},\"{self.reasoning}\","
-            f"{self.valuation},{self.price_target},\"{self.valuation_reasoning}\",\"{self.price_target_reasoning}\",\"{self.notes_to_self}\""
+            f"{self.valuation},{self.price_prediction_t},{self.price_prediction_t1},{self.price_prediction_t2},"
+            f"\"{self.valuation_reasoning}\",\"{self.price_prediction_reasoning}\",\"{self.notes_to_self}\""
         )
 
 @dataclass

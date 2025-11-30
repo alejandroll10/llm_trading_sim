@@ -26,8 +26,10 @@ class SqueezeBuyerAgent(BaseAgent):
                 reasoning=f"Dormant until round {self.activation_round}",
                 valuation=current_price,
                 valuation_reasoning="Waiting for activation",
-                price_target=current_price,
-                price_target_reasoning="No target yet"
+                price_prediction_reasoning="No target yet",
+                price_prediction_t=current_price,
+                price_prediction_t1=current_price,
+                price_prediction_t2=current_price,
             )
 
         # SQUEEZE MODE: Aggressive buying to spike price
@@ -44,8 +46,10 @@ class SqueezeBuyerAgent(BaseAgent):
                 reasoning="Insufficient cash for squeeze order",
                 valuation=current_price,
                 valuation_reasoning="No cash available",
-                price_target=current_price,
-                price_target_reasoning="No cash available"
+                price_prediction_reasoning="No cash available",
+                price_prediction_t=current_price,
+                price_prediction_t1=current_price,
+                price_prediction_t2=current_price,
             )
 
         # Place single massive aggressive limit order
@@ -58,12 +62,15 @@ class SqueezeBuyerAgent(BaseAgent):
             )
         ]
 
+        target_price = aggressive_price * 2.0
         return TradeDecision(
             orders=orders,
             replace_decision="Replace",
             reasoning=f"SQUEEZE ACTIVATED (Round {round_number}): Buying {max_shares} shares at ${aggressive_price:.2f} (+{(self.price_aggression-1)*100:.0f}% above market)",
             valuation=aggressive_price * 1.5,
             valuation_reasoning=f"Aggressive valuation to create price spike at round {round_number}",
-            price_target=aggressive_price * 2.0,
-            price_target_reasoning="Target: Force short squeeze by driving price up"
+            price_prediction_reasoning="Target: Force short squeeze by driving price up",
+            price_prediction_t=aggressive_price,
+            price_prediction_t1=target_price,
+            price_prediction_t2=target_price,
         )

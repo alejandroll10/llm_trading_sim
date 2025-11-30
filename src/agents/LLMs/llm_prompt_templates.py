@@ -2,8 +2,10 @@ TRADING_OPTIONS_TEMPLATE = """
 Your analysis should include:
 - valuation_reasoning: Your numerical analysis of the asset's fundamental value
 - valuation: Your estimate of the asset's current fundamental value
-- price_target_reasoning: Your numerical analysis of the asset's price target
-- price_target: Your predicted price for the next round
+- price_prediction_reasoning: Your brief reasoning for your price predictions for the next 3 rounds
+- price_prediction_t: Your predicted average transaction price for THIS round
+- price_prediction_t1: Your predicted average transaction price for NEXT round
+- price_prediction_t2: Your predicted average transaction price for the round AFTER next
 - reasoning: Your explanation for the trading decision
 
 Trading Options:

@@ -44,12 +44,14 @@ class ProportionalGapTrader(BaseAgent):
                 reasoning="Gap between price and fundamental too small",
                 valuation=fundamental,
                 valuation_reasoning="Fundamental estimate provided",
-                price_target=price,
-                price_target_reasoning="No trade executed",
+                price_prediction_reasoning="No trade executed",
+                price_prediction_t=price,
+                price_prediction_t1=price,
+                price_prediction_t2=price,
             )
             self.broadcast_message(round_number, {
                 'valuation': decision.valuation,
-                'price_target': decision.price_target,
+                'price_prediction_t1': decision.price_prediction_t1,
                 'reasoning': decision.reasoning,
             })
             return decision
@@ -74,12 +76,14 @@ class ProportionalGapTrader(BaseAgent):
                     reasoning="Insufficient cash for minimum trade",
                     valuation=fundamental,
                     valuation_reasoning="Fundamental estimate provided",
-                    price_target=price,
-                    price_target_reasoning="Cannot participate",
+                    price_prediction_reasoning="Cannot participate",
+                    price_prediction_t=price,
+                    price_prediction_t1=price,
+                    price_prediction_t2=price,
                 )
                 self.broadcast_message(round_number, {
                     'valuation': decision.valuation,
-                    'price_target': decision.price_target,
+                    'price_prediction_t1': decision.price_prediction_t1,
                     'reasoning': decision.reasoning,
                 })
                 return decision
@@ -90,18 +94,21 @@ class ProportionalGapTrader(BaseAgent):
                 order_type=OrderType.LIMIT,
                 price_limit=price * 1.01,
             )
+            target_price = price * (1 + min(abs(gap_percentage), 0.05))
             decision = TradeDecision(
                 orders=[order],
                 replace_decision="Replace",
                 reasoning=f"Price ${price:.2f} below fundamental ${fundamental:.2f} by {gap_percentage:.1%}",
                 valuation=fundamental,
                 valuation_reasoning="Fundamental estimate provided",
-                price_target=price * (1 + min(abs(gap_percentage), 0.05)),
-                price_target_reasoning="Expect move toward fundamental",
+                price_prediction_reasoning="Expect move toward fundamental",
+                price_prediction_t=price,
+                price_prediction_t1=target_price,
+                price_prediction_t2=target_price,
             )
             self.broadcast_message(round_number, {
                 'valuation': decision.valuation,
-                'price_target': decision.price_target,
+                'price_prediction_t1': decision.price_prediction_t1,
                 'reasoning': decision.reasoning,
             })
             return decision
@@ -117,12 +124,14 @@ class ProportionalGapTrader(BaseAgent):
                 reasoning="Insufficient shares for minimum trade",
                 valuation=fundamental,
                 valuation_reasoning="Fundamental estimate provided",
-                price_target=price,
-                price_target_reasoning="Cannot participate",
+                price_prediction_reasoning="Cannot participate",
+                price_prediction_t=price,
+                price_prediction_t1=price,
+                price_prediction_t2=price,
             )
             self.broadcast_message(round_number, {
                 'valuation': decision.valuation,
-                'price_target': decision.price_target,
+                'price_prediction_t1': decision.price_prediction_t1,
                 'reasoning': decision.reasoning,
             })
             return decision
@@ -133,18 +142,21 @@ class ProportionalGapTrader(BaseAgent):
             order_type=OrderType.LIMIT,
             price_limit=price * 0.99,
         )
+        target_price = price * (1 - min(abs(gap_percentage), 0.05))
         decision = TradeDecision(
             orders=[order],
             replace_decision="Replace",
             reasoning=f"Price ${price:.2f} above fundamental ${fundamental:.2f} by {abs(gap_percentage):.1%}",
             valuation=fundamental,
             valuation_reasoning="Fundamental estimate provided",
-            price_target=price * (1 - min(abs(gap_percentage), 0.05)),
-            price_target_reasoning="Expect move toward fundamental",
+            price_prediction_reasoning="Expect move toward fundamental",
+            price_prediction_t=price,
+            price_prediction_t1=target_price,
+            price_prediction_t2=target_price,
         )
         self.broadcast_message(round_number, {
             'valuation': decision.valuation,
-            'price_target': decision.price_target,
+            'price_prediction_t1': decision.price_prediction_t1,
             'reasoning': decision.reasoning,
         })
         return decision

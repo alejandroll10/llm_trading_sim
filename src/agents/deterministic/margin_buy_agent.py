@@ -53,6 +53,8 @@ class MarginBuyAgent(BaseAgent):
             reasoning=f"Buying {total_quantity} shares using leverage. Cash: ${available_cash:.2f}, Borrowing: ${borrowing_power:.2f}",
             valuation=100.0,
             valuation_reasoning="Margin buyer always buys",
-            price_target=price * 1.1,
-            price_target_reasoning="Target 10% above current price"
+            price_prediction_reasoning="Target 10% above current price",
+            price_prediction_t=price,
+            price_prediction_t1=price * 1.1,
+            price_prediction_t2=price * 1.1,
         )

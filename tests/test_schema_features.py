@@ -13,7 +13,6 @@ from pydantic import ValidationError
 from agents.LLMs.services.schema_features import (
     Feature,
     FeatureRegistry,
-    OrderSchema,
     TradeDecisionSchema
 )
 
@@ -75,8 +74,10 @@ class TestSchemaGeneration:
         # Check that all fields are present
         assert 'valuation_reasoning' in schema_class.model_fields
         assert 'valuation' in schema_class.model_fields
-        assert 'price_target_reasoning' in schema_class.model_fields
-        assert 'price_target' in schema_class.model_fields
+        assert 'price_prediction_reasoning' in schema_class.model_fields
+        assert 'price_prediction_t' in schema_class.model_fields
+        assert 'price_prediction_t1' in schema_class.model_fields
+        assert 'price_prediction_t2' in schema_class.model_fields
         assert 'reasoning' in schema_class.model_fields
         assert 'orders' in schema_class.model_fields
         assert 'replace_decision' in schema_class.model_fields
@@ -136,8 +137,10 @@ class TestSchemaValidation:
         decision = schema_class(
             valuation_reasoning="Stock is undervalued by 10%",
             valuation=30.0,
-            price_target_reasoning="Expecting price increase",
-            price_target=32.0,
+            price_prediction_reasoning="Expecting price increase",
+            price_prediction_t=30.5,
+            price_prediction_t1=32.0,
+            price_prediction_t2=33.0,
             reasoning="Buying because undervalued",
             orders=[{
                 'decision': 'Buy',
@@ -164,8 +167,10 @@ class TestSchemaValidation:
         decision = schema_class(
             valuation_reasoning="Stock is undervalued",
             valuation=30.0,
-            price_target_reasoning="Expecting increase",
-            price_target=32.0,
+            price_prediction_reasoning="Expecting increase",
+            price_prediction_t=30.5,
+            price_prediction_t1=32.0,
+            price_prediction_t2=33.0,
             reasoning="Buying",
             orders=[],
             replace_decision="Add"
@@ -183,8 +188,10 @@ class TestSchemaValidation:
         decision = schema_class(
             valuation_reasoning="Analysis",
             valuation=30.0,
-            price_target_reasoning="Prediction",
-            price_target=32.0,
+            price_prediction_reasoning="Prediction",
+            price_prediction_t=30.5,
+            price_prediction_t1=32.0,
+            price_prediction_t2=33.0,
             reasoning="Strategy",
             orders=[],
             replace_decision="Add",
@@ -206,8 +213,10 @@ class TestSchemaValidation:
             schema_class(
                 # Missing valuation_reasoning
                 valuation=30.0,
-                price_target_reasoning="Prediction",
-                price_target=32.0,
+                price_prediction_reasoning="Prediction",
+                price_prediction_t=30.5,
+                price_prediction_t1=32.0,
+                price_prediction_t2=33.0,
                 reasoning="Strategy",
                 orders=[],
                 replace_decision="Add"
@@ -260,16 +269,29 @@ class TestBackwardCompatibility:
 class TestOrderSchema:
     """Test that OrderSchema remains unchanged"""
 
-    def test_order_schema_fields(self):
-        """Test OrderSchema has expected fields"""
+    def test_order_schema_fields_single_stock(self):
+        """Test OrderSchema for single-stock mode has expected fields (no stock_id)"""
+        OrderSchema = FeatureRegistry.create_order_schema(is_multi_stock=False)
         assert 'decision' in OrderSchema.model_fields
         assert 'quantity' in OrderSchema.model_fields
         assert 'order_type' in OrderSchema.model_fields
         assert 'price_limit' in OrderSchema.model_fields
+        # Single-stock mode should NOT have stock_id
+        assert 'stock_id' not in OrderSchema.model_fields
+
+    def test_order_schema_fields_multi_stock(self):
+        """Test OrderSchema for multi-stock mode has stock_id field"""
+        OrderSchema = FeatureRegistry.create_order_schema(is_multi_stock=True)
+        assert 'decision' in OrderSchema.model_fields
+        assert 'quantity' in OrderSchema.model_fields
+        assert 'order_type' in OrderSchema.model_fields
+        assert 'price_limit' in OrderSchema.model_fields
+        # Multi-stock mode SHOULD have stock_id
         assert 'stock_id' in OrderSchema.model_fields
 
-    def test_order_creation(self):
-        """Test creating a valid order"""
+    def test_order_creation_multi_stock(self):
+        """Test creating a valid order in multi-stock mode"""
+        OrderSchema = FeatureRegistry.create_order_schema(is_multi_stock=True)
         order = OrderSchema(
             decision='Buy',
             quantity=100,
@@ -281,8 +303,9 @@ class TestOrderSchema:
         assert order.quantity == 100
         assert order.stock_id == 'TECH_A'
 
-    def test_order_default_stock_id(self):
-        """Test that stock_id defaults to DEFAULT_STOCK"""
+    def test_order_creation_single_stock(self):
+        """Test creating a valid order in single-stock mode (no stock_id)"""
+        OrderSchema = FeatureRegistry.create_order_schema(is_multi_stock=False)
         order = OrderSchema(
             decision='Sell',
             quantity=50,
@@ -290,7 +313,8 @@ class TestOrderSchema:
             price_limit=100.0
         )
 
-        assert order.stock_id == 'DEFAULT_STOCK'
+        assert order.decision == 'Sell'
+        assert order.quantity == 50
 
 
 if __name__ == '__main__':

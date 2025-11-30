@@ -143,47 +143,47 @@ def plot_valuation_dispersion(decisions_df: pd.DataFrame, history: List[dict]):
     return fig
 
 
-def plot_price_target_accuracy(decisions_df: pd.DataFrame, price_data: List[float]):
+def plot_price_prediction_accuracy(decisions_df: pd.DataFrame, price_data: List[float]):
     """
-    Plot agent price targets vs actual next prices.
+    Plot agent price predictions vs actual next prices.
 
     Args:
-        decisions_df: DataFrame with agent decisions including price_target
+        decisions_df: DataFrame with agent decisions including price_prediction_t1
         price_data: List of market prices
 
     Returns:
-        Matplotlib figure or None if no price target data
+        Matplotlib figure or None if no price prediction data
     """
-    if 'price_target' not in decisions_df.columns:
+    if 'price_prediction_t1' not in decisions_df.columns:
         return None
 
     fig, ax = plt.subplots(figsize=EXTRA_LARGE_FIGSIZE)
 
     # Group by round and agent_type
-    price_targets = decisions_df.groupby(['round', 'agent_type'])['price_target'].mean().unstack()
+    price_predictions = decisions_df.groupby(['round', 'agent_type'])['price_prediction_t1'].mean().unstack()
 
     # Calculate next round actual prices
     actual_next_prices = []
-    for r in price_targets.index:
+    for r in price_predictions.index:
         if r + 1 < len(price_data):
             actual_next_prices.append(price_data[r + 1])
         else:
             actual_next_prices.append(None)
 
-    # Plot each agent type's price target
-    for agent_type in price_targets.columns:
-        ax.plot(price_targets.index, price_targets[agent_type],
-               label=f'{agent_type} Target',
+    # Plot each agent type's price prediction
+    for agent_type in price_predictions.columns:
+        ax.plot(price_predictions.index, price_predictions[agent_type],
+               label=f'{agent_type} Prediction',
                linewidth=THIN_LINEWIDTH, alpha=STANDARD_ALPHA)
 
     # Plot actual next round prices
-    ax.plot(price_targets.index, actual_next_prices,
+    ax.plot(price_predictions.index, actual_next_prices,
            label='Actual Next Price',
            color='black', linewidth=STANDARD_LINEWIDTH)
 
     ax.set_xlabel('Round')
     ax.set_ylabel('Price')
-    ax.set_title('Agent Price Targets vs Actual Next Prices')
+    ax.set_title('Agent Price Predictions vs Actual Next Prices')
     ax.legend(loc='best')
     ax.grid(True, alpha=GRID_ALPHA)
 
@@ -193,28 +193,28 @@ def plot_price_target_accuracy(decisions_df: pd.DataFrame, price_data: List[floa
     return fig
 
 
-def plot_price_target_errors(decisions_df: pd.DataFrame, price_data: List[float]):
+def plot_price_prediction_errors(decisions_df: pd.DataFrame, price_data: List[float]):
     """
-    Plot price target error distribution by agent type.
+    Plot price prediction error distribution by agent type.
 
     Args:
-        decisions_df: DataFrame with agent decisions including price_target
+        decisions_df: DataFrame with agent decisions including price_prediction_t1
         price_data: List of market prices
 
     Returns:
-        Matplotlib figure or None if no price target data
+        Matplotlib figure or None if no price prediction data
     """
-    if 'price_target' not in decisions_df.columns:
+    if 'price_prediction_t1' not in decisions_df.columns:
         return None
 
     fig, ax = plt.subplots(figsize=EXTRA_LARGE_FIGSIZE)
 
     # Group by round and agent_type
-    price_targets = decisions_df.groupby(['round', 'agent_type'])['price_target'].mean().unstack()
+    price_predictions = decisions_df.groupby(['round', 'agent_type'])['price_prediction_t1'].mean().unstack()
 
     # Calculate next round actual prices
     actual_next_prices = []
-    for r in price_targets.index:
+    for r in price_predictions.index:
         if r + 1 < len(price_data):
             actual_next_prices.append(price_data[r + 1])
         else:
@@ -223,15 +223,15 @@ def plot_price_target_errors(decisions_df: pd.DataFrame, price_data: List[float]
     error_data = []
     agent_types = []
 
-    for agent_type in price_targets.columns:
-        # Calculate errors where we have both targets and actuals
+    for agent_type in price_predictions.columns:
+        # Calculate errors where we have both predictions and actuals
         errors = []
-        for r in price_targets.index:
+        for r in price_predictions.index:
             if r < len(actual_next_prices) and actual_next_prices[r] is not None:
-                target = price_targets.loc[r, agent_type]
+                prediction = price_predictions.loc[r, agent_type]
                 actual = actual_next_prices[r]
-                if not np.isnan(target) and not np.isnan(actual):
-                    errors.append(abs(target - actual) / actual * 100)  # Percent error
+                if not np.isnan(prediction) and not np.isnan(actual):
+                    errors.append(abs(prediction - actual) / actual * 100)  # Percent error
 
         if errors:
             error_data.append(errors)
@@ -240,7 +240,7 @@ def plot_price_target_errors(decisions_df: pd.DataFrame, price_data: List[float]
     if error_data:
         ax.boxplot(error_data, labels=agent_types)
         ax.set_ylabel('Absolute Percent Error (%)')
-        ax.set_title('Price Target Accuracy by Agent Type')
+        ax.set_title('Price Prediction Accuracy by Agent Type')
         ax.grid(True, alpha=GRID_ALPHA)
         plt.xticks(rotation=45)
 

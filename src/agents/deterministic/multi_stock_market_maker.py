@@ -56,8 +56,10 @@ class MultiStockMarketMaker(BaseAgent):
         return TradeDecision(
             valuation_reasoning="Market maker providing liquidity",
             valuation=0.0,
-            price_target_reasoning="N/A",
-            price_target=0.0,
+            price_prediction_reasoning="N/A",
+            price_prediction_t=0.0,
+            price_prediction_t1=0.0,
+            price_prediction_t2=0.0,
             orders=orders,
             reasoning=f"Market maker placed {len(orders)} orders for liquidity",
             replace_decision="Replace"

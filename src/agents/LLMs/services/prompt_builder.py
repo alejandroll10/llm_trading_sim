@@ -181,7 +181,7 @@ Your entire current strategy will be replaced with whatever you write in prompt_
 
         Args:
             last_reasoning: Dict with 'round', 'reasoning', 'valuation_reasoning',
-                          'price_target_reasoning' keys
+                          'price_prediction_reasoning' keys
 
         Returns:
             Formatted string showing last round's reasoning, or empty if none
@@ -192,7 +192,7 @@ Your entire current strategy will be replaced with whatever you write in prompt_
         round_num = last_reasoning.get('round', '?')
         reasoning = last_reasoning.get('reasoning', '')
         valuation_reasoning = last_reasoning.get('valuation_reasoning', '')
-        price_target_reasoning = last_reasoning.get('price_target_reasoning', '')
+        price_prediction_reasoning = last_reasoning.get('price_prediction_reasoning', '')
 
         lines = ["\n\n=== YOUR LAST ROUND REASONING ==="]
         lines.append(f"(Round {round_num})")
@@ -200,8 +200,8 @@ Your entire current strategy will be replaced with whatever you write in prompt_
 
         if valuation_reasoning:
             lines.append(f"Valuation: {valuation_reasoning}")
-        if price_target_reasoning:
-            lines.append(f"Price Target: {price_target_reasoning}")
+        if price_prediction_reasoning:
+            lines.append(f"Price Predictions: {price_prediction_reasoning}")
         if reasoning:
             lines.append(f"Decision: {reasoning}")
 

@@ -34,7 +34,7 @@ class LLMAgent(BaseAgent):
         self.enabled_features = enabled_features if enabled_features is not None else FeatureRegistry.get_all_features()
 
         # Store last round's reasoning for continuity (always enabled)
-        self.last_reasoning: Dict[str, Any] = {}  # {round, reasoning, valuation_reasoning, price_target_reasoning}
+        self.last_reasoning: Dict[str, Any] = {}  # {round, reasoning, valuation_reasoning, price_prediction_reasoning}
 
         # Conditionally initialize memory based on feature flags
         if Feature.MEMORY in self.enabled_features:
@@ -141,7 +141,7 @@ class LLMAgent(BaseAgent):
                 'round': round_number,
                 'reasoning': response.decision.get('reasoning', ''),
                 'valuation_reasoning': response.decision.get('valuation_reasoning', ''),
-                'price_target_reasoning': response.decision.get('price_target_reasoning', ''),
+                'price_prediction_reasoning': response.decision.get('price_prediction_reasoning', ''),
             }
 
             # Store memory notes with validation (only if memory feature enabled)

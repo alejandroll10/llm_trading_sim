@@ -307,16 +307,16 @@ class PlotGenerator:
                 save_plot(fig, 'valuation_dispersion', self.scenario_name,
                          self.dated_plots_dir, self.scenario_plots_dir)
 
-            # Price target accuracy
-            fig = valuation_plots.plot_price_target_accuracy(decisions_df, price_data)
+            # Price prediction accuracy
+            fig = valuation_plots.plot_price_prediction_accuracy(decisions_df, price_data)
             if fig:
-                save_plot(fig, 'price_target_accuracy', self.scenario_name,
+                save_plot(fig, 'price_prediction_accuracy', self.scenario_name,
                          self.dated_plots_dir, self.scenario_plots_dir)
 
-            # Price target errors
-            fig = valuation_plots.plot_price_target_errors(decisions_df, price_data)
+            # Price prediction errors
+            fig = valuation_plots.plot_price_prediction_errors(decisions_df, price_data)
             if fig:
-                save_plot(fig, 'price_target_errors', self.scenario_name,
+                save_plot(fig, 'price_prediction_errors', self.scenario_name,
                          self.dated_plots_dir, self.scenario_plots_dir)
 
         except Exception as e:

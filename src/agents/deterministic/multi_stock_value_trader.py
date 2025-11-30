@@ -81,8 +81,10 @@ class MultiStockValueTrader(BaseAgent):
         return TradeDecision(
             valuation_reasoning="Value-based strategy across multiple stocks",
             valuation=0.0,  # Not applicable for multi-stock
-            price_target_reasoning="Target based on fundamentals",
-            price_target=0.0,  # Not applicable for multi-stock
+            price_prediction_reasoning="Target based on fundamentals",
+            price_prediction_t=0.0,  # Not applicable for multi-stock
+            price_prediction_t1=0.0,
+            price_prediction_t2=0.0,
             orders=orders,
             reasoning=reasoning,
             replace_decision="Replace"  # Cancel old orders, place new ones

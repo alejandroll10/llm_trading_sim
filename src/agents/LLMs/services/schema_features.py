@@ -95,8 +95,10 @@ class FeatureRegistry:
         return {
             'valuation_reasoning': (str, Field(..., description="Brief numerical calculation of valuation analysis")),
             'valuation': (float, Field(..., description="Agent's estimated fundamental value")),
-            'price_target_reasoning': (str, Field(..., description="Specific reasoning of expected price next round")),
-            'price_target': (float, Field(..., description="Agent's predicted price in near future")),
+            'price_prediction_reasoning': (str, Field(..., description="Brief reasoning for your price predictions for the next 3 rounds")),
+            'price_prediction_t': (float, Field(..., description="Your predicted average transaction price for THIS round")),
+            'price_prediction_t1': (float, Field(..., description="Your predicted average transaction price for NEXT round")),
+            'price_prediction_t2': (float, Field(..., description="Your predicted average transaction price for the round AFTER next")),
             'reasoning': (str, Field(..., description="Your strategy and reasoning for this trade - decide BEFORE specifying orders")),
             'orders': (List[OrderSchema], Field(..., description="List of orders to execute")),
             'replace_decision': (str, Field(..., description="Add, Cancel, or Replace")),

@@ -68,6 +68,8 @@ class BuyTrader(BaseAgent):
             reasoning=f"Price ${price:.2f}, placing orders at +1% and -1% levels",
             valuation=100.0,  # Replace with your actual valuation logic
             valuation_reasoning="Basic buy valuation based on current market conditions",
-            price_target=105.0,  # Replace with your actual price target logic
-            price_target_reasoning="Target price determined by historical growth patterns"
+            price_prediction_reasoning="Target price determined by historical growth patterns",
+            price_prediction_t=price,
+            price_prediction_t1=price * 1.05,
+            price_prediction_t2=price * 1.05,
         )

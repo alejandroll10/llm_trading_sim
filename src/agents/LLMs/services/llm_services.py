@@ -62,8 +62,10 @@ class LLMService:
             decision_dict = {
                 "valuation_reasoning": "LLM Hold Agent: Always hold strategy",
                 "valuation": 0,
-                "price_target": 0,
-                "price_target_reasoning": "LLM Hold Agent: Always hold strategy",
+                "price_prediction_reasoning": "LLM Hold Agent: Always hold strategy",
+                "price_prediction_t": 0,
+                "price_prediction_t1": 0,
+                "price_prediction_t2": 0,
                 "orders": [],  # Empty list for hold
                 "replace_decision": "Add",
                 "reasoning": "LLM Hold Agent: Always hold strategy",
@@ -157,8 +159,10 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
             decision_dict = {
                 "valuation_reasoning": parsed_response.valuation_reasoning,
                 "valuation": parsed_response.valuation,
-                "price_target_reasoning": parsed_response.price_target_reasoning,
-                "price_target": parsed_response.price_target,
+                "price_prediction_reasoning": parsed_response.price_prediction_reasoning,
+                "price_prediction_t": parsed_response.price_prediction_t,
+                "price_prediction_t1": parsed_response.price_prediction_t1,
+                "price_prediction_t2": parsed_response.price_prediction_t2,
                 "orders": orders,
                 "replace_decision": parsed_response.replace_decision,
                 "reasoning": parsed_response.reasoning,
@@ -198,8 +202,10 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
         fallback = {
             "valuation_reasoning": "Fallback decision due to parsing error",
             "valuation": 0,
-            "price_target": 0,
-            "price_target_reasoning": "Fallback decision due to parsing error",
+            "price_prediction_reasoning": "Fallback decision due to parsing error",
+            "price_prediction_t": 0,
+            "price_prediction_t1": 0,
+            "price_prediction_t2": 0,
             "orders": [],  # Empty list for hold
             "replace_decision": "Add",
             "reasoning": "Fallback decision due to parsing error",

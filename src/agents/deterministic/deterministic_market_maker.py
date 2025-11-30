@@ -113,6 +113,8 @@ class DeterministicMarketMaker(BaseAgent):
             reasoning=reasoning,
             valuation=fundamental,
             valuation_reasoning="Based on provided fundamental value",
-            price_target=fundamental,
-            price_target_reasoning="Target is aligned with fundamental value"
+            price_prediction_reasoning="Target is aligned with fundamental value",
+            price_prediction_t=fundamental,
+            price_prediction_t1=fundamental,
+            price_prediction_t2=fundamental,
         ) 

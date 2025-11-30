@@ -43,8 +43,10 @@ class TradeDecision(BaseModel):
     Fields:
         valuation_reasoning: Explanation of valuation analysis (separate from trade reasoning)
         valuation: Agent's estimated fundamental value of the asset
-        price_target_reasoning: Explanation for the price target
-        price_target: Agent's predicted price in the next round
+        price_prediction_reasoning: Explanation for price predictions
+        price_prediction_t: Predicted average transaction price for THIS round
+        price_prediction_t1: Predicted average transaction price for NEXT round
+        price_prediction_t2: Predicted average transaction price for round after next
         reasoning: Explanation for the trading decision (comes before orders for better chain-of-thought)
         orders: List of individual orders
         replace_decision: How to handle existing orders
@@ -59,8 +61,10 @@ class TradeDecision(BaseModel):
     """
     valuation_reasoning: str
     valuation: float
-    price_target_reasoning: str
-    price_target: float
+    price_prediction_reasoning: str
+    price_prediction_t: float
+    price_prediction_t1: float
+    price_prediction_t2: float
     reasoning: str
     orders: List[OrderDetails] = []
     replace_decision: Literal["Cancel", "Replace", "Add"] = "Replace"

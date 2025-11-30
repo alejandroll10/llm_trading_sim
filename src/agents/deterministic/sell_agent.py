@@ -57,6 +57,8 @@ class SellTrader(BaseAgent):
             reasoning=f"Price ${price:.2f}, always sell",
             valuation=price * 0.9,  # Example: value it 10% below current price
             valuation_reasoning="Basic sell valuation based on current market conditions",
-            price_target=price * 0.95,  # Example: expect price to drop 5%
-            price_target_reasoning="Target price determined by expected market movement"
+            price_prediction_reasoning="Target price determined by expected market movement",
+            price_prediction_t=price,
+            price_prediction_t1=price * 0.95,
+            price_prediction_t2=price * 0.95,
         )

@@ -51,8 +51,10 @@ class MultiStockShortSeller(BaseAgent):
         return TradeDecision(
             valuation_reasoning="Short overvalued stocks to build positions for margin testing",
             valuation=0.0,
-            price_target_reasoning="N/A",
-            price_target=0.0,
+            price_prediction_reasoning="N/A",
+            price_prediction_t=0.0,
+            price_prediction_t1=0.0,
+            price_prediction_t2=0.0,
             orders=orders,
             reasoning=f"Placed {len(orders)} short sell orders across stocks",
             replace_decision="Replace"
