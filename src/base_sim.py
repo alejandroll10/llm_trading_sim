@@ -252,6 +252,12 @@ class BaseSimulation:
                 redemption_value=self.context.redemption_value
             ) if dividend_params else None
 
+        # Initialize dividend shock structure (for systematic vs idiosyncratic shocks)
+        # Can be configured at the agent_params level or individually per stock
+        self.shock_config = agent_params.get('shock_structure', {}) if agent_params else {}
+        self.shock_enabled = self.shock_config.get('enabled', False)
+        self._current_round_shocks = None  # Stores shocks for current round (for data recording)
+
         # Initialize interest service
         self.interest_service = InterestService(
             agent_repository=self.agent_repository,
@@ -598,6 +604,62 @@ class BaseSimulation:
                 LoggingService.log_simulation(f"Failed to save final data: {str(e)}")
        # Clean up expired orders at end of round
 
+    def _generate_dividend_shocks(self) -> dict:
+        """Generate systematic and style-level dividend shocks for the current round.
+
+        Shocks are drawn from normal distributions with volatilities configured in shock_config.
+        - Systematic shock: affects all stocks (drawn once per round)
+        - Style shocks: affect stocks within the same style category (drawn once per style)
+
+        Returns:
+            dict with 'systematic' (float) and 'styles' (dict of style -> shock)
+        """
+        if not self.shock_enabled:
+            return {'systematic': 0.0, 'styles': {}}
+
+        # Draw systematic shock (affects all stocks)
+        systematic_volatility = self.shock_config.get('systematic_volatility', 0.0)
+        systematic_shock = random.gauss(0, systematic_volatility) if systematic_volatility > 0 else 0.0
+
+        # Draw style-level shocks (affects stocks in same style)
+        style_shocks = {}
+        style_config = self.shock_config.get('styles', {})
+        for style, config in style_config.items():
+            vol = config.get('volatility', 0.0) if isinstance(config, dict) else config
+            style_shocks[style] = random.gauss(0, vol) if vol > 0 else 0.0
+
+        shocks = {
+            'systematic': systematic_shock,
+            'styles': style_shocks
+        }
+
+        self.logger.info(
+            f"Generated dividend shocks: systematic={systematic_shock:.4f}, "
+            f"styles={style_shocks}"
+        )
+
+        return shocks
+
+    def _get_stock_style(self, stock_id: str) -> Optional[str]:
+        """Get the style category for a stock (for shock lookup).
+
+        Args:
+            stock_id: The stock identifier
+
+        Returns:
+            Style string if configured, None otherwise
+        """
+        if not self.is_multi_stock or not self.stock_configs:
+            return None
+
+        stock_config = self.stock_configs.get(stock_id, {})
+        # Style can be in DIVIDEND_PARAMS or at stock level
+        style = stock_config.get('style')
+        if style is None:
+            dividend_params = stock_config.get('DIVIDEND_PARAMS', {})
+            style = dividend_params.get('style')
+        return style
+
     def _cancel_all_orders_for_stock(self, stock_id: str):
         """Cancel all orders for a specific stock (used during final redemption)"""
         # Get the correct order book for this stock
@@ -868,6 +930,11 @@ class BaseSimulation:
         # Check if this is final redemption round
         is_final_round = round_number == self.context._num_rounds - 1 and not self.infinite_rounds
 
+        # Generate dividend shocks ONCE for this round (before processing any stocks)
+        # This ensures systematic shock is the same for all stocks
+        shocks = self._generate_dividend_shocks()
+        self._current_round_shocks = shocks  # Store for data recording
+
         if self.is_multi_stock:
             # Multi-stock: Let each manager handle end-of-round processing
             total_payments = 0.0
@@ -878,19 +945,27 @@ class BaseSimulation:
                     self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
                     self._cancel_all_orders_for_stock(stock_id)
 
+                # Get the style-specific shock for this stock
+                stock_style = self._get_stock_style(stock_id)
+                style_shock = shocks['styles'].get(stock_style, 0.0) if stock_style else 0.0
+
                 # Manager.update() with is_round_end=True handles all end-of-round processing
                 # Pass THIS stock's volume, not the aggregated total
                 stock_volume = stock_market_results[stock_id].volume
                 manager.update(
                     round_number=round_number,
                     last_volume=stock_volume,
-                    is_round_end=True
+                    is_round_end=True,
+                    systematic_shock=shocks['systematic'],
+                    style_shock=style_shock
                 )
                 manager.update_market_depth()
 
                 # Aggregate total payments from all stocks for logging
+                # dividend_history now contains DividendRealization objects
                 if manager.dividend_service and manager.dividend_service.dividend_history:
-                    stock_payment = manager.dividend_service.dividend_history[-1]
+                    last_realization = manager.dividend_service.dividend_history[-1]
+                    stock_payment = last_realization.total_dividend
                     total_payments += stock_payment
                     self.logger.info(f"  {stock_id} dividend payment: ${stock_payment:.2f}")
 
@@ -904,10 +979,13 @@ class BaseSimulation:
                 self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
                 self._cancel_all_orders_for_stock(stock_id)
 
+            # For single stock, pass systematic shock (no style shock)
             self.market_state_manager.update(
                 round_number=round_number,
                 last_volume=market_result.volume,
-                is_round_end=True
+                is_round_end=True,
+                systematic_shock=shocks['systematic'],
+                style_shock=0.0  # Single stock doesn't use style shocks
             )
             self.market_state_manager.update_market_depth()
 
@@ -961,12 +1039,16 @@ class BaseSimulation:
             # Multi-stock: Aggregate dividends from all stocks
             last_paid_dividend = 0.0
             dividends_by_stock = {}  # Track per-stock for detailed recording
+            realizations_by_stock = {}  # Track full realizations for shock logging
 
             for stock_id, manager in self.market_state_managers.items():
                 if manager.dividend_service and manager.dividend_service.dividend_history:
                     # Get last paid dividend for this stock
-                    stock_dividend = manager.dividend_service.dividend_history[-1]
+                    # dividend_history now contains DividendRealization objects
+                    last_realization = manager.dividend_service.dividend_history[-1]
+                    stock_dividend = last_realization.total_dividend
                     dividends_by_stock[stock_id] = stock_dividend
+                    realizations_by_stock[stock_id] = last_realization
                     last_paid_dividend += stock_dividend
                     self.logger.debug(f"Stock {stock_id} last dividend: ${stock_dividend:.2f}")
                 else:
@@ -983,11 +1065,12 @@ class BaseSimulation:
                     f"sum(dividends_by_stock)={expected_total:.6f}"
                 )
 
-            # Record per-stock dividends for analytics
+            # Record per-stock dividends for analytics (including shock breakdowns)
             if dividends_by_stock:
                 self.data_recorder.record_multi_stock_dividends(
                     round_number=round_number,
-                    dividends_by_stock=dividends_by_stock
+                    dividends_by_stock=dividends_by_stock,
+                    realizations_by_stock=realizations_by_stock
                 )
         else:
             # Single-stock: Original behavior

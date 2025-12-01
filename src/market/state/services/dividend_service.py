@@ -22,18 +22,70 @@ class DividendInfo:
     max_dividend: float
     min_dividend: float
     destination: PaymentDestination
+    # Factor loadings for shock structure (defaults for backwards compatibility)
+    systematic_beta: float = 1.0
+    style_gamma: float = 1.0
+
+@dataclass
+class DividendRealization:
+    """Record of a dividend payment including shock components"""
+    total_dividend: float
+    base_component: float
+    idiosyncratic_component: float
+    systematic_shock: float = 0.0
+    style_shock: float = 0.0
+    systematic_contribution: float = 0.0  # beta * systematic_shock
+    style_contribution: float = 0.0  # gamma * style_shock
 class DividendCalculator:
     """Pure calculation logic - no state"""
     def __init__(self, dividend_params: dict):
         if not dividend_params:
             raise ValueError("dividend_params is required")
         self.model = dividend_params
-        
-    def calculate_dividend(self) -> float:
-        """Calculate actual dividend payment"""
-        if random.random() < self.model['dividend_probability']:
-            return self.model['base_dividend'] + self.model['dividend_variation']
-        return self.model['base_dividend'] - self.model['dividend_variation']
+
+    def calculate_dividend(self, systematic_shock: float = 0.0, style_shock: float = 0.0) -> DividendRealization:
+        """Calculate actual dividend payment with optional factor shocks.
+
+        Dividend structure:
+            dividend = base + beta * systematic_shock + gamma * style_shock + idiosyncratic
+
+        Args:
+            systematic_shock: Market-wide shock affecting all stocks (drawn once per round)
+            style_shock: Style-level shock affecting stocks in same category (drawn once per style per round)
+
+        Returns:
+            DividendRealization with total dividend and component breakdown
+        """
+        base = self.model['base_dividend']
+        variation = self.model['dividend_variation']
+        prob = self.model['dividend_probability']
+
+        # Factor loadings (default to 1.0 for backwards compatibility)
+        beta = self.model.get('systematic_beta', 1.0)
+        gamma = self.model.get('style_gamma', 1.0)
+
+        # Idiosyncratic component (existing stochastic logic)
+        if random.random() < prob:
+            idio = variation
+        else:
+            idio = -variation
+
+        # Calculate contributions from each factor
+        systematic_contribution = beta * systematic_shock
+        style_contribution = gamma * style_shock
+
+        # Total dividend
+        total = base + systematic_contribution + style_contribution + idio
+
+        return DividendRealization(
+            total_dividend=total,
+            base_component=base,
+            idiosyncratic_component=idio,
+            systematic_shock=systematic_shock,
+            style_shock=style_shock,
+            systematic_contribution=systematic_contribution,
+            style_contribution=style_contribution
+        )
 
     def should_pay_dividends(self, round_number: int) -> bool:
         """Pure function to determine payment rounds"""
@@ -44,7 +96,7 @@ class DividendCalculator:
         base = self.model['base_dividend']
         variation = self.model['dividend_variation']
         prob = self.model['dividend_probability']
-        
+
         expected = prob * (base + variation) + (1 - prob) * (base - variation)
         destination = self.model['destination']
         return DividendInfo(
@@ -55,7 +107,9 @@ class DividendCalculator:
             expected_dividend=expected,
             max_dividend=base + variation,
             min_dividend=base - variation,
-            destination=destination
+            destination=destination,
+            systematic_beta=self.model.get('systematic_beta', 1.0),
+            style_gamma=self.model.get('style_gamma', 1.0)
         )
 
 class DividendPaymentProcessor:
@@ -202,11 +256,13 @@ class DividendService:
         self.calculator = DividendCalculator(dividend_params)
         self.payment_processor = DividendPaymentProcessor(agent_repository, logger, stock_id)
         self.stock_id = stock_id
-        self.dividend_history = []
+        self.dividend_history = []  # List of DividendRealization objects
         self.redemption_value = redemption_value
         self.current_round = 0
         self._should_pay_this_round = False
-        
+        # Store style for this stock (used for shock lookups)
+        self.style = dividend_params.get('style', None)
+
         try:
             self.dividend_destination = PaymentDestination.from_string(
                 dividend_params.get('destination', 'dividend')
@@ -215,33 +271,76 @@ class DividendService:
             LoggingService.get_logger('dividend').warning(f"{e}, defaulting to dividend account")
             self.dividend_destination = PaymentDestination.DIVIDEND_ACCOUNT
 
-    def process_dividend_payments(self, round_number: int) -> DividendPaymentResult:
-        """Process dividend payments for the current round"""
-        dividend = self.calculator.calculate_dividend()
-        self.dividend_history.append(dividend)
+    def process_dividend_payments(
+        self,
+        round_number: int,
+        systematic_shock: float = 0.0,
+        style_shock: float = 0.0
+    ) -> DividendPaymentResult:
+        """Process dividend payments for the current round.
+
+        Args:
+            round_number: Current simulation round
+            systematic_shock: Market-wide shock (same for all stocks)
+            style_shock: Style-level shock (same for stocks in same style)
+
+        Returns:
+            DividendPaymentResult with payment details
+        """
+        realization = self.calculator.calculate_dividend(
+            systematic_shock=systematic_shock,
+            style_shock=style_shock
+        )
+        self.dividend_history.append(realization)
+
+        LoggingService.get_logger('dividend').info(
+            f"Dividend for {self.stock_id}: {realization.total_dividend:.4f} "
+            f"(base={realization.base_component:.2f}, idio={realization.idiosyncratic_component:.2f}, "
+            f"sys={realization.systematic_contribution:.4f}, style={realization.style_contribution:.4f})"
+        )
+
         return self.payment_processor._process_dividend_payment(
-            dividend, 
-            self.dividend_destination, 
+            realization.total_dividend,
+            self.dividend_destination,
             round_number
         )
 
-    def process_round_end(self, round_number: int, is_final_round: bool) -> Optional[DividendPaymentResult]:
-        """Handle end-of-round processing"""
+    def process_round_end(
+        self,
+        round_number: int,
+        is_final_round: bool,
+        systematic_shock: float = 0.0,
+        style_shock: float = 0.0
+    ) -> Optional[DividendPaymentResult]:
+        """Handle end-of-round processing.
 
-        self.current_round = round_number  # Update round number
+        Args:
+            round_number: Current simulation round
+            is_final_round: Whether this is the final round (triggers redemption)
+            systematic_shock: Market-wide shock for dividend calculation
+            style_shock: Style-level shock for dividend calculation
+
+        Returns:
+            DividendPaymentResult if payments were made, None otherwise
+        """
+        self.current_round = round_number
         LoggingService.get_logger('dividend').info(f"Processing round end {round_number}")
 
         if self.calculator.should_pay_dividends(round_number) and not is_final_round:
             LoggingService.get_logger('dividend').info(f"Processing dividend payment for round {round_number}")
-            return self.process_dividend_payments(round_number)
-        
+            return self.process_dividend_payments(
+                round_number,
+                systematic_shock=systematic_shock,
+                style_shock=style_shock
+            )
+
         if is_final_round and self.redemption_value is not None:
             LoggingService.get_logger('dividend').info(f"Processing redemption for final round {round_number}")
             return self.payment_processor.process_redemption(
                 redemption_value=self.redemption_value,
                 round_number=round_number
             )
-        
+
         LoggingService.get_logger('dividend').info(f"No dividend or redemption for round {round_number}")
         return None
 
@@ -255,15 +354,24 @@ class DividendService:
         self.current_round = round_number
         self._should_pay_this_round = self.calculator.should_pay_dividends(round_number)
 
+    def get_last_realization(self) -> Optional[DividendRealization]:
+        """Get the most recent dividend realization with all components."""
+        return self.dividend_history[-1] if self.dividend_history else None
+
     def get_state(self) -> dict:
         """Single source of truth for dividend state"""
         model_info = self.calculator.get_model_info()
-        last_paid = self.dividend_history[-1] if self.dividend_history else None
-        
+        last_realization = self.get_last_realization()
+
+        # For backwards compatibility, extract total_dividend as float
+        last_paid = last_realization.total_dividend if last_realization else None
+
         return {
             'model': model_info,
             'last_paid_dividend': last_paid,
+            'last_realization': last_realization,  # Full breakdown for new consumers
             'redemption_value': self.redemption_value,
             'next_payment_round': self._get_next_payment_round(),
-            'should_pay': self._should_pay_this_round
+            'should_pay': self._should_pay_this_round,
+            'style': self.style
         }

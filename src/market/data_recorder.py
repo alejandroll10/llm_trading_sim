@@ -309,7 +309,7 @@ class DataRecorder:
             })
 
     def _record_dividend_data(self, round_number: int, market_state: dict, timestamp: str):
-        """Record dividend model state and realizations"""
+        """Record dividend model state and realizations including shock components"""
         if round_number == 0:
             return
 
@@ -327,13 +327,26 @@ class DataRecorder:
         model_info = dividend_state['model']  # This is a DividendInfo object
         last_paid = round(dividend_state.get('last_paid_dividend', 0.0), 2)  # Round to 2 decimals
 
+        # Get shock components from the last realization (if available)
+        last_realization = dividend_state.get('last_realization')
+        shock_data = {}
+        if last_realization:
+            shock_data = {
+                'systematic_shock': round(last_realization.systematic_shock, 6),
+                'style_shock': round(last_realization.style_shock, 6),
+                'systematic_contribution': round(last_realization.systematic_contribution, 6),
+                'style_contribution': round(last_realization.style_contribution, 6),
+                'idiosyncratic_component': round(last_realization.idiosyncratic_component, 4),
+                'base_component': round(last_realization.base_component, 4),
+            }
+
         # Calculate actual total cash paid from payment_history (avoids timing issues)
         total_cash_paid = calculate_total_dividend_cash(
             self.agent_repository,
             round_number
         )
 
-        self.dividend_data.append({
+        record = {
             'round': round_number + 1,
             'timestamp': timestamp,
             'last_paid_dividend': last_paid,
@@ -342,15 +355,28 @@ class DataRecorder:
             'next_payment_round': dividend_state.get('next_payment_round', 0),
             'should_pay': dividend_state.get('should_pay', False),
             'price': round(self.context.current_price, 2),
-            'total_dividend_payment': round(total_cash_paid, 2) if dividend_state.get('should_pay', False) else 0
-        })
+            'total_dividend_payment': round(total_cash_paid, 2) if dividend_state.get('should_pay', False) else 0,
+            'style': dividend_state.get('style'),
+            'systematic_beta': model_info.systematic_beta,
+            'style_gamma': model_info.style_gamma,
+        }
+        # Add shock data if available
+        record.update(shock_data)
+        self.dividend_data.append(record)
 
-    def record_multi_stock_dividends(self, round_number: int, dividends_by_stock: Dict[str, float]):
+    def record_multi_stock_dividends(
+        self,
+        round_number: int,
+        dividends_by_stock: Dict[str, float],
+        realizations_by_stock: Dict[str, Any] = None
+    ):
         """Record per-stock dividend information for multi-stock scenarios.
 
         Args:
             round_number: Current simulation round
             dividends_by_stock: Dict mapping stock_id to dividend per-share amount paid
+            realizations_by_stock: Optional dict mapping stock_id to DividendRealization objects
+                                   (contains shock component breakdown)
         """
         timestamp = datetime.now().isoformat()
         total_aggregated_dividend = sum(dividends_by_stock.values())
@@ -377,7 +403,7 @@ class DataRecorder:
 
         # Record per-stock dividends for detailed analytics
         for stock_id, dividend in dividends_by_stock.items():
-            self.dividend_data.append({
+            record = {
                 'round': round_number + 1,
                 'timestamp': timestamp,
                 'stock_id': stock_id,
@@ -387,7 +413,21 @@ class DataRecorder:
                 'total_dividend_payment': round(stock_cash_paid[stock_id], 2),  # Actual cash paid from payment_history
                 'is_multi_stock': True,
                 'is_per_stock_detail': True  # Flag to distinguish from aggregate
-            })
+            }
+
+            # Add shock component breakdown if realization available
+            if realizations_by_stock and stock_id in realizations_by_stock:
+                realization = realizations_by_stock[stock_id]
+                record.update({
+                    'systematic_shock': round(realization.systematic_shock, 6),
+                    'style_shock': round(realization.style_shock, 6),
+                    'systematic_contribution': round(realization.systematic_contribution, 6),
+                    'style_contribution': round(realization.style_contribution, 6),
+                    'idiosyncratic_component': round(realization.idiosyncratic_component, 4),
+                    'base_component': round(realization.base_component, 4),
+                })
+
+            self.dividend_data.append(record)
 
     def record_social_message(self, round_number: int, agent_id: str, message: str):
         """Record a social media post from an agent"""

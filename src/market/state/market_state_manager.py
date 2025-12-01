@@ -59,7 +59,15 @@ class MarketStateManager:
         return self.component_manager.borrow_service
 
 
-    def update(self, round_number: int, last_volume: float = 0, is_round_end: bool = False, skip_distribution: bool = False):
+    def update(
+        self,
+        round_number: int,
+        last_volume: float = 0,
+        is_round_end: bool = False,
+        skip_distribution: bool = False,
+        systematic_shock: float = 0.0,
+        style_shock: float = 0.0
+    ):
         LoggingService.get_logger('simulation').info(f"Updating market state for round {round_number}, is_round_end: {is_round_end}")
         # 1. Update all market state components first
         self._update_market_components(round_number, last_volume)
@@ -68,9 +76,13 @@ class MarketStateManager:
         if not is_round_end and not skip_distribution:
             self._distribute_market_information(round_number)
 
-        # 3. Handle end-of-round if needed
+        # 3. Handle end-of-round if needed (pass shocks for dividend calculation)
         if is_round_end:
-            self._process_end_of_round(round_number)
+            self._process_end_of_round(
+                round_number,
+                systematic_shock=systematic_shock,
+                style_shock=style_shock
+            )
 
         # 4. Return final state
         return self._get_current_market_state(round_number, last_volume)
@@ -101,8 +113,19 @@ class MarketStateManager:
         # Distribute information
         self.information_service.distribute_information(round_number)
 
-    def _process_end_of_round(self, round_number: int):
-        """Handle end-of-round payments and processing"""
+    def _process_end_of_round(
+        self,
+        round_number: int,
+        systematic_shock: float = 0.0,
+        style_shock: float = 0.0
+    ):
+        """Handle end-of-round payments and processing.
+
+        Args:
+            round_number: Current simulation round
+            systematic_shock: Market-wide dividend shock (same for all stocks)
+            style_shock: Style-level dividend shock (same for stocks in same style)
+        """
         LoggingService.get_logger('simulation').info(f"Processing end-of-round payments for round {round_number}")
         is_final_round = round_number == self.context._num_rounds - 1 and not self.context.infinite_rounds
         if is_final_round:
@@ -124,11 +147,14 @@ class MarketStateManager:
             if borrow_result.total_fee > 0:
                 self.context.record_borrow_fee_payment(borrow_result.total_fee, round_number)
 
-        # 3. Process dividend payments if needed
+        # 3. Process dividend payments if needed (with shock components)
         if self.component_manager.dividend_service:
             LoggingService.get_logger('simulation').info(f"Processing dividend payments for round {round_number}")
             payment_result = self.component_manager.dividend_service.process_round_end(
-                round_number, is_final_round
+                round_number,
+                is_final_round,
+                systematic_shock=systematic_shock,
+                style_shock=style_shock
             )
             LoggingService.get_logger('simulation').info(f"Payment result: {payment_result}")
             if payment_result:  # Only process if payments were made

@@ -580,4 +580,324 @@ SCENARIOS = {
             }
         }
     ),
+
+    # =========================================================================
+    # DIVIDEND SHOCK SCENARIOS (Issue #86)
+    # Test systematic vs idiosyncratic dividend shocks
+    # =========================================================================
+
+    "systematic_shock_test": SimulationScenario(
+        name="systematic_shock_test",
+        description="All stocks receive same systematic dividend shock - tests market-wide correlation",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "IS_MULTI_STOCK": True,
+            "HIDE_FUNDAMENTAL_PRICE": False,
+            "STOCKS": {
+                "STOCK_A": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "common",  # All stocks same style
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.5,
+                        'destination': 'dividend',
+                        'systematic_beta': 1.0,  # Full exposure to systematic shock
+                        'style_gamma': 0.0,  # No style exposure
+                        'style': 'common',
+                    }
+                },
+                "STOCK_B": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "common",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.5,
+                        'destination': 'dividend',
+                        'systematic_beta': 1.0,
+                        'style_gamma': 0.0,
+                        'style': 'common',
+                    }
+                },
+                "STOCK_C": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "common",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.5,
+                        'destination': 'dividend',
+                        'systematic_beta': 1.0,
+                        'style_gamma': 0.0,
+                        'style': 'common',
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH * 3,
+                'initial_positions': {
+                    "STOCK_A": 3333,
+                    "STOCK_B": 3333,
+                    "STOCK_C": 3334
+                },
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'hold_trader': 5  # Passive agents to observe dividend patterns
+                },
+                # Shock structure configuration
+                'shock_structure': {
+                    'enabled': True,
+                    'systematic_volatility': 1.0,  # Large systematic shocks
+                    'styles': {}  # No style-level shocks
+                },
+                'interest_model': {
+                    'rate': 0.05,
+                    'compound_frequency': 1
+                }
+            }
+        }
+    ),
+
+    "style_shock_test": SimulationScenario(
+        name="style_shock_test",
+        description="Stocks grouped by style - within-style correlation, cross-style independence",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "IS_MULTI_STOCK": True,
+            "HIDE_FUNDAMENTAL_PRICE": False,
+            "STOCKS": {
+                "TECH_A": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "tech",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.2,
+                        'destination': 'dividend',
+                        'systematic_beta': 0.0,  # No systematic exposure
+                        'style_gamma': 1.0,  # Full style exposure
+                        'style': 'tech',
+                    }
+                },
+                "TECH_B": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "tech",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.2,
+                        'destination': 'dividend',
+                        'systematic_beta': 0.0,
+                        'style_gamma': 1.0,
+                        'style': 'tech',
+                    }
+                },
+                "PHARMA_A": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "pharma",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.2,
+                        'destination': 'dividend',
+                        'systematic_beta': 0.0,
+                        'style_gamma': 1.0,
+                        'style': 'pharma',
+                    }
+                },
+                "PHARMA_B": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "pharma",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.2,
+                        'destination': 'dividend',
+                        'systematic_beta': 0.0,
+                        'style_gamma': 1.0,
+                        'style': 'pharma',
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH * 4,
+                'initial_positions': {
+                    "TECH_A": 2500,
+                    "TECH_B": 2500,
+                    "PHARMA_A": 2500,
+                    "PHARMA_B": 2500
+                },
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'hold_trader': 5
+                },
+                'shock_structure': {
+                    'enabled': True,
+                    'systematic_volatility': 0.0,  # No systematic shocks
+                    'styles': {
+                        'tech': {'volatility': 0.8},
+                        'pharma': {'volatility': 0.6}
+                    }
+                },
+                'interest_model': {
+                    'rate': 0.05,
+                    'compound_frequency': 1
+                }
+            }
+        }
+    ),
+
+    "mixed_shock_test": SimulationScenario(
+        name="mixed_shock_test",
+        description="Full factor structure: systematic + style + idiosyncratic shocks",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 15,
+            "IS_MULTI_STOCK": True,
+            "HIDE_FUNDAMENTAL_PRICE": False,
+            "STOCKS": {
+                "TECH_HIGH_BETA": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "tech",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.3,  # Idiosyncratic
+                        'destination': 'dividend',
+                        'systematic_beta': 1.5,  # High systematic exposure
+                        'style_gamma': 1.0,
+                        'style': 'tech',
+                    }
+                },
+                "TECH_LOW_BETA": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "tech",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.3,
+                        'destination': 'dividend',
+                        'systematic_beta': 0.5,  # Low systematic exposure
+                        'style_gamma': 1.0,
+                        'style': 'tech',
+                    }
+                },
+                "PHARMA_HIGH_BETA": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "pharma",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.3,
+                        'destination': 'dividend',
+                        'systematic_beta': 1.2,
+                        'style_gamma': 1.0,
+                        'style': 'pharma',
+                    }
+                },
+                "PHARMA_LOW_BETA": {
+                    "INITIAL_PRICE": 100.0,
+                    "FUNDAMENTAL_PRICE": 100.0,
+                    "REDEMPTION_VALUE": 100.0,
+                    "TRANSACTION_COST": 0.0,
+                    "style": "pharma",
+                    "DIVIDEND_PARAMS": {
+                        'type': 'stochastic',
+                        'base_dividend': 2.0,
+                        'dividend_frequency': 1,
+                        'dividend_probability': 0.5,
+                        'dividend_variation': 0.3,
+                        'destination': 'dividend',
+                        'systematic_beta': 0.3,
+                        'style_gamma': 1.0,
+                        'style': 'pharma',
+                    }
+                }
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH * 4,
+                'initial_positions': {
+                    "TECH_HIGH_BETA": 2500,
+                    "TECH_LOW_BETA": 2500,
+                    "PHARMA_HIGH_BETA": 2500,
+                    "PHARMA_LOW_BETA": 2500
+                },
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'hold_trader': 5
+                },
+                'shock_structure': {
+                    'enabled': True,
+                    'systematic_volatility': 0.5,
+                    'styles': {
+                        'tech': {'volatility': 0.4},
+                        'pharma': {'volatility': 0.3}
+                    }
+                },
+                'interest_model': {
+                    'rate': 0.05,
+                    'compound_frequency': 1
+                }
+            }
+        }
+    ),
 }
