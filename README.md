@@ -166,8 +166,6 @@ scenario = {
 - `test_leverage` - Deterministic agents with 2x leverage
 - `test_leverage_llm` - LLM agents using leverage strategically
 
-See `docs/LEVERAGE.md` for comprehensive documentation.
-
 #### Short Selling
 Agents can borrow shares to sell short, enabling research on bearish strategies and market dynamics.
 
