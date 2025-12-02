@@ -2,6 +2,7 @@ import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import os
 import json
+import hashlib
 import numpy as np
 import random
 from base_sim import BaseSimulation
@@ -12,6 +13,13 @@ from services.logging_service import LoggingService
 from scenarios import get_scenario, list_scenarios
 import shutil
 from visualization.plot_generator import PlotGenerator
+
+
+def compute_config_hash(parameters: dict) -> str:
+    """Compute SHA-256 hash of configuration for reproducibility verification."""
+    config_str = json.dumps(parameters, sort_keys=True, default=str)
+    return hashlib.sha256(config_str.encode()).hexdigest()
+
 
 def create_run_directory(sim_type: str, description: str = "", parameters: dict = None) -> Path:
     """Create a directory structure that includes simulation type and date"""
@@ -26,6 +34,8 @@ def create_run_directory(sim_type: str, description: str = "", parameters: dict 
         'sim_type': sim_type,
         'description': description,
         'timestamp': date_str,
+        'run_id': f"{sim_type}_{date_str}",
+        'config_hash': compute_config_hash(parameters) if parameters else None,
         'parameters': parameters
     }
     
