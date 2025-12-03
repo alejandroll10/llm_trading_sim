@@ -11,6 +11,7 @@ from .short_sell_agent import ShortSellTrader
 from .buy_to_close_agent import BuyToCloseTrader
 from .squeeze_buyer_agent import SqueezeBuyerAgent
 from .margin_buy_agent import MarginBuyAgent
+from .market_buy_agent import MarketBuyAgent
 from .multi_stock_value_trader import MultiStockValueTrader
 from .multi_stock_buy_agent import MultiStockBuyAgent
 from .multi_stock_sell_agent import MultiStockSellAgent
@@ -33,6 +34,7 @@ DETERMINISTIC_AGENTS = {
     "buy_to_close_trader": BuyToCloseTrader,
     "squeeze_buyer": SqueezeBuyerAgent,
     "margin_buyer": MarginBuyAgent,
+    "market_buyer": MarketBuyAgent,  # For testing crossed market fix
     "multi_stock_test": MultiStockValueTrader,
     "multi_stock_value": MultiStockValueTrader,
     "multi_stock_buy": MultiStockBuyAgent,

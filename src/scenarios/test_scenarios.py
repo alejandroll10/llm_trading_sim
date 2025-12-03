@@ -329,5 +329,59 @@ SCENARIOS = {
             }
         }
     ),
+
+    # ==========================================================================
+    # Crossed Market Fix Test (Issue #88)
+    # ==========================================================================
+    "test_crossed_market": SimulationScenario(
+        name="test_crossed_market",
+        description="Test scenario for crossed market fix (Issue #88) - uses MARKET orders that become aggressive limits",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 50.0,
+            "FUNDAMENTAL_PRICE": 50.0,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    # Sellers: Place limit sell orders that sit on the book
+                    'sell_trader': 2,
+                    # Buyers: Place MARKET buy orders that may become aggressive limits
+                    'market_buyer': 2,
+                    # Market maker to provide some liquidity
+                    'deterministic_market_maker': 1,
+                },
+                'type_specific_params': {
+                    'sell_trader': {
+                        # Sellers have lots of shares to sell
+                        'initial_cash': 0.5 * BASE_INITIAL_CASH,
+                        'initial_shares': int(2.0 * BASE_INITIAL_SHARES),
+                    },
+                    'market_buyer': {
+                        # Buyers have limited cash to trigger partial fills
+                        # This causes market orders to convert to aggressive limits
+                        'initial_cash': 0.3 * BASE_INITIAL_CASH,
+                        'initial_shares': int(0.5 * BASE_INITIAL_SHARES),
+                    },
+                    'deterministic_market_maker': {
+                        'initial_cash': 1.0 * BASE_INITIAL_CASH,
+                        'initial_shares': int(1.0 * BASE_INITIAL_SHARES),
+                    }
+                },
+                'deterministic_params': {
+                    'market_buyer': {
+                        'buy_proportion': 0.9,  # Try to use 90% of cash
+                    },
+                    'sell_trader': {
+                        'max_proportion': 0.3,  # Sell 30% of shares each round
+                    }
+                }
+            }
+        }
+    ),
 }
 
