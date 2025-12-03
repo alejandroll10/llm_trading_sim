@@ -24,12 +24,13 @@ class MatchingEngine:
         # Initialize services
         self.order_processing_service = OrderProcessingService(order_book)
         self.trade_processing_service = TradeProcessingService(
-            agent_manager, 
-            order_state_manager, 
-            order_book, 
-            order_repository, 
-            agent_repository, 
-            context
+            agent_manager,
+            order_state_manager,
+            order_book,
+            order_repository,
+            agent_repository,
+            context,
+            trade_execution_service=trade_execution_service
         )
         
         # Initialize handlers with services
