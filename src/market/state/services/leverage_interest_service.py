@@ -8,16 +8,16 @@ class LeverageInterestService:
 
     This service processes interest charges each round for agents who have
     borrowed cash to take leveraged long positions. Interest is calculated
-    based on the amount borrowed and the annual interest rate, prorated per round.
+    based on the amount borrowed and the per-round interest rate.
     """
 
-    def __init__(self, annual_interest_rate: float = 0.05):
+    def __init__(self, interest_rate: float = 0.05):
         """Initialize the leverage interest service.
 
         Args:
-            annual_interest_rate: Annual interest rate on borrowed cash (e.g., 0.05 = 5% per year)
+            interest_rate: Per-round interest rate on borrowed cash (e.g., 0.05 = 5% per round)
         """
-        self.annual_interest_rate = annual_interest_rate
+        self.interest_rate = interest_rate
         self.total_interest_charged = 0.0
         self.logger = LoggingService.get_logger('leverage_interest')
 
@@ -28,34 +28,31 @@ class LeverageInterestService:
             self.logger.setLevel(logging.INFO)
 
         self.logger.info(
-            f"Initialized leverage interest service with {annual_interest_rate:.2%} annual rate"
+            f"Initialized leverage interest service with {interest_rate:.2%} per-round rate"
         )
 
     def charge_interest(
         self,
-        agents: List[BaseAgent],
-        rounds_per_year: int = 252
+        agents: List[BaseAgent]
     ) -> Dict[str, float]:
         """Charge per-round interest on borrowed cash for all agents.
 
-        Interest is calculated as: borrowed_cash * (annual_rate / rounds_per_year)
+        Interest is calculated as: borrowed_cash * interest_rate
         The interest is deducted from the agent's cash and added to their
         cumulative leverage_interest_paid tracker.
 
         Args:
             agents: List of all agents in the simulation
-            rounds_per_year: Number of trading rounds per year (default: 252 for daily trading)
 
         Returns:
             Dict mapping agent_id to interest charged this round
         """
         interest_by_agent = {}
-        per_round_rate = self.annual_interest_rate / rounds_per_year
 
         for agent in agents:
             if agent.borrowed_cash > 0:
                 # Calculate interest for this round
-                interest = agent.borrowed_cash * per_round_rate
+                interest = agent.borrowed_cash * self.interest_rate
 
                 # Charge interest (reduce cash)
                 agent.cash -= interest
@@ -75,7 +72,7 @@ class LeverageInterestService:
                 self.logger.debug(
                     f"Charged {agent.agent_id} ${interest:.2f} interest "
                     f"on ${agent.borrowed_cash:.2f} borrowed cash "
-                    f"(rate: {per_round_rate:.6f}/round)"
+                    f"(rate: {self.interest_rate:.4%}/round)"
                 )
 
         if interest_by_agent:

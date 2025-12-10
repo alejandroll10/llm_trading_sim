@@ -35,6 +35,7 @@ from . import feature_ab_tests
 from . import test_scenarios
 from . import bubbles_professionals
 from . import comprehensive_tests
+from . import paper_management_science
 
 # Combine all scenarios into a single registry
 SCENARIOS = {
@@ -48,6 +49,7 @@ SCENARIOS = {
     **test_scenarios.SCENARIOS,
     **bubbles_professionals.SCENARIOS,
     **comprehensive_tests.SCENARIOS,
+    **paper_management_science.SCENARIOS,
 }
 
 # Backwards-compatible API

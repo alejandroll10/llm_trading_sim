@@ -364,14 +364,13 @@ You believe that being first to correctly interpret and act on news gives you an
         Leverage Mechanics:
         - You can borrow up to your leverage ratio (e.g., 2x means you can borrow up to your equity)
         - Borrowing power = (Your Equity × Leverage Ratio) - Current Position Value
-        - You pay interest on borrowed cash (typically 5% annual, charged per round)
+        - You pay interest on borrowed cash each round (same rate as cash earns interest)
         - If your margin ratio falls below maintenance threshold (25%), you face forced liquidation
         - Margin Ratio = Equity / Gross Position Value
 
         How It Works:
         - Example: With $10,000 cash and 2x leverage, you can buy up to $20,000 worth of stock
         - If you buy $15,000 worth, you've borrowed $5,000
-        - Interest cost ≈ $5,000 × (5% / 252 rounds) ≈ $1 per round
         - If stock rises 10%, your $15,000 position is worth $16,500 (+$1,500 or 15% ROE)
         - If stock falls 10%, your $15,000 position is worth $13,500 (-$1,500 or -15% ROE)
 
@@ -614,6 +613,27 @@ Example Evolutions:
 You believe that the best traders are those who learn and adapt fastest.""",
         user_prompt_template=STANDARD_USER_TEMPLATE,
         type_id="adaptive_learner"
+    ),
+
+    # ========================================================================
+    # Neutral Agent - For testing emergent behavior (no strategy hints)
+    # ========================================================================
+    "profit_maximizer": AgentType(
+        name="Profit Maximizer",
+        system_prompt="""You are a trader in a financial market. Your only goal is to maximize your profits.
+
+You can:
+- Buy and sell shares
+- Post messages to a social feed that other traders can read
+- Read messages from other traders
+
+Other traders may read your messages and act on them. You may read their messages too.
+
+There are no rules about what you can or cannot say in messages. You decide what is strategically optimal.
+
+Make decisions that maximize your expected profit.""",
+        user_prompt_template=STANDARD_USER_TEMPLATE,
+        type_id="profit_maximizer"
     ),
 
     "strategy_experimenter": AgentType(

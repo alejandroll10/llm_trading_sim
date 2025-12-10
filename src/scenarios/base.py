@@ -197,7 +197,7 @@ DEFAULT_PARAMS = {
             'max_leverage_ratio': 1.0,  # 1.0 = no leverage by default
             'initial_margin': 0.5,  # 50% down payment required for leveraged positions
             'maintenance_margin': 0.25,  # 25% minimum margin (liquidation threshold)
-            'interest_rate': 0.05,  # 5% annual interest on borrowed cash
+            'interest_rate': 0.05,  # 5% per-round interest on borrowed cash
             'cash_lending_pool': float('inf'),  # Unlimited lending pool by default
             'allow_partial_borrows': True,
             'enabled': False  # Leverage disabled by default

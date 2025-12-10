@@ -295,9 +295,9 @@ class BaseSimulation:
                 context=self.context
             )
 
-            # Leverage interest service
+            # Leverage interest service (same rate as cash interest for consistency)
             self.leverage_interest_service = LeverageInterestService(
-                annual_interest_rate=leverage_params.get('interest_rate', 0.05)
+                interest_rate=leverage_params.get('interest_rate', 0.05)
             )
 
             # Assign cash_lending_repo to all agents
@@ -996,8 +996,7 @@ class BaseSimulation:
         # Charge interest on borrowed cash for leverage (after market state updates)
         if self.leverage_enabled and self.leverage_interest_service:
             interest_charged = self.leverage_interest_service.charge_interest(
-                self.agent_repository.get_all_agents(),
-                rounds_per_year=252  # Daily trading
+                self.agent_repository.get_all_agents()
             )
             if interest_charged:
                 total_leverage_interest = sum(interest_charged.values())

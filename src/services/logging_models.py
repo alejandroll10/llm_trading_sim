@@ -99,6 +99,8 @@ class DecisionLogEntry:
     valuation_reasoning: str = ""  # Separate reasoning for valuation
     price_prediction_reasoning: str = ""  # Reasoning for price predictions
     notes_to_self: str = ""  # Agent's memory notes for future rounds
+    post_message: str = ""  # Message posted to social feed
+    message_reasoning: str = ""  # Reasoning for the social message
 
     @staticmethod
     def from_decision(
@@ -129,7 +131,11 @@ class DecisionLogEntry:
         # Extract memory notes (handle None case when LLM doesn't include field)
         # If notes_to_self is not in decision (feature disabled), use empty string
         notes_to_self = sanitize_for_csv(decision_dict.get('notes_to_self') or '') if 'notes_to_self' in decision_dict else ''
-        
+
+        # Extract social media fields
+        post_message = sanitize_for_csv(decision_dict.get('post_message') or '') if 'post_message' in decision_dict else ''
+        message_reasoning = sanitize_for_csv(decision_dict.get('message_reasoning') or '') if 'message_reasoning' in decision_dict else ''
+
         if not decision_dict.get('orders'):
             # Log hold decision
             entries.append(DecisionLogEntry(
@@ -149,7 +155,9 @@ class DecisionLogEntry:
                 price_prediction_t2=price_prediction_t2,
                 valuation_reasoning=valuation_reasoning,
                 price_prediction_reasoning=price_prediction_reasoning,
-                notes_to_self=notes_to_self
+                notes_to_self=notes_to_self,
+                post_message=post_message,
+                message_reasoning=message_reasoning
             ))
             return entries
             
@@ -172,7 +180,9 @@ class DecisionLogEntry:
                 price_prediction_t2=price_prediction_t2,
                 valuation_reasoning=valuation_reasoning,
                 price_prediction_reasoning=price_prediction_reasoning,
-                notes_to_self=notes_to_self
+                notes_to_self=notes_to_self,
+                post_message=post_message,
+                message_reasoning=message_reasoning
             ))
         
         return entries
@@ -184,7 +194,8 @@ class DecisionLogEntry:
             f"{self.agent_type_name},{self.agent_type_id},{self.decision},"
             f"{self.order_type},{self.quantity},{self.price},\"{self.reasoning}\","
             f"{self.valuation},{self.price_prediction_t},{self.price_prediction_t1},{self.price_prediction_t2},"
-            f"\"{self.valuation_reasoning}\",\"{self.price_prediction_reasoning}\",\"{self.notes_to_self}\""
+            f"\"{self.valuation_reasoning}\",\"{self.price_prediction_reasoning}\",\"{self.notes_to_self}\","
+            f"\"{self.post_message}\",\"{self.message_reasoning}\""
         )
 
 @dataclass

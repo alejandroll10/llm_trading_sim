@@ -178,7 +178,7 @@ SCENARIOS = {
                     'max_leverage_ratio': 2.0,  # Default max 2x leverage
                     'initial_margin': 0.5,  # 50% down payment
                     'maintenance_margin': 0.25,  # 25% liquidation threshold
-                    'interest_rate': 0.05,  # 5% annual interest on borrowed cash
+                    'interest_rate': 0.05,  # 5% per-round interest on borrowed cash
                     'cash_lending_pool': float('inf'),  # Unlimited lending pool
                     'allow_partial_borrows': True,
                 },
