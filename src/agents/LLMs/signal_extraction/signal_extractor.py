@@ -172,10 +172,10 @@ class SignalExtractor:
             else:
                 rounds_left = int(periods_remaining)
                 if rounds_left > 0:
-                    # Show that there IS a redemption but not the exact value
-                    redemption_text = f"At the end of the final round (in {rounds_left} rounds), all shares will be redeemed at a value determined by market fundamentals."
+                    # Clarify that asset pays forever but sim ends - triggers perpetuity valuation
+                    redemption_text = f"The asset pays dividends indefinitely. The simulation ends in {rounds_left} rounds, at which point shares are liquidated at fair value."
                 else:
-                    redemption_text = "This is the final round. At the end of this round, all shares will be redeemed at a value determined by market fundamentals."
+                    redemption_text = "The asset pays dividends indefinitely. This is the final round, at which point shares are liquidated at fair value."
             return {'redemption_text': redemption_text}
 
         # FULL mode: show everything including redemption value
