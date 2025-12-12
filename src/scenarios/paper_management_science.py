@@ -21,7 +21,7 @@ from .base import (
 # =============================================================================
 PAPER_VERSION = "v1"
 PAPER_RANDOM_SEED = 42
-PAPER_LLM_MODEL = "gpt-4o-2024-11-20"  # Frozen model version
+PAPER_LLM_MODEL = "gpt-oss-120b"  # OpenAI open-weight model (August 2025)
 
 # Standard fundamental value: E[D]/r = 1.40/0.05 = 28.00
 FUNDAMENTAL_VALUE = FUNDAMENTAL_WITH_DEFAULT_PARAMS  # 28.0

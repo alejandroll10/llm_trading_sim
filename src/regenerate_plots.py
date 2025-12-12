@@ -1,68 +1,102 @@
-"""Main orchestrator for generating all simulation plots."""
+#!/usr/bin/env python3
+"""
+Regenerate plots from saved simulation data without re-running simulations.
 
+Usage:
+    python src/regenerate_plots.py <run_directory>
+
+Example:
+    python src/regenerate_plots.py logs/paper_final_results/paper_social_manipulation_20251202_004848
+"""
+
+import sys
+import json
 import pandas as pd
 from pathlib import Path
 from typing import Dict
 
-from utils.csv_loader import load_csv
+# Add src to path for imports
+sys.path.insert(0, str(Path(__file__).parent))
+
 from visualization.plot_utils import clean_data, save_plot
 from visualization.plots import price_plots, agent_plots, trading_plots, decision_plots, valuation_plots, order_plots
+from utils.csv_loader import load_csv
 
 
-class PlotGenerator:
-    """Orchestrates the generation of all simulation plots."""
+class PlotRegenerator:
+    """Regenerate plots from saved simulation data."""
 
-    def __init__(self, simulation):
-        """
-        Initialize the plot generator.
+    def __init__(self, run_dir: Path):
+        self.run_dir = Path(run_dir)
+        self.data_dir = self.run_dir / 'data'
 
-        Args:
-            simulation: BaseSimulation instance with completed run
-        """
-        self.simulation = simulation
-        self.scenario_name = simulation.sim_type.lower()
+        # Load metadata to get scenario name and parameters
+        metadata_path = self.run_dir / 'metadata.json'
+        if metadata_path.exists():
+            with open(metadata_path) as f:
+                self.metadata = json.load(f)
+            self.scenario_name = self.metadata.get('sim_type', self.run_dir.name).lower()
+        else:
+            self.metadata = {}
+            self.scenario_name = self.run_dir.name.lower()
 
-        # Set up directory paths
-        self.dated_plots_dir = simulation.run_dir / 'plots'
+        # Load parameters
+        params_path = self.run_dir / 'parameters.json'
+        if params_path.exists():
+            with open(params_path) as f:
+                self.params = json.load(f)
+        else:
+            self.params = self.metadata.get('parameters', {})
+
+        # Load market data for history
+        # Note: CSV has 'price' but PlotGenerator expects 'last_trade_price'
+        market_data_path = self.data_dir / 'market_data.csv'
+        if market_data_path.exists():
+            self.market_df = pd.read_csv(market_data_path)
+            # Map CSV columns to expected history keys
+            self.history = []
+            for _, row in self.market_df.iterrows():
+                record = row.to_dict()
+                # Map 'price' to 'last_trade_price' for compatibility with plot functions
+                if 'price' in record and 'last_trade_price' not in record:
+                    record['last_trade_price'] = record['price']
+                self.history.append(record)
+        else:
+            self.history = []
+            self.market_df = None
+
+        # Set up output directories
+        self.dated_plots_dir = self.run_dir / 'plots'
         self.dated_plots_dir.mkdir(exist_ok=True)
 
-        scenario_dir = Path('logs') / 'latest_sim' / simulation.sim_type
+        # Also save to latest_sim for convenience
+        scenario_dir = Path('logs') / 'latest_sim' / self.scenario_name
         scenario_dir.mkdir(parents=True, exist_ok=True)
         self.scenario_plots_dir = scenario_dir / 'plots'
         self.scenario_plots_dir.mkdir(exist_ok=True)
 
-        # Prepare commonly used data
-        self.history = simulation.data_recorder.history
-        self.data_dir = simulation.run_dir / 'data'
+    def regenerate_all(self):
+        """Regenerate all plots."""
+        print(f"Regenerating plots for: {self.run_dir}")
+        print(f"Scenario name: {self.scenario_name}")
 
-    def save_all_plots(self):
-        """Generate and save all plots for the simulation."""
-        print("Generating plots...")
-
-        # Generate price plots
         self._generate_price_plots()
-
-        # Generate agent plots
         self._generate_agent_plots()
-
-        # Generate trading flow plots
         self._generate_trading_plots()
-
-        # Generate decision plots
         self._generate_decision_plots()
-
-        # Generate valuation plots
         self._generate_valuation_plots()
-
-        # Generate order flow plots
         self._generate_order_plots()
 
-        print("All plots generated successfully!")
+        print(f"\nPlots saved to: {self.dated_plots_dir}")
 
     def _generate_price_plots(self):
         """Generate price-related plots."""
+        if not self.history:
+            print("  No market data found, skipping price plots")
+            return
+
         try:
-            print("  Processing price data...")
+            print("  Generating price plots...")
 
             rounds = clean_data([h.get('round') for h in self.history])
             fundamental_prices = clean_data([h.get('fundamental_price') for h in self.history])
@@ -71,8 +105,7 @@ class PlotGenerator:
             best_bids = clean_data([h.get('best_bid') for h in self.history])
             best_asks = clean_data([h.get('best_ask') for h in self.history])
             short_interest = clean_data([h.get('short_interest') for h in self.history])
-            # Get trade counts from trades list in history
-            num_trades = [len(h.get('trades', [])) for h in self.history]
+            num_trades = [h.get('num_trades', 0) for h in self.history]
 
             # Price vs Fundamental
             fig = price_plots.plot_price_vs_fundamental(
@@ -98,13 +131,13 @@ class PlotGenerator:
 
     def _generate_agent_plots(self):
         """Generate agent-related plots."""
-        try:
-            print("  Processing agent data...")
-            agent_data_path = self.data_dir / 'agent_data.csv'
+        agent_data_path = self.data_dir / 'agent_data.csv'
+        agent_df = load_csv(agent_data_path, "agent data")
+        if agent_df is None:
+            return
 
-            agent_df = load_csv(agent_data_path, "agent data")
-            if agent_df is None:
-                return
+        try:
+            print("  Generating agent plots...")
 
             # Calculate initial values
             initial_values = self._calculate_initial_values(agent_df)
@@ -182,8 +215,8 @@ class PlotGenerator:
             if 'borrowed_cash' in agent_df.columns and agent_df['borrowed_cash'].sum() > 0:
                 print("  Processing leverage metrics...")
 
-                # Get leverage parameters from simulation
-                leverage_params = self.simulation.params.get('AGENT_PARAMS', {}).get('leverage_params', {})
+                # Get leverage parameters
+                leverage_params = self.params.get('AGENT_PARAMS', {}).get('leverage_params', {})
                 maintenance_margin = leverage_params.get('maintenance_margin', 0.25)
                 initial_margin = leverage_params.get('initial_margin', 0.5)
 
@@ -248,7 +281,7 @@ class PlotGenerator:
     def _generate_decision_plots(self):
         """Generate decision analysis plots."""
         try:
-            decisions_path = self.simulation.run_dir / 'structured_decisions.csv'
+            decisions_path = self.run_dir / 'structured_decisions.csv'
             decisions_df = load_csv(decisions_path, "decision data", silent=True)
             if decisions_df is None:
                 return
@@ -279,7 +312,7 @@ class PlotGenerator:
     def _generate_valuation_plots(self):
         """Generate valuation analysis plots."""
         try:
-            decisions_path = self.simulation.run_dir / 'structured_decisions.csv'
+            decisions_path = self.run_dir / 'structured_decisions.csv'
             decisions_df = load_csv(decisions_path, "decision data", silent=True)
             if decisions_df is None:
                 return
@@ -294,8 +327,7 @@ class PlotGenerator:
             rounds = clean_data([h.get('round') for h in self.history])
             price_data = clean_data([h.get('price') for h in self.history])
             fundamental_data = clean_data([h.get('fundamental_price') for h in self.history])
-            # Get trade counts from trades list in history
-            num_trades = [len(h.get('trades', [])) for h in self.history]
+            num_trades = [h.get('num_trades', 0) for h in self.history]
 
             # Agent valuations
             fig = valuation_plots.plot_agent_valuations(
@@ -381,8 +413,8 @@ class PlotGenerator:
             if not type_data.empty:
                 initial_values[agent_type] = {
                     'total_shares': type_data['total_shares'].sum(),
-                    'borrowed_shares': type_data['borrowed_shares'].sum(),
-                    'net_shares': type_data['net_shares'].sum(),
+                    'borrowed_shares': type_data['borrowed_shares'].sum() if 'borrowed_shares' in type_data.columns else 0,
+                    'net_shares': type_data['net_shares'].sum() if 'net_shares' in type_data.columns else type_data['total_shares'].sum(),
                     'cash': type_data['cash'].sum(),
                     'total_value': type_data['total_value'].sum()
                 }
@@ -391,3 +423,27 @@ class PlotGenerator:
                       f"Value=${initial_values[agent_type]['total_value']:.2f}")
 
         return initial_values
+
+
+def main():
+    if len(sys.argv) < 2:
+        print(__doc__)
+        print("\nAvailable paper results:")
+        paper_results = Path('logs/paper_final_results')
+        if paper_results.exists():
+            for d in sorted(paper_results.iterdir()):
+                if d.is_dir():
+                    print(f"  {d}")
+        sys.exit(1)
+
+    run_dir = Path(sys.argv[1])
+    if not run_dir.exists():
+        print(f"Error: Directory not found: {run_dir}")
+        sys.exit(1)
+
+    regenerator = PlotRegenerator(run_dir)
+    regenerator.regenerate_all()
+
+
+if __name__ == '__main__':
+    main()

@@ -43,9 +43,9 @@ def save_plot(fig, base_name: str, scenario_name: str, dated_plots_dir: Path,
         close: Whether to close the figure after saving
     """
     try:
-        filename = f'{base_name}_{scenario_name}.png'
-        fig.savefig(dated_plots_dir / filename)
-        fig.savefig(scenario_plots_dir / filename)
+        filename = f'{base_name}_{scenario_name}.pdf'
+        fig.savefig(dated_plots_dir / filename, format='pdf', bbox_inches='tight')
+        fig.savefig(scenario_plots_dir / filename, format='pdf', bbox_inches='tight')
         print(f"  Saved plot: {base_name}")
     except Exception as e:
         print(f"  Error saving plot {base_name}: {str(e)}")

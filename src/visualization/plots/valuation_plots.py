@@ -14,7 +14,7 @@ from visualization.plot_config import (
 
 def plot_agent_valuations(decisions_df: pd.DataFrame, history: List[dict],
                           rounds: List[float], price_data: List[float],
-                          fundamental_data: List[float]):
+                          fundamental_data: List[float], num_trades: List[int] = None):
     """
     Plot agent valuations compared to market price over time.
 
@@ -24,6 +24,7 @@ def plot_agent_valuations(decisions_df: pd.DataFrame, history: List[dict],
         rounds: List of round numbers
         price_data: List of market prices
         fundamental_data: List of fundamental values
+        num_trades: Optional list of trade counts per round (to mark actual trades)
 
     Returns:
         Matplotlib figure or None if no valuation data
@@ -36,6 +37,15 @@ def plot_agent_valuations(decisions_df: pd.DataFrame, history: List[dict],
     # Add actual market price
     ax.plot(rounds, price_data, label='Market Price',
             color='black', linewidth=STANDARD_LINEWIDTH)
+
+    # Mark rounds with actual trades (skip round 1 - initialization)
+    if num_trades is not None:
+        trade_rounds = [r for r, n in zip(rounds, num_trades) if n and n > 0 and r > 1]
+        trade_prices = [p for r, p, n in zip(rounds, price_data, num_trades) if n and n > 0 and r > 1]
+        if trade_rounds:
+            ax.scatter(trade_rounds, trade_prices, color='black', s=50,
+                      zorder=5, label='Actual Trade', marker='o')
+
     ax.plot(rounds, fundamental_data, label='Fundamental Value',
             color=FUNDAMENTAL_COLOR, linestyle=FUNDAMENTAL_LINESTYLE,
             linewidth=STANDARD_LINEWIDTH)
@@ -143,13 +153,15 @@ def plot_valuation_dispersion(decisions_df: pd.DataFrame, history: List[dict]):
     return fig
 
 
-def plot_price_prediction_accuracy(decisions_df: pd.DataFrame, price_data: List[float]):
+def plot_price_prediction_accuracy(decisions_df: pd.DataFrame, price_data: List[float],
+                                    num_trades: List[int] = None):
     """
-    Plot agent price predictions vs actual next prices.
+    Plot agent price expectations vs realized prices.
 
     Args:
         decisions_df: DataFrame with agent decisions including price_prediction_t1
         price_data: List of market prices
+        num_trades: Optional list of trade counts per round (to mark actual trades)
 
     Returns:
         Matplotlib figure or None if no price prediction data
@@ -160,30 +172,39 @@ def plot_price_prediction_accuracy(decisions_df: pd.DataFrame, price_data: List[
     fig, ax = plt.subplots(figsize=EXTRA_LARGE_FIGSIZE)
 
     # Group by round and agent_type
-    price_predictions = decisions_df.groupby(['round', 'agent_type'])['price_prediction_t1'].mean().unstack()
+    price_expectations = decisions_df.groupby(['round', 'agent_type'])['price_prediction_t1'].mean().unstack()
 
     # Calculate next round actual prices
     actual_next_prices = []
-    for r in price_predictions.index:
+    rounds_list = list(price_expectations.index)
+    for r in rounds_list:
         if r + 1 < len(price_data):
             actual_next_prices.append(price_data[r + 1])
         else:
             actual_next_prices.append(None)
 
-    # Plot each agent type's price prediction
-    for agent_type in price_predictions.columns:
-        ax.plot(price_predictions.index, price_predictions[agent_type],
-               label=f'{agent_type} Prediction',
+    # Plot each agent type's price expectation
+    for agent_type in price_expectations.columns:
+        ax.plot(price_expectations.index, price_expectations[agent_type],
+               label=f'{agent_type}',
                linewidth=THIN_LINEWIDTH, alpha=STANDARD_ALPHA)
 
     # Plot actual next round prices
-    ax.plot(price_predictions.index, actual_next_prices,
-           label='Actual Next Price',
+    ax.plot(rounds_list, actual_next_prices,
+           label='Realized Price',
            color='black', linewidth=STANDARD_LINEWIDTH)
+
+    # Mark rounds with actual trades (skip round 1)
+    if num_trades is not None and len(num_trades) > 0:
+        trade_rounds = [r for r in rounds_list if r + 1 < len(num_trades) and num_trades[r + 1] and num_trades[r + 1] > 0 and r > 0]
+        trade_prices = [price_data[r + 1] for r in trade_rounds if r + 1 < len(price_data)]
+        if trade_rounds and trade_prices:
+            ax.scatter(trade_rounds, trade_prices, color='black', s=50,
+                      zorder=5, label='Actual Trade', marker='o')
 
     ax.set_xlabel('Round')
     ax.set_ylabel('Price')
-    ax.set_title('Agent Price Predictions vs Actual Next Prices')
+    ax.set_title('Agent Price Expectations vs Realized Prices')
     ax.legend(loc='best')
     ax.grid(True, alpha=GRID_ALPHA)
 

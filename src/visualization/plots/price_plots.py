@@ -11,7 +11,8 @@ from visualization.plot_config import (
 
 
 def plot_price_vs_fundamental(rounds: List[float], fundamental_prices: List[float],
-                               last_trade_prices: List[float], midpoint_prices: List[float]):
+                               last_trade_prices: List[float], midpoint_prices: List[float],
+                               num_trades: List[int] = None):
     """
     Plot market price evolution compared to fundamental value.
 
@@ -20,6 +21,7 @@ def plot_price_vs_fundamental(rounds: List[float], fundamental_prices: List[floa
         fundamental_prices: List of fundamental values
         last_trade_prices: List of last trade prices
         midpoint_prices: List of midpoint prices
+        num_trades: Optional list of trade counts per round (to mark actual trades)
 
     Returns:
         Matplotlib figure
@@ -29,8 +31,19 @@ def plot_price_vs_fundamental(rounds: List[float], fundamental_prices: List[floa
     ax.plot(rounds, fundamental_prices, label='Fundamental Value',
             linestyle=FUNDAMENTAL_LINESTYLE, linewidth=STANDARD_LINEWIDTH,
             color=FUNDAMENTAL_COLOR)
-    ax.plot(rounds, last_trade_prices, label='Last Trade',
-            color=PRICE_COLOR, alpha=0.8, linewidth=STANDARD_LINEWIDTH)
+
+    # Plot price line
+    ax.plot(rounds, last_trade_prices, color=PRICE_COLOR, alpha=0.8,
+            linewidth=STANDARD_LINEWIDTH, label='Price')
+
+    # If we have trade data, mark rounds with actual trades (skip round 1 - initialization)
+    if num_trades is not None:
+        trade_rounds = [r for r, n in zip(rounds, num_trades) if n and n > 0 and r > 1]
+        trade_prices = [p for r, p, n in zip(rounds, last_trade_prices, num_trades) if n and n > 0 and r > 1]
+        if trade_rounds:
+            ax.scatter(trade_rounds, trade_prices, color=PRICE_COLOR, s=50,
+                      zorder=5, label='Actual Trade', marker='o')
+
     ax.plot(rounds, midpoint_prices, label='Midpoint',
             color=MIDPOINT_COLOR, alpha=0.8, linewidth=STANDARD_LINEWIDTH)
 
