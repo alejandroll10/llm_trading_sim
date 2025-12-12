@@ -189,7 +189,7 @@ correlated_crash = SimulationScenario(
         "RANDOM_SEED": PAPER_RANDOM_SEED,
         "NUM_ROUNDS": 20,
         "INITIAL_PRICE": 2 * FUNDAMENTAL_VALUE,  # 2x overvalued
-        "FUNDAMENTAL_INFO_MODE": FundamentalInfoMode.FULL,
+        "FUNDAMENTAL_INFO_MODE": FundamentalInfoMode.PROCESS_ONLY,  # Agents calculate FV themselves
         "AGENT_PARAMS": {
             **DEFAULT_PARAMS["AGENT_PARAMS"],
             'allow_short_selling': False,  # No shorts → all want to sell, no buyers
