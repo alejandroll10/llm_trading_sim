@@ -45,6 +45,8 @@ class AgentContext:
     maintenance_margin: float = None
     # Short selling support
     allow_short_selling: bool = False
+    borrowed_shares: int = 0
+    net_shares: int = 0
 
 class MarketStateFormatter:
     """Formats market state information for LLM consumption"""
@@ -120,11 +122,13 @@ class MarketStateFormatter:
             else:
                 leverage_note = " (Cash borrowing is not allowed)"
 
-            # Determine short selling note
+            # Determine short selling note and shares display
             if agent_context.allow_short_selling:
-                short_selling_note = "- Short selling is ALLOWED: You can sell shares you don't own by borrowing them"
+                short_selling_note = "- Short selling is ALLOWED: You can sell shares you don't own by borrowing them from the lending pool"
+                shares_display = f"- Net Shares: {agent_context.net_shares} shares (negative = short position)"
             else:
                 short_selling_note = "- Short selling is NOT allowed: You can only sell shares you currently own"
+                shares_display = f"- Shares: {agent_context.shares} shares"
 
             context = {
                 # Market data from signals
@@ -134,6 +138,8 @@ class MarketStateFormatter:
 
                 # Agent data (already safe via dataclass)
                 'shares': agent_context.shares,
+                'net_shares': agent_context.net_shares,
+                'shares_display': shares_display,  # Conditional: "Shares" or "Net Shares"
                 'cash': agent_context.cash,
                 'dividend_cash': agent_context.dividend_cash,
                 'total_available_cash': agent_context.available_cash,
@@ -242,7 +248,7 @@ class MarketStateFormatter:
                 'dividend_info': dividend_info,  # Mode-aware dividend info
                 'interest_info': INTEREST_INFO_TEMPLATE.format(**context),
                 'redemption_info': REDEMPTION_INFO_TEMPLATE.format(**context),
-                'trading_options': TRADING_OPTIONS_TEMPLATE,
+                'trading_options': TRADING_OPTIONS_TEMPLATE.format(short_selling_note=short_selling_note),
                 'multi_stock_info': multi_stock_info,  # From signals or market_state
                 'news_info': news_info  # LLM-generated market news
             }

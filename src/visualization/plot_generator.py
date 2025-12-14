@@ -323,6 +323,14 @@ class PlotGenerator:
                 save_plot(fig, 'price_prediction_errors', self.scenario_name,
                          self.dated_plots_dir, self.scenario_plots_dir)
 
+            # Combined valuation vs expectations plot
+            fig = valuation_plots.plot_valuation_vs_expectations(
+                decisions_df, self.history, rounds, price_data, fundamental_data, num_trades
+            )
+            if fig:
+                save_plot(fig, 'valuation_vs_expectations', self.scenario_name,
+                         self.dated_plots_dir, self.scenario_plots_dir)
+
         except Exception as e:
             print(f"  Error creating valuation plots: {str(e)}")
 

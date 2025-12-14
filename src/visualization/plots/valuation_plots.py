@@ -214,6 +214,84 @@ def plot_price_prediction_accuracy(decisions_df: pd.DataFrame, price_data: List[
     return fig
 
 
+def plot_valuation_vs_expectations(decisions_df: pd.DataFrame, history: List[dict],
+                                    rounds: List[float], price_data: List[float],
+                                    fundamental_data: List[float], num_trades: List[int] = None):
+    """
+    Combined plot showing agent valuations and price expectations together.
+
+    This reveals whether agents are value investors (valuation ≈ expectation)
+    or speculators (expectation differs from valuation).
+
+    Args:
+        decisions_df: DataFrame with agent decisions including valuation and price_prediction_t1
+        history: List of historical market data
+        rounds: List of round numbers
+        price_data: List of market prices
+        fundamental_data: List of fundamental values
+        num_trades: Optional list of trade counts per round
+
+    Returns:
+        Matplotlib figure or None if insufficient data
+    """
+    has_valuation = 'valuation' in decisions_df.columns and not decisions_df['valuation'].isna().all()
+    has_expectations = 'price_prediction_t1' in decisions_df.columns and not decisions_df['price_prediction_t1'].isna().all()
+
+    if not has_valuation and not has_expectations:
+        return None
+
+    fig, ax = plt.subplots(figsize=EXTRA_LARGE_FIGSIZE)
+
+    # Plot market price (realized)
+    ax.plot(rounds, price_data, label='Market Price',
+            color='black', linewidth=STANDARD_LINEWIDTH, zorder=10)
+
+    # Mark rounds with actual trades
+    if num_trades is not None:
+        trade_rounds = [r for r, n in zip(rounds, num_trades) if n and n > 0 and r > 1]
+        trade_prices = [p for r, p, n in zip(rounds, price_data, num_trades) if n and n > 0 and r > 1]
+        if trade_rounds:
+            ax.scatter(trade_rounds, trade_prices, color='black', s=50,
+                      zorder=11, label='Trade Occurred', marker='o')
+
+    # Plot fundamental value
+    ax.plot(rounds, fundamental_data, label='Fundamental Value',
+            color=FUNDAMENTAL_COLOR, linestyle=FUNDAMENTAL_LINESTYLE,
+            linewidth=STANDARD_LINEWIDTH, zorder=9)
+
+    # Get unique agent types
+    agent_types = sorted(decisions_df['agent_type'].unique())
+    colors = plt.cm.tab10(np.linspace(0, 1, len(agent_types)))
+
+    for agent_type, color in zip(agent_types, colors):
+        agent_data = decisions_df[decisions_df['agent_type'] == agent_type]
+
+        # Plot valuation as solid line
+        if has_valuation:
+            valuations = agent_data.groupby('round')['valuation'].mean()
+            ax.plot(valuations.index, valuations.values,
+                   label=f'{agent_type} Valuation',
+                   color=color, linewidth=THIN_LINEWIDTH, alpha=STANDARD_ALPHA,
+                   linestyle='-')
+
+        # Plot price expectation as dashed line
+        if has_expectations:
+            expectations = agent_data.groupby('round')['price_prediction_t1'].mean()
+            ax.plot(expectations.index, expectations.values,
+                   label=f'{agent_type} Price Exp.',
+                   color=color, linewidth=THIN_LINEWIDTH, alpha=STANDARD_ALPHA,
+                   linestyle='--')
+
+    ax.set_xlabel('Round')
+    ax.set_ylabel('Price / Valuation')
+    ax.set_title('Agent Valuations vs Price Expectations')
+    ax.legend(loc='best', fontsize='small', ncol=2)
+    ax.grid(True, alpha=GRID_ALPHA)
+
+    plt.tight_layout()
+    return fig
+
+
 def plot_price_prediction_errors(decisions_df: pd.DataFrame, price_data: List[float]):
     """
     Plot price prediction error distribution by agent type.

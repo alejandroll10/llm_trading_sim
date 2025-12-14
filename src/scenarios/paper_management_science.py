@@ -125,6 +125,35 @@ social_manipulation = SimulationScenario(
     }
 )
 
+# Infinite horizon version - agents use perpetuity valuation naturally
+social_manipulation_infinite = SimulationScenario(
+    name="paper_social_manipulation_infinite",
+    description="Social manipulation with infinite horizon (natural belief divergence)",
+    parameters={
+        **DEFAULT_PARAMS,
+        "RANDOM_SEED": PAPER_RANDOM_SEED,
+        "NUM_ROUNDS": 15,
+        "INFINITE_ROUNDS": True,  # Uses infinite horizon prompt
+        "INITIAL_PRICE": 35.0,  # Slightly overvalued
+        "FUNDAMENTAL_INFO_MODE": FundamentalInfoMode.PROCESS_ONLY,
+        "LENDABLE_SHARES": 50000,
+        "AGENT_PARAMS": {
+            **DEFAULT_PARAMS["AGENT_PARAMS"],
+            'allow_short_selling': True,
+            'initial_cash': BASE_INITIAL_CASH,
+            'initial_shares': BASE_INITIAL_SHARES,
+            'SOCIAL_ENABLED': True,
+            'MEMORY_ENABLED': True,
+            'agent_composition': {
+                'influencer': 2,
+                'herd_follower': 4,
+                'value': 2,
+                'contrarian': 1,
+            },
+        },
+    }
+)
+
 emergent_manipulation = SimulationScenario(
     name="paper_emergent_manipulation",
     description="Emergent manipulation: Value investors with social (NO manipulation prompt)",
@@ -187,7 +216,7 @@ correlated_crash = SimulationScenario(
     parameters={
         **DEFAULT_PARAMS,
         "RANDOM_SEED": PAPER_RANDOM_SEED,
-        "NUM_ROUNDS": 20,
+        "NUM_ROUNDS": 10,
         "INITIAL_PRICE": 2 * FUNDAMENTAL_VALUE,  # 2x overvalued
         "FUNDAMENTAL_INFO_MODE": FundamentalInfoMode.PROCESS_ONLY,  # Agents calculate FV themselves
         "AGENT_PARAMS": {
@@ -266,12 +295,10 @@ SCENARIOS = {
     "paper_price_discovery_above": price_discovery_above,
     "paper_price_discovery_below": price_discovery_below,
 
-    # Social dynamics
-    "paper_social_manipulation": social_manipulation,
-    "paper_emergent_manipulation": emergent_manipulation,
-    "paper_neutral_manipulation": neutral_manipulation_test,
+    # Social dynamics (infinite horizon for natural belief divergence)
+    "paper_social_manipulation_infinite": social_manipulation_infinite,
 
-    # Systemic risk
+    # Systemic risk / No-Trade Theorem
     "paper_correlated_crash": correlated_crash,
 
     # Short selling

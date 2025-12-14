@@ -305,6 +305,8 @@ class LLMAgent(BaseAgent):
             leverage_interest_paid=self.leverage_interest_paid,
             # Short selling support
             allow_short_selling=self.allow_short_selling,
+            borrowed_shares=self.borrowed_shares,
+            net_shares=self.shares - self.borrowed_shares,
             **leverage_metrics  # Include calculated metrics if available
         )
 
