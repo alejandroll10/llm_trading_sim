@@ -441,13 +441,19 @@ class MarketStateFormatter:
             output += f"  - Cash in Orders: ${agent_context.committed_cash:.2f}"
             return output
         else:
-            # Single-stock: Original display
-            return f"""Available Shares: {agent_context.shares} shares
-Main Cash: ${agent_context.cash:.2f}
-Dividend Cash: ${agent_context.dividend_cash:.2f}
-Available Cash: ${agent_context.available_cash:.2f}
-Shares in Orders: {agent_context.committed_shares} shares
-Cash in Orders: ${agent_context.committed_cash:.2f}"""
+            # Single-stock: Clear position header to ensure LLM reads it
+            if agent_context.allow_short_selling:
+                position_type = "LONG" if agent_context.net_shares >= 0 else "SHORT"
+                shares_line = f"Your net position: {agent_context.net_shares} shares ({position_type})"
+            else:
+                shares_line = f"You currently own: {agent_context.shares} shares"
+            return f"""=== YOUR CURRENT POSITION ===
+{shares_line}
+- Main Cash Account: ${agent_context.cash:.2f}
+- Dividend Cash Account: ${agent_context.dividend_cash:.2f}
+- Total Available Cash: ${agent_context.available_cash:.2f}
+- Shares Committed to Orders: {agent_context.committed_shares} shares
+- Cash Committed to Orders: ${agent_context.committed_cash:.2f}"""
 
     @staticmethod
     def _format_percent(value: float) -> str:

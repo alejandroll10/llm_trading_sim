@@ -14,6 +14,7 @@ Trading Options:
    - For each order:
      - Market order: Set order_type='market'
      - Limit order: Set order_type='limit' and specify price_limit
+   - Note: The minimum price increment (tick size) is $0.01. You can place orders at any price to the cent.
    {short_selling_note}
 
 2. Cancel Orders (replace_decision='Cancel'):
@@ -107,7 +108,7 @@ Dividend Information:
 INTEREST_INFO_TEMPLATE = """
 Interest Rate Information:
 - Base Rate: {interest_rate:.1f}%
-- Compound Frequency: {compound_frequency} times per round
+- Compound Frequency: {compound_frequency}
 - Payment Destination: {interest_destination} account ({interest_tradeable})
 """
 

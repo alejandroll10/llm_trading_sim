@@ -155,19 +155,18 @@ def run_scenario(scenario_name: str, output_dir: Path):
         plot_generator = PlotGenerator(sim)
         plot_generator.save_all_plots()
 
-        # Copy results to paper directory
+        # Copy all results to paper directory (use copytree to get everything)
         source_dir = sim.run_dir
 
-        # Copy data directory
-        if (source_dir / 'data').exists():
-            shutil.copytree(source_dir / 'data', scenario_dir / 'data', dirs_exist_ok=True)
+        # Copy key directories and files
+        for item in ['data', 'plots']:
+            src_path = source_dir / item
+            if src_path.exists():
+                shutil.copytree(src_path, scenario_dir / item, dirs_exist_ok=True)
 
-        # Copy plots directory
-        if (source_dir / 'plots').exists():
-            shutil.copytree(source_dir / 'plots', scenario_dir / 'plots', dirs_exist_ok=True)
-
-        # Copy metadata and parameters
-        for fname in ['metadata.json', 'parameters.json']:
+        # Copy all important files at root level
+        for fname in ['metadata.json', 'parameters.json', 'structured_decisions.csv',
+                      'margin_calls.csv', 'validation_errors.csv']:
             if (source_dir / fname).exists():
                 shutil.copy2(source_dir / fname, scenario_dir / fname)
 

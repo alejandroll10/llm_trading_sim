@@ -31,7 +31,17 @@ class InterestService:
             
         self.interest_history = []
         self.current_round = 0
-        self.next_payment_round = self.interest_model['compound_frequency']
+        # Convert compound_frequency to interval (handle 'per_round' string)
+        self._payment_interval = self._get_payment_interval()
+        self.next_payment_round = self._payment_interval
+
+    def _get_payment_interval(self) -> int:
+        """Convert compound_frequency to numeric interval (in rounds)"""
+        freq = self.interest_model.get('compound_frequency', 'per_round')
+        if isinstance(freq, int):
+            return freq
+        # 'per_round' means every round
+        return 1
 
     def calculate_interest(self, balance: float) -> float:
         """Calculate interest for a given balance"""
@@ -117,9 +127,9 @@ class InterestService:
     def update(self, round_number: int):
         """Update state for current round"""
         self.current_round = round_number
-        
-        # Update next payment round
-        frequency = self.interest_model['compound_frequency']
+
+        # Update next payment round using numeric interval
+        frequency = self._payment_interval
         self.next_payment_round = (
             round_number + (frequency - (round_number % frequency))
             if round_number % frequency != 0
