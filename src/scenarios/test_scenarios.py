@@ -383,5 +383,47 @@ SCENARIOS = {
             }
         }
     ),
+    "test_commitment_tracking": SimulationScenario(
+        name="test_commitment_tracking",
+        description="Test that orders in MATCHING state are counted in commitment sync",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "INITIAL_PRICE": 50.0,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    # Mixed order agents place market + limit orders each round
+                    'mixed_order': 2,
+                    # Buy traders provide matching liquidity
+                    'buy_trader': 2,
+                },
+                'type_specific_params': {
+                    'mixed_order': {
+                        'initial_cash': 1.5 * BASE_INITIAL_CASH,
+                        'initial_shares': int(1.5 * BASE_INITIAL_SHARES),
+                    },
+                    'buy_trader': {
+                        'initial_cash': 2.0 * BASE_INITIAL_CASH,
+                        'initial_shares': int(0.5 * BASE_INITIAL_SHARES),
+                    },
+                },
+                'deterministic_params': {
+                    'mixed_order': {
+                        'market_sell_qty': 1000,
+                        'limit_sell_qty': 1500,
+                        'limit_buy_qty': 1500,
+                    },
+                    'buy_trader': {
+                        'max_proportion': 0.3,
+                    }
+                }
+            }
+        }
+    ),
 }
 

@@ -30,13 +30,15 @@ def get_book_orders(orders: List[Order]) -> List[Order]:
     ]
 
 def is_active(order: Order) -> bool:
-    """Check if order is active in the order book"""
+    """Check if order is active (has commitment held)"""
     return (
         order.state in {
             OrderState.ACTIVE,
             OrderState.PENDING,
             OrderState.PARTIALLY_FILLED,
-            OrderState.COMMITTED
+            OrderState.COMMITTED,
+            OrderState.MATCHING,        # Market orders being matched
+            OrderState.LIMIT_MATCHING,  # Limit orders being matched
         }
     )
 

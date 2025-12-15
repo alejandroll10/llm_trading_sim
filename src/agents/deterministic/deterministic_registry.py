@@ -18,6 +18,7 @@ from .multi_stock_sell_agent import MultiStockSellAgent
 from .multi_stock_short_seller import MultiStockShortSeller
 from .multi_stock_squeeze_buyer import MultiStockSqueezeBuyer
 from .multi_stock_market_maker import MultiStockMarketMaker
+from .mixed_order_agent import MixedOrderAgent
 
 DETERMINISTIC_AGENTS = {
     "gap_trader": ProportionalGapTrader,
@@ -41,5 +42,6 @@ DETERMINISTIC_AGENTS = {
     "multi_stock_sell": MultiStockSellAgent,
     "multi_stock_short_seller": MultiStockShortSeller,
     "multi_stock_squeeze_buyer": MultiStockSqueezeBuyer,
-    "multi_stock_market_maker": MultiStockMarketMaker
+    "multi_stock_market_maker": MultiStockMarketMaker,
+    "mixed_order": MixedOrderAgent,  # For testing commitment tracking bug
 }
