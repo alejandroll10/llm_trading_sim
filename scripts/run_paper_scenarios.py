@@ -121,11 +121,8 @@ def update_manifest(manifest_path: Path, scenario_name: str, status: str, durati
 
 
 def run_scenario(scenario_name: str, output_dir: Path):
-    """Run a single scenario and save to the paper output directory."""
+    """Run a single scenario using run_base_sim.py and copy results."""
     import time
-    from base_sim import BaseSimulation
-    from scenarios import get_scenario
-    from visualization.plot_generator import PlotGenerator
     import shutil
 
     print(f"\n{'='*60}")
@@ -135,40 +132,37 @@ def run_scenario(scenario_name: str, output_dir: Path):
     start_time = time.time()
 
     try:
-        # Get scenario
-        scenario = get_scenario(scenario_name)
-        params = scenario.parameters
-
         # Create scenario output directory
         scenario_dir = output_dir / scenario_name
         scenario_dir.mkdir(parents=True, exist_ok=True)
 
-        # Run simulation
-        sim = BaseSimulation(
-            sim_type=scenario_name,
-            description=scenario.description,
-            params=params
+        # Run simulation via run_base_sim.py (handles all parameter expansion correctly)
+        repo_root = Path(__file__).parent.parent
+        result = subprocess.run(
+            ["python", "src/run_base_sim.py", scenario_name],
+            cwd=repo_root,
+            capture_output=False
         )
-        sim.run()
 
-        # Generate plots
-        plot_generator = PlotGenerator(sim)
-        plot_generator.save_all_plots()
+        if result.returncode != 0:
+            raise RuntimeError(f"run_base_sim.py exited with code {result.returncode}")
 
-        # Copy all results to paper directory (use copytree to get everything)
-        source_dir = sim.run_dir
+        # Find the latest run directory for this scenario
+        latest_sim_dir = repo_root / "logs" / "latest_sim" / scenario_name
+        if not latest_sim_dir.exists():
+            raise RuntimeError(f"No output found at {latest_sim_dir}")
 
         # Copy key directories and files
         for item in ['data', 'plots']:
-            src_path = source_dir / item
+            src_path = latest_sim_dir / item
             if src_path.exists():
                 shutil.copytree(src_path, scenario_dir / item, dirs_exist_ok=True)
 
         # Copy all important files at root level
         for fname in ['metadata.json', 'parameters.json', 'structured_decisions.csv',
                       'margin_calls.csv', 'validation_errors.csv']:
-            if (source_dir / fname).exists():
-                shutil.copy2(source_dir / fname, scenario_dir / fname)
+            if (latest_sim_dir / fname).exists():
+                shutil.copy2(latest_sim_dir / fname, scenario_dir / fname)
 
         duration = time.time() - start_time
         print(f"✓ Completed {scenario_name} in {duration:.1f}s")
