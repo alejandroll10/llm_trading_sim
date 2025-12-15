@@ -24,7 +24,6 @@ Output:
     └── ...
 """
 
-import os
 import sys
 import json
 import subprocess
@@ -72,7 +71,8 @@ def create_paper_output_dir():
     """Create versioned output directory for paper results."""
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     dir_name = f"paper_{PAPER_VERSION}_{timestamp}"
-    output_dir = Path('logs') / dir_name
+    repo_root = Path(__file__).parent.parent
+    output_dir = repo_root / 'logs' / dir_name
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -242,8 +242,9 @@ def main():
     # Run scenarios
     print(f"\n🚀 Running {len(scenarios_to_run)} scenarios...")
 
-    # Change to src directory for imports
-    os.chdir(Path(__file__).parent.parent / 'src')
+    # Ensure paths are absolute (we use subprocess so no chdir needed)
+    output_dir = output_dir.resolve()
+    manifest_path = manifest_path.resolve()
 
     results = []
     for i, scenario_name in enumerate(scenarios_to_run, 1):
@@ -269,7 +270,8 @@ def main():
     print(f"📋 Manifest: {manifest_path}")
 
     # Create symlink to latest paper run
-    latest_link = Path('logs') / f'paper_{PAPER_VERSION}_latest'
+    repo_root = Path(__file__).parent.parent
+    latest_link = repo_root / 'logs' / f'paper_{PAPER_VERSION}_latest'
     if latest_link.exists() or latest_link.is_symlink():
         latest_link.unlink()
     latest_link.symlink_to(output_dir.name)
