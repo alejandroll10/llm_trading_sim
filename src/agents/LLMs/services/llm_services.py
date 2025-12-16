@@ -45,12 +45,15 @@ class LLMService:
     def __init__(self):
         load_dotenv()  # Load API key from .env
 
-        # Initialize OpenAI client with configured base_url
+        # Initialize OpenAI client with configured base_url and timeout
         # (base_url set in scenarios/base.py - non-sensitive config)
+        # Use httpx timeout for reliable request timeout (20s default)
+        import httpx
+        timeout_config = httpx.Timeout(20.0, connect=10.0)
         if DEFAULT_LLM_BASE_URL:
-            self.client = openai.OpenAI(base_url=DEFAULT_LLM_BASE_URL)
+            self.client = openai.OpenAI(base_url=DEFAULT_LLM_BASE_URL, timeout=timeout_config)
         else:
-            self.client = openai.OpenAI()  # Use default OpenAI endpoint
+            self.client = openai.OpenAI(timeout=timeout_config)
 
         self.seed = 42
     
@@ -112,8 +115,7 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
         start_time = time.time()
         prompt_len = len(request.system_prompt) + len(request.user_prompt)
 
-        max_retries = 3
-        timeout_seconds = 60  # 60s timeout per attempt
+        max_retries = 20  # High retry count for flaky API (timeout ~60s per attempt)
 
         for attempt in range(max_retries):
             try:
@@ -123,8 +125,7 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
                     messages=messages,
                     response_format=dynamic_schema,
                     temperature=0.0,
-                    seed=self.seed,
-                    timeout=timeout_seconds
+                    seed=self.seed
                 )
                 elapsed = time.time() - start_time
                 logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Response in {elapsed:.1f}s")

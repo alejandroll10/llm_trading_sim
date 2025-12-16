@@ -34,7 +34,11 @@ class AgentDecisionService:
         decisions = {}
         if use_serial:
             # Serial execution for gpt-oss (more reliable)
-            for agent_id in agent_ids:
+            import time as _time
+            for i, agent_id in enumerate(agent_ids):
+                # Add small delay between requests to avoid rate limiting
+                if i > 0:
+                    _time.sleep(0.5)  # 500ms delay between requests
                 decisions[agent_id] = self.agent_repository.get_agent_decision(
                     agent_id=agent_id,
                     market_state=market_state,
