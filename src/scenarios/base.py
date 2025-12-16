@@ -36,21 +36,17 @@ class FundamentalInfoMode(str, Enum):
     NONE = "none"
 
 # =============================================================================
-# LLM Configuration (Non-sensitive settings - safe to commit)
+# LLM Configuration
 # =============================================================================
-# Default LLM provider settings
-DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"  # UF Hypergator endpoint
-DEFAULT_LLM_MODEL = "gpt-oss-120b"                            # UF Hypergator reasoning model (120b more reliable than 20b)
-
-# Alternative configurations (comment/uncomment to switch):
-# OpenAI:
-# DEFAULT_LLM_BASE_URL = None  # None = use OpenAI default
-# DEFAULT_LLM_MODEL = "gpt-4o-2024-11-20"
-
-# Other UF Hypergator models:
-# DEFAULT_LLM_MODEL = "gpt-oss-20b"              # Reasoning model
-# DEFAULT_LLM_MODEL = "gpt-oss-120b"             # Large reasoning model
-# DEFAULT_LLM_MODEL = "llama-3.1-8b-instruct"    # Smaller/faster Llama
+# Try to load from local config file (gitignored), fall back to defaults
+try:
+    from llm_config import LLM_BASE_URL, LLM_MODEL
+    DEFAULT_LLM_BASE_URL = LLM_BASE_URL
+    DEFAULT_LLM_MODEL = LLM_MODEL
+except ImportError:
+    # Default: UF Hypergator API (works for most users)
+    DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"
+    DEFAULT_LLM_MODEL = "gpt-oss-120b"
 # =============================================================================
 
 class SimulationScenario:
