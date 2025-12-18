@@ -27,9 +27,11 @@ class AgentDecisionService:
         agent_ids = self.agent_repository.get_shuffled_agent_ids()
         new_orders = []
 
-        # Check if we should use serial execution (for gpt-oss models which have parallel issues)
-        from scenarios.base import DEFAULT_LLM_MODEL
-        use_serial = 'gpt-oss' in DEFAULT_LLM_MODEL.lower()
+        # Check if we should use serial execution (for gpt-oss models on remote APIs with rate limits)
+        # Local vLLM endpoints can handle parallel requests fine
+        from scenarios.base import DEFAULT_LLM_MODEL, DEFAULT_LLM_BASE_URL
+        is_local = DEFAULT_LLM_BASE_URL and 'localhost' in DEFAULT_LLM_BASE_URL
+        use_serial = 'gpt-oss' in DEFAULT_LLM_MODEL.lower() and not is_local
 
         decisions = {}
         if use_serial:
@@ -47,7 +49,7 @@ class AgentDecisionService:
                 )
         else:
             # Parallel execution for other models (faster)
-            with ThreadPoolExecutor(max_workers=min(len(agent_ids), 10)) as executor:
+            with ThreadPoolExecutor(max_workers=min(len(agent_ids), 2)) as executor:
                 future_to_agent = {
                     executor.submit(
                         self.agent_repository.get_agent_decision,

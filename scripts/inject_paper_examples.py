@@ -75,7 +75,38 @@ def load_scenario_data(run_dir: Path) -> dict:
         with open(meta_path) as f:
             data['metadata'] = json.load(f)
 
+    # Load decisions.log for actual prompts
+    decisions_log_path = run_dir / "decisions.log"
+    if decisions_log_path.exists():
+        data['decisions_log'] = decisions_log_path.read_text()
+
     return data
+
+
+def parse_prompt_from_log(decisions_log: str, agent_id: int, round_num: int) -> tuple:
+    """Extract actual system and user prompts from decisions.log.
+
+    Returns:
+        tuple: (system_prompt, user_prompt) or (None, None) if not found
+    """
+    import re
+
+    # Pattern to match agent prompt blocks
+    # Format: ========== Agent X Prompt ==========\nSystem: ...\nUser: ...
+    # Use =+ to match variable number of equals signs
+    pattern = rf'=+ Agent {agent_id} Prompt =+\nSystem: (.*?)\nUser: (.*?)(?=\n=+ Agent \d+ (?:Response|Prompt) =+|$)'
+
+    matches = list(re.finditer(pattern, decisions_log, re.DOTALL))
+
+    # Find the match for the specific round by counting occurrences
+    # Each agent appears once per round, so match index == round_num
+    if round_num < len(matches):
+        match = matches[round_num]
+        system_prompt = match.group(1).strip()
+        user_prompt = match.group(2).strip()
+        return system_prompt, user_prompt
+
+    return None, None
 
 
 def get_agent_prompt(agent_type: str) -> str:
@@ -190,19 +221,78 @@ def clean_text(text: str) -> str:
     if not isinstance(text, str):
         return str(text) if text is not None else ''
     return (text
+            .replace('\u202f', ' ')   # narrow no-break space
+            .replace('\u00a0', ' ')   # non-breaking space
             .replace('\u2011', '-')   # non-breaking hyphen
             .replace('\u2013', '-')   # en-dash
             .replace('\u2014', '--')  # em-dash
+            .replace('\u2212', '-')   # minus sign
+            .replace('\u00d7', 'x')   # multiplication sign
+            .replace('\u00f7', '/')   # division sign
             .replace(';', ','))       # semicolons to commas for readability
 
 
-def format_response_wrapped(row: pd.Series, width: int = 70) -> str:
-    """Format a structured decision as pretty-printed text for verbatim blocks.
+def clean_for_latex(text: str) -> str:
+    """Clean text for LaTeX verbatim environments."""
+    import re
+    if not isinstance(text, str):
+        return str(text) if text is not None else ''
+
+    # Remove emojis and other problematic unicode
+    text = re.sub(r'[^\x00-\x7F]+', lambda m: {
+        '\u2013': '-',   # en-dash
+        '\u2014': '--',  # em-dash
+        '\u2011': '-',   # non-breaking hyphen
+        '\u2212': '-',   # minus sign
+        '\u2019': "'",   # right single quote
+        '\u201c': '"',   # left double quote
+        '\u201d': '"',   # right double quote
+        '\u2026': '...', # ellipsis
+        '\u00a0': ' ',   # non-breaking space
+        '\u202f': ' ',   # narrow no-break space
+        '\u2248': '~',   # approximately equal
+        '\u2192': '->',  # right arrow
+    }.get(m.group(), ''), text)
+
+    # Remove duplicate MESSAGING sections (keep only the first)
+    messaging_pattern = r'(MESSAGING:.*?Be explicit about your messaging strategy.*?\n)'
+    matches = list(re.finditer(messaging_pattern, text, re.DOTALL))
+    if len(matches) > 1:
+        # Remove all but the first occurrence
+        for match in reversed(matches[1:]):
+            text = text[:match.start()] + text[match.end():]
+
+    # Remove log timestamps that may have leaked into prompts
+    text = re.sub(r'\n\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d+ -.*$', '', text)
+
+    return text
+
+
+def truncate_prompt_for_display(user_prompt: str, max_section: str = "Payment Schedule") -> str:
+    """Truncate user prompt to just the market state section for display.
+
+    Cuts at 'Payment Schedule' to keep the figure manageable while
+    showing the key market state, position, and dividend info.
+    """
+    if max_section in user_prompt:
+        # Find where to cut
+        idx = user_prompt.index(max_section)
+        truncated = user_prompt[:idx].rstrip()
+        return truncated
+    return user_prompt
+
+
+def format_response_wrapped(rows: pd.DataFrame, width: int = 70) -> str:
+    """Format structured decision(s) as pretty-printed text for verbatim blocks.
 
     Manually formats to ensure lines don't exceed width for LaTeX verbatim.
+
+    Args:
+        rows: DataFrame with one or more rows for the same agent/round decision.
     """
-    valuation_reasoning = clean_text(row.get('valuation_reasoning', ''))
-    reasoning = clean_text(row.get('reasoning', ''))
+    first_row = rows.iloc[0]
+    valuation_reasoning = clean_text(first_row.get('valuation_reasoning', ''))
+    reasoning = clean_text(first_row.get('reasoning', ''))
 
     # Wrap long text fields
     val_reason_wrapped = textwrap.fill(valuation_reasoning, width=width-4,
@@ -210,23 +300,25 @@ def format_response_wrapped(row: pd.Series, width: int = 70) -> str:
     reasoning_wrapped = textwrap.fill(reasoning, width=width-4,
                                        initial_indent='    ', subsequent_indent='    ')
 
-    # Build order info
+    # Build order info from all rows
     order_lines = []
-    if row.get('decision') not in ['Hold', 'none', None]:
-        order_type = str(row.get('order_type', 'none')).replace('OrderType.', '').lower()
-        order_lines.append(f'    decision: {row.get("decision", "Hold")}')
-        order_lines.append(f'    quantity: {int(row.get("quantity", 0))}')
-        order_lines.append(f'    order_type: {order_type}')
-        if row.get('price') is not None:
-            order_lines.append(f'    price_limit: {row.get("price")}')
+    for _, row in rows.iterrows():
+        if row.get('decision') not in ['Hold', 'none', None]:
+            order_type = str(row.get('order_type', 'none')).replace('OrderType.', '').lower()
+            order_lines.append(f'    decision: {row.get("decision", "Hold")}')
+            order_lines.append(f'    quantity: {int(row.get("quantity", 0))}')
+            order_lines.append(f'    order_type: {order_type}')
+            # Only include price_limit for limit orders
+            if order_type == 'limit' and row.get('price') is not None:
+                order_lines.append(f'    price_limit: {row.get("price")}')
 
     lines = [
         "valuation_reasoning:",
         val_reason_wrapped,
-        f"valuation: {row.get('valuation', 0)}",
-        f"price_prediction_t: {row.get('price_prediction_t', 0)}",
-        f"price_prediction_t1: {row.get('price_prediction_t1', 0)}",
-        f"price_prediction_t2: {row.get('price_prediction_t2', 0)}",
+        f"valuation: {first_row.get('valuation', 0)}",
+        f"price_prediction_t: {first_row.get('price_prediction_t', 0)}",
+        f"price_prediction_t1: {first_row.get('price_prediction_t1', 0)}",
+        f"price_prediction_t2: {first_row.get('price_prediction_t2', 0)}",
         "order:" if order_lines else "order: none",
     ]
     if order_lines:
@@ -239,27 +331,42 @@ def format_response_wrapped(row: pd.Series, width: int = 70) -> str:
     return '\n'.join(lines)
 
 
-def format_response(row: pd.Series, wrap_width: int = 65) -> str:
-    """Format a structured decision as JSON response."""
-    response = {
-        "valuation_reasoning": clean_text(row.get('valuation_reasoning', '')),
-        "valuation": row.get('valuation', 0),
-        "price_prediction_t": row.get('price_prediction_t', 0),
-        "price_prediction_t1": row.get('price_prediction_t1', 0),
-        "price_prediction_t2": row.get('price_prediction_t2', 0),
-        "orders": [{
+def format_response(rows: pd.DataFrame, wrap_width: int = 65) -> str:
+    """Format structured decision(s) as JSON response.
+
+    Args:
+        rows: DataFrame with one or more rows for the same agent/round decision.
+              Multiple rows represent multiple orders in the same decision.
+    """
+    # Use first row for shared fields (reasoning, valuation, etc.)
+    first_row = rows.iloc[0]
+
+    # Build orders list from all rows
+    orders = []
+    for _, row in rows.iterrows():
+        if row.get('decision') in ['Hold', 'none', None]:
+            continue
+        order_type = str(row.get('order_type', 'none')).replace('OrderType.', '').lower()
+        order = {
             "decision": row.get('decision', 'Hold'),
             "quantity": int(row.get('quantity', 0)),
-            "order_type": str(row.get('order_type', 'none')).replace('OrderType.', '').lower(),
-            "price_limit": row.get('price', None)
-        }] if row.get('decision') not in ['Hold', 'none', None] else [],
-        "replace_decision": "Add" if row.get('decision') not in ['Hold', 'none', None] else "Cancel",
-        "reasoning": clean_text(row.get('reasoning', ''))
-    }
+            "order_type": order_type,
+        }
+        # Only add price_limit for limit orders (not market orders)
+        if order_type == 'limit' and row.get('price') is not None:
+            order["price_limit"] = row.get('price')
+        orders.append(order)
 
-    # Clean up None values
-    if response['orders'] and response['orders'][0]['price_limit'] is None:
-        del response['orders'][0]['price_limit']
+    response = {
+        "valuation_reasoning": clean_text(first_row.get('valuation_reasoning', '')),
+        "valuation": first_row.get('valuation', 0),
+        "price_prediction_t": first_row.get('price_prediction_t', 0),
+        "price_prediction_t1": first_row.get('price_prediction_t1', 0),
+        "price_prediction_t2": first_row.get('price_prediction_t2', 0),
+        "orders": orders,
+        "replace_decision": "Add" if orders else "Cancel",
+        "reasoning": clean_text(first_row.get('reasoning', ''))
+    }
 
     return json.dumps(response, indent=2, ensure_ascii=False)
 
@@ -288,29 +395,42 @@ def generate_example(scenario: str, round_num: int = 1, agent_type: str = None,
     if round_decisions.empty:
         raise ValueError(f"No decisions found for round {round_num}, agent_type={agent_type}")
 
-    # Pick first matching decision
-    row = round_decisions.iloc[0]
+    # Get first agent_id matching the filter
+    first_row = round_decisions.iloc[0]
+    agent_id = first_row['agent_id']
 
-    # Get system prompt
-    agent_type_id = row.get('agent_type_id', row.get('agent_type', 'default'))
-    system_prompt = get_agent_prompt(agent_type_id)
+    # Get ALL rows for this agent/round (may have multiple orders)
+    agent_rows = round_decisions[round_decisions['agent_id'] == agent_id]
 
-    # Build user prompt (market state)
-    user_prompt = format_market_state(data, round_num, row['agent_id'], condensed=condensed)
+    # Try to get actual prompts from decisions.log (ground truth)
+    system_prompt = None
+    user_prompt = None
+    if 'decisions_log' in data:
+        system_prompt, user_prompt = parse_prompt_from_log(
+            data['decisions_log'], agent_id, round_num
+        )
 
-    # Format response
-    response = format_response(row)
+    # Fall back to reconstruction if decisions.log not available
+    if system_prompt is None:
+        agent_type_id = first_row.get('agent_type_id', first_row.get('agent_type', 'default'))
+        system_prompt = get_agent_prompt(agent_type_id)
+
+    if user_prompt is None:
+        user_prompt = format_market_state(data, round_num, agent_id, condensed=condensed)
+
+    # Format response (pass all rows for this agent to capture multiple orders)
+    response = format_response(agent_rows)
 
     return {
         'scenario': scenario,
         'run_dir': str(run_dir),
         'round': round_num,
-        'agent_type': row.get('agent_type', 'Unknown'),
-        'agent_id': row['agent_id'],
+        'agent_type': first_row.get('agent_type', 'Unknown'),
+        'agent_id': first_row['agent_id'],
         'system_prompt': system_prompt,
         'user_prompt': user_prompt,
         'response': response,
-        'raw_row': row.to_dict()
+        'raw_rows': agent_rows.to_dict('records')  # All rows for multi-order support
     }
 
 
@@ -340,15 +460,15 @@ def generate_appendix_example(scenario: str = "social", round_num: int = 1,
     latex.append("")
 
     latex.append(r"\paragraph{System Prompt}")
-    latex.append(to_latex_verbatim(example['system_prompt']))
+    latex.append(to_latex_verbatim(clean_for_latex(example['system_prompt'])))
     latex.append("")
 
     latex.append(r"\paragraph{User Prompt (Market State)}")
-    latex.append(to_latex_verbatim(example['user_prompt']))
+    latex.append(to_latex_verbatim(clean_for_latex(example['user_prompt'])))
     latex.append("")
 
     latex.append(r"\paragraph{LLM Response}")
-    latex.append(to_latex_verbatim(example['response']))
+    latex.append(to_latex_verbatim(clean_for_latex(example['response'])))
 
     return "\n".join(latex)
 
@@ -370,7 +490,7 @@ def generate_main_text_figure(scenario: str = "social", round_num: int = 1,
     # === FIGURE 1: PROMPT ===
     latex.append(r"\begin{figure}[htbp]")
     latex.append(r"\centering")
-    latex.append(r"\begin{tcolorbox}[colback=gray!5, colframe=gray!50, width=\textwidth, boxrule=0.5pt]")
+    latex.append(r"\begin{tcolorbox}[colback=gray!5, colframe=gray!50, width=0.95\textwidth, boxrule=0.5pt]")
     latex.append("")
 
     # System prompt (full - these are typically short)
@@ -382,17 +502,19 @@ def generate_main_text_figure(scenario: str = "social", round_num: int = 1,
     latex.append(r"\vspace{0.5em}")
     latex.append("")
 
-    # User prompt (full market state)
+    # User prompt (truncated to market state section, cleaned for LaTeX)
+    user_prompt_display = truncate_prompt_for_display(example['user_prompt'])
+    user_prompt_display = clean_for_latex(user_prompt_display)
     latex.append(r"\textbf{User Prompt:}")
-    latex.append(r"\begin{small}")
+    latex.append(r"\begin{footnotesize}")
     latex.append(r"\begin{verbatim}")
-    latex.append(example['user_prompt'])
+    latex.append(user_prompt_display)
     latex.append(r"\end{verbatim}")
-    latex.append(r"\end{small}")
+    latex.append(r"\end{footnotesize}")
     latex.append("")
 
     latex.append(r"\end{tcolorbox}")
-    latex.append(r"\caption{Example prompt to an LLM trading agent. The system prompt establishes the agent's strategy. The user prompt provides market state, position information, dividend parameters, and interest rate---all information needed for fundamental valuation.}")
+    latex.append(r"\caption{Example prompt to an LLM trading agent. The system prompt establishes the agent's strategy. The user prompt provides market state, position information, and dividend parameters (truncated; full prompt in Appendix).}")
     latex.append(r"\label{fig:llm_prompt}")
     latex.append(r"\end{figure}")
     latex.append("")
@@ -407,14 +529,15 @@ def generate_main_text_figure(scenario: str = "social", round_num: int = 1,
     latex.append(r"\begin{small}")
     latex.append(r"\begin{verbatim}")
     # Use wrapped format for readable line lengths
-    raw_row = pd.Series(example['raw_row'])
-    latex.append(format_response_wrapped(raw_row, width=70))
+    raw_rows = pd.DataFrame(example['raw_rows'])
+    latex.append(format_response_wrapped(raw_rows, width=70))
     latex.append(r"\end{verbatim}")
     latex.append(r"\end{small}")
     latex.append("")
 
     latex.append(r"\end{tcolorbox}")
-    latex.append(r"\caption{LLM agent response to the prompt in Figure~\ref{fig:llm_prompt}. The agent calculates fundamental value as \$28.00 using the dividend discount model (\$1.40/0.05), recognizes the current price of \$31.50 is overvalued, and places a limit sell order. The structured output format ensures machine-readable decisions while the reasoning fields reveal the agent's decision process.}")
+
+    latex.append(r"\caption{LLM agent response to the prompt in Figure~\ref{fig:llm_prompt}. The structured output format ensures machine-readable decisions while the reasoning fields reveal the agent's decision process.}")
     latex.append(r"\label{fig:llm_response}")
     latex.append(r"\end{figure}")
 

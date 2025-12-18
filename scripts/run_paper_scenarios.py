@@ -160,7 +160,7 @@ def run_scenario(scenario_name: str, output_dir: Path):
 
         # Copy all important files at root level
         for fname in ['metadata.json', 'parameters.json', 'structured_decisions.csv',
-                      'margin_calls.csv', 'validation_errors.csv']:
+                      'margin_calls.csv', 'validation_errors.csv', 'decisions.log']:
             if (latest_sim_dir / fname).exists():
                 shutil.copy2(latest_sim_dir / fname, scenario_dir / fname)
 
