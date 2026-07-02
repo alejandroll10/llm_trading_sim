@@ -143,6 +143,7 @@ Market State:
 - Best Public Estimate of Risk-Neutral Fundamental Value: {fundamental_display}
 - Last Trading Volume: {volume_display}
 - Price/Fundamental Ratio: {pf_ratio_display}
+- Transaction Fee: {transaction_fee_display}
 
 - Recent Trades
 {trade_history}

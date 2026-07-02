@@ -162,7 +162,8 @@ class ComponentManager:
             'midpoint': public_info['order_book_state']['midpoint'],
             'last_trade_price': public_info['last_trade']['price'],
             'volume': public_info['last_trade']['volume'],
-            'trade_history': public_info['trade_history'][-5:]
+            'trade_history': public_info['trade_history'][-5:],
+            'transaction_cost': public_info.get('transaction_cost', 0.0)
         }
 
     def format_fundamental_state(self) -> dict:

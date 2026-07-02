@@ -70,15 +70,25 @@ def release_for_trade(trade: Trade, order_repository, agent_repository, commitme
 
 class CommitmentCalculator:
     """Handles all commitment-related calculations"""
-    def __init__(self, order_book=None, order_books=None):
+    def __init__(self, order_book=None, order_books=None, transaction_cost=0.0):
         """Initialize commitment calculator
 
         Args:
             order_book: Single order book (single-stock mode or backwards compatibility)
             order_books: Dict of {stock_id: OrderBook} for multi-stock mode
+            transaction_cost: Proportional fee rate per trade (float, or dict of
+                {stock_id: rate}). Buy commitments include the fee so committed
+                cash covers price + fee at execution.
         """
         self.order_book = order_book
         self.order_books = order_books  # For multi-stock support
+        self.transaction_cost = transaction_cost
+
+    def get_fee_rate(self, stock_id: str) -> float:
+        """Fee rate for a given stock"""
+        if isinstance(self.transaction_cost, dict):
+            return self.transaction_cost.get(stock_id, 0.0)
+        return self.transaction_cost or 0.0
 
     def calculate_required_commitment(self, order: Order, current_price: float) -> float:
         """Calculate initial commitment required"""
@@ -91,42 +101,43 @@ class CommitmentCalculator:
             return self._calculate_limit_buy_commitment(order)
 
     def _calculate_limit_buy_commitment(self, order: Order) -> float:
-        """Simple limit order commitment"""
-        return order.quantity * order.price
-    
-    @staticmethod
-    def calculate_release_amount(trade: Trade, order: Order) -> float:
+        """Simple limit order commitment (includes transaction fee)"""
+        return order.quantity * order.price * (1 + self.get_fee_rate(order.stock_id))
+
+    def calculate_release_amount(self, trade: Trade, order: Order) -> float:
         """Calculate how much of the committed (held) funds/shares to release after a trade"""
         if order.side == 'buy':
             if order.order_type == 'market':
                 # Market order logic unchanged
                 proportion = trade.quantity / (order.remaining_quantity + trade.quantity)
                 release_amount = order.current_cash_commitment * proportion
-                
+
                 if order.remaining_quantity == 0:
                     release_amount = order.current_cash_commitment
             else:
                 # For limit orders:
-                # 1. Release the amount used for the trade
-                release_amount = trade.quantity * trade.price
-                
+                # 1. Release the amount used for the trade (price + fee)
+                release_amount = trade.quantity * trade.price * (1 + self.get_fee_rate(order.stock_id))
+
                 # 2. If order is now complete, also release any remaining commitment
                 #    (this handles cases where we got a better price than limit)
                 if order.remaining_quantity == 0:
                     release_amount = order.current_cash_commitment
-                
+
             return min(release_amount, order.current_cash_commitment)
         else:
             return min(trade.quantity, order.current_share_commitment)
 
     def _calculate_market_buy_commitment(self, order: Order, current_price: float) -> float:
-        """Dynamic market order commitment based on order book"""
+        """Dynamic market order commitment based on order book (includes transaction fee)"""
+        fee_multiplier = 1 + self.get_fee_rate(order.stock_id)
+
         # Get the correct order book for this stock
         order_book = self._get_order_book_for_stock(order.stock_id)
 
         if not order_book:
             # Fallback if no order book available
-            return order.quantity * (current_price * 1.1)  # 10% buffer
+            return order.quantity * (current_price * 1.1) * fee_multiplier  # 10% buffer
 
         total_cost, fillable_qty = order_book.estimate_market_order_cost(
             order.quantity, 'buy'
@@ -136,7 +147,7 @@ class CommitmentCalculator:
             unfilled = order.quantity - fillable_qty
             total_cost += unfilled * (current_price * 1.1)  # 10% buffer
 
-        return total_cost
+        return total_cost * fee_multiplier
 
     def _get_order_book_for_stock(self, stock_id: str):
         """Get the appropriate order book for a given stock

@@ -375,6 +375,13 @@ class AgentRepository:
         if changes.cash_change != 0:
             self.update_account_balance(agent_id, changes.cash_change, 'main', payment_type='trade', round_number=self.context.round_number)
 
+        # Track transaction fees (already included in cash_change);
+        # fees leave the system, so the verifier nets them out per round
+        fee = getattr(changes, 'fee', 0.0)
+        if fee:
+            agent.fees_paid += fee
+            agent.transaction_fees_this_round += fee
+
         # Update shares through dedicated method, passing stock_id for multi-stock support
         if changes.shares_change != 0:
             self.update_share_balance(agent_id, changes.shares_change, stock_id=changes.stock_id)

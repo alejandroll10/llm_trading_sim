@@ -43,9 +43,12 @@ class OrderStateManager:
         try:
             # Calculate required commitment
             # For limit orders, use limit price; for market orders, use current price
+            # Buy commitments include the transaction fee so committed cash
+            # covers price + fee at execution
             if order.side == 'buy':
                 commitment_price = order.price if order.order_type == 'limit' else current_price
-                required_cash = order.quantity * commitment_price
+                fee_rate = self.commitment_calculator.get_fee_rate(order.stock_id)
+                required_cash = order.quantity * commitment_price * (1 + fee_rate)
                 required_shares = 0
             else:
                 required_cash = 0

@@ -719,7 +719,14 @@ class SimulationVerifier:
                 if payment['round'] == current_round - 1
             )
 
-        expected_wealth_change = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid
+        # Transaction fees leave the system on every trade, so trades are
+        # zero-sum only net of fees
+        transaction_fees = sum(
+            agent.transaction_fees_this_round
+            for agent in self.agent_repository.get_all_agents()
+        )
+
+        expected_wealth_change = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid - transaction_fees
         actual_wealth_change = post_wealth - pre_wealth
 
         self.logger.info(f"Pre-round cash: ${pre_wealth:.2f}")
@@ -1038,6 +1045,12 @@ class SimulationVerifier:
             for agent in self.agent_repository.get_all_agents()
         )
 
+        # Transaction fees paid this round (cash that "leaves" the system on trades)
+        transaction_fees = sum(
+            agent.transaction_fees_this_round
+            for agent in self.agent_repository.get_all_agents()
+        )
+
         # DEBUG: Add detailed logging for payment breakdown
         self.logger.warning(
             f"[CASH_DEBUG] Round {current_round} Payment Breakdown:\n"
@@ -1048,14 +1061,16 @@ class SimulationVerifier:
             f"  Leverage Interest Charged: ${leverage_interest_charged:.2f}\n"
             f"  Leverage Cash Repaid: ${leverage_cash_repaid:.2f}\n"
             f"  Margin Call Costs: ${margin_call_costs:.2f}\n"
+            f"  Transaction Fees: ${transaction_fees:.2f}\n"
             f"  Total Cash Pre-Round: ${total_cash_pre:.2f}\n"
             f"  Total Cash Post-Round: ${total_cash_post:.2f}"
         )
 
         # Verify round-by-round changes
         # Margin call costs are subtracted because buy-to-cover creates shares without going through market
+        # Transaction fees are subtracted because they leave the system when trades execute
         cash_difference = total_cash_post - total_cash_pre
-        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid - margin_call_costs
+        total_round_payments = dividend_payment + interest_payment - borrow_fee_payment + leverage_cash_borrowed - leverage_interest_charged - leverage_cash_repaid - margin_call_costs - transaction_fees
 
         self.logger.warning(
             f"[CASH_DEBUG] Cash Verification:\n"
@@ -1116,9 +1131,16 @@ class SimulationVerifier:
             total_historical_leverage_interest_charged = sum(payment['amount'] for payment in self.context.market_history.leverage_interest_charged)
             total_historical_leverage_cash_repaid = sum(payment['amount'] for payment in self.context.market_history.leverage_cash_repaid)
 
+        # Cumulative transaction fees across all rounds (cash that left the system on trades)
+        total_historical_transaction_fees = sum(
+            agent.fees_paid
+            for agent in self.agent_repository.get_all_agents()
+        )
+
         expected_total_cash = (
             initial_cash + total_historical_dividends + total_historical_interest - total_historical_borrow_fees
             + total_historical_leverage_cash_borrowed - total_historical_leverage_interest_charged - total_historical_leverage_cash_repaid
+            - total_historical_transaction_fees
         )
 
         self.logger.info(f"\n=== System-wide cash verification ===")
@@ -1129,6 +1151,7 @@ class SimulationVerifier:
         self.logger.info(f"Total historical leverage cash borrowed: ${total_historical_leverage_cash_borrowed:.2f}")
         self.logger.info(f"Total historical leverage interest charged: ${total_historical_leverage_interest_charged:.2f}")
         self.logger.info(f"Total historical leverage cash repaid: ${total_historical_leverage_cash_repaid:.2f}")
+        self.logger.info(f"Total historical transaction fees: ${total_historical_transaction_fees:.2f}")
         self.logger.info(f"Current total cash: ${total_cash_post:.2f}")
         self.logger.info(f"Expected total: ${expected_total_cash:.2f}")
 

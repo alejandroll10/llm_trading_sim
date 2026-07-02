@@ -42,7 +42,8 @@ class MarketPriceProvider(BaseProvider):
             metadata={
                 'round': metadata['round'],  # Get round from metadata
                 'best_bid': market_state['best_bid'],
-                'best_ask': market_state['best_ask']
+                'best_ask': market_state['best_ask'],
+                'transaction_cost': market_state.get('transaction_cost', 0.0)
             }
         )
 
@@ -59,7 +60,8 @@ class MarketPriceProvider(BaseProvider):
             metadata={
                 'round': metadata['round'],
                 'best_bid': market_state['best_bid'],
-                'best_ask': market_state['best_ask']
+                'best_ask': market_state['best_ask'],
+                'transaction_cost': market_state.get('transaction_cost', 0.0)
             }
         )
 

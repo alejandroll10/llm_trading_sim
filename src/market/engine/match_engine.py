@@ -534,8 +534,11 @@ class MatchingEngine:
                 agent = self.agent_repository.get_agent(trade.seller_id)
 
                 if agent.borrowed_cash > 0:
-                    # Calculate proceeds from sale
-                    proceeds = trade.quantity * trade.price
+                    # Calculate proceeds from sale, net of transaction fee
+                    # (the seller only receives trade_value - fee in cash)
+                    from services.shared_service_factory import SharedServiceFactory
+                    fee_rate = SharedServiceFactory.get_transaction_cost(trade.stock_id)
+                    proceeds = trade.quantity * trade.price * (1 - fee_rate)
 
                     # Repay borrowed cash (up to what was borrowed)
                     repayment = min(proceeds, agent.borrowed_cash)

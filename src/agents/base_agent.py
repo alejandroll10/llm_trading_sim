@@ -134,6 +134,11 @@ class BaseAgent(ABC):
         # without going through the market, so cash "leaves" the system
         self.margin_call_cost_this_round: float = 0.0
 
+        # Transaction fees: cash paid on trades leaves the system, so the
+        # verifier needs the per-round total; cumulative is for reporting
+        self.fees_paid: float = 0.0
+        self.transaction_fees_this_round: float = 0.0
+
         # Initialize services (issue #57 refactoring)
         self.verifier = AgentVerifier(self)  # Phase 1
         self.margin_service = MarginService(self)  # Phase 2
@@ -498,6 +503,7 @@ class BaseAgent(ABC):
             'borrowed_cash': self.borrowed_cash,
             'leverage_ratio': self.leverage_ratio,
             'leverage_interest_paid': self.leverage_interest_paid,
+            'fees_paid': self.fees_paid,
         }
 
     def _release_cash(self, amount: float):

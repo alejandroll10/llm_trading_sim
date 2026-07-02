@@ -255,7 +255,8 @@ class DataRecorder:
                 'timestamp': timestamp,
                 'dividend_cash': round(state.dividend_cash, 2),
                 'committed_cash': round(state.committed_cash, 2),  # Cash locked in pending buy orders
-                'total_cash': round(state.cash + state.committed_cash + state.dividend_cash, 2)  # Full total including committed
+                'total_cash': round(state.cash + state.committed_cash + state.dividend_cash, 2),  # Full total including committed
+                'fees_paid': round(agent.fees_paid, 2)  # Cumulative transaction fees paid
             })
 
     def _record_stock_positions(self, round_number: int, market_state: dict, timestamp: str):

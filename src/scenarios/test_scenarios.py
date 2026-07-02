@@ -144,6 +144,48 @@ SCENARIOS = {
             }
         }
     ),
+    "test_fee_zero": SimulationScenario(
+        name="test_fee_zero",
+        description="A/B fee regression test (control): deterministic buyers/sellers with zero transaction cost",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "TRANSACTION_COST": 0.0,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'buy_trader': 1,
+                    'sell_trader': 1,
+                    'hold_trader': 1
+                }
+            }
+        }
+    ),
+    "test_fee_nonzero": SimulationScenario(
+        name="test_fee_nonzero",
+        description="A/B fee regression test (treatment): identical to test_fee_zero but with a 1% per-trade fee charged to both counterparties",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "TRANSACTION_COST": 0.01,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'buy_trader': 1,
+                    'sell_trader': 1,
+                    'hold_trader': 1
+                }
+            }
+        }
+    ),
     "test_leverage": SimulationScenario(
         name="test_leverage",
         description="Test scenario for leverage trading (2x leverage with margin calls)",

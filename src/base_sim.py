@@ -214,10 +214,19 @@ class BaseSimulation:
         # Initialize shared services
         if self.is_multi_stock:
             # Multi-stock: Pass all order books so commitment calculator can use the right one
-            SharedServiceFactory.initialize(order_books=self.order_books)
+            SharedServiceFactory.initialize(
+                order_books=self.order_books,
+                transaction_cost={
+                    stock_id: config.get('TRANSACTION_COST', 0.0)
+                    for stock_id, config in stock_configs.items()
+                }
+            )
         else:
             # Single-stock: Pass single order book
-            SharedServiceFactory.initialize(order_book=self.order_book)
+            SharedServiceFactory.initialize(
+                order_book=self.order_book,
+                transaction_cost=transaction_cost
+            )
         
         # Create order services through factory
         self.order_state_manager, self.trade_execution_service = OrderServiceFactory.create_services(
@@ -375,7 +384,9 @@ class BaseSimulation:
             agents_logger=LoggingService.get_logger('agents'),
             order_state_manager=self.order_state_manager,
             order_book=self.order_book,
-            order_repository=self.order_repository
+            order_repository=self.order_repository,
+            position_calculator=SharedServiceFactory.get_position_calculator(),
+            commitment_calculator=SharedServiceFactory.get_commitment_calculator()
         )
 
         # Initialize matching engine(s)
@@ -455,9 +466,10 @@ class BaseSimulation:
         # Log initial states
         self._log_round_start(round_number)
 
-        # Reset margin call costs for this round (for verification tracking)
+        # Reset margin call costs and transaction fees for this round (for verification tracking)
         for agent in self.agent_repository.get_all_agents():
             agent.margin_call_cost_this_round = 0.0
+            agent.transaction_fees_this_round = 0.0
 
         # Store pre-round states for verification
         pre_round_states = self.verifier.store_pre_round_states()

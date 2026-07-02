@@ -151,6 +151,9 @@ class MarketStateFormatter:
 
                 # Calculated display values
                 'volume_display': MarketStateFormatter._format_volume(volume_signal),
+                'transaction_fee_display': MarketStateFormatter._format_transaction_fee(
+                    price_signal.metadata.get('transaction_cost', 0.0)
+                ),
                 'fundamental_display': MarketStateFormatter._format_fundamental(fundamental_signal),
                 'order_book_display': MarketStateFormatter._format_order_book(order_book_signal),
                 'orders_display': MarketStateFormatter._format_outstanding_orders(
@@ -274,6 +277,14 @@ class MarketStateFormatter:
         if volume_signal.metadata['round'] == 0:
             return MarketStateFormatter.NO_HISTORY
         return f"{volume_signal.value:.2f}"
+
+    @staticmethod
+    def _format_transaction_fee(transaction_cost: float) -> str:
+        """Format transaction fee display"""
+        if not transaction_cost:
+            return "None"
+        return (f"{transaction_cost * 100:.2f}% of trade value, "
+                f"charged to both buyer and seller on execution")
 
     @staticmethod
     def _format_pf_ratio(price_signal: InformationSignal,
@@ -635,6 +646,13 @@ class MarketStateFormatter:
                 lines.append(f"  Best Bid: ${best_bid:.2f}")
             if best_ask:
                 lines.append(f"  Best Ask: ${best_ask:.2f}")
+
+            # Show per-stock transaction fee if any
+            stock_fee = price_signal.metadata.get('transaction_cost', 0.0)
+            if stock_fee:
+                lines.append(
+                    f"  Transaction Fee: {MarketStateFormatter._format_transaction_fee(stock_fee)}"
+                )
 
             # Show order book depth from order_book_signal
             if order_book_signal:

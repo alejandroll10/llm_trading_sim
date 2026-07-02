@@ -24,6 +24,20 @@ class MarginService:
         """
         self.agent = agent
 
+    @staticmethod
+    def _get_fee_rate(stock_id: str = "DEFAULT_STOCK") -> float:
+        """Per-trade transaction fee rate for forced liquidation trades"""
+        from services.shared_service_factory import SharedServiceFactory
+        return SharedServiceFactory.get_transaction_cost(stock_id)
+
+    def _charge_transaction_fee(self, fee: float):
+        """Deduct a transaction fee from agent cash and track it for verification"""
+        if fee <= 0:
+            return
+        self.agent.cash -= fee
+        self.agent.fees_paid += fee
+        self.agent.transaction_fees_this_round += fee
+
     # ========== SHORT SELLING MARGIN METHODS ==========
 
     def get_max_borrowable_shares(self, current_price: float) -> float:
@@ -169,13 +183,15 @@ class MarginService:
             excess = self.agent.borrowed_shares - max_borrowable
             original_borrowed = self.agent.borrowed_shares
             cost = excess * current_price
+            fee = self._get_fee_rate() * cost
 
             # Execute forced buy-to-cover
             self.agent.borrowed_shares -= excess
             self.agent.shares += excess
             self.agent.cash -= cost
-            self.agent.record_payment('main', -cost, 'trade', round_number)
-            # Track margin call cost for cash verification
+            self._charge_transaction_fee(fee)
+            self.agent.record_payment('main', -(cost + fee), 'trade', round_number)
+            # Track margin call cost for cash verification (fee tracked separately)
             self.agent.margin_call_cost_this_round += cost
 
             LoggingService.log_margin_call(
@@ -256,11 +272,13 @@ class MarginService:
 
         # Execute buy-to-cover for each stock
         total_cost = 0
+        total_fee = 0
         for cover_info in stocks_to_cover:
             stock_id = cover_info['stock_id']
             shares = cover_info['shares']
             price = cover_info['price']
             cost = shares * price
+            fee = self._get_fee_rate(stock_id) * cost
 
             # Update positions
             self.agent.borrowed_positions[stock_id] = max(0, self.agent.borrowed_positions.get(stock_id, 0) - shares)
@@ -269,7 +287,9 @@ class MarginService:
 
             self.agent._update_position(stock_id, self.agent.positions.get(stock_id, 0) + shares)
             self.agent.cash -= cost
+            self._charge_transaction_fee(fee)
             total_cost += cost
+            total_fee += fee
 
             # Log margin call for this stock
             LoggingService.log_margin_call(
@@ -285,8 +305,8 @@ class MarginService:
 
         # Record the payment and track for verification
         if total_cost > 0:
-            self.agent.record_payment('main', -total_cost, 'trade', round_number)
-            # Track margin call cost for cash verification (cash "leaves" system)
+            self.agent.record_payment('main', -(total_cost + total_fee), 'trade', round_number)
+            # Track margin call cost for cash verification (cash "leaves" system; fee tracked separately)
             self.agent.margin_call_cost_this_round += total_cost
 
         # Log overall margin call event
@@ -501,6 +521,7 @@ class MarginService:
 
         # Execute forced liquidation
         total_proceeds = 0
+        total_fee = 0
         repayment = 0
 
         for liquidate_info in stocks_to_liquidate:
@@ -508,11 +529,14 @@ class MarginService:
             shares = liquidate_info['shares']
             price = liquidate_info['price']
             proceeds = shares * price
+            fee = self._get_fee_rate(stock_id) * proceeds
 
             # Update positions - sell the shares
             self.agent._update_position(stock_id, max(0, self.agent.positions.get(stock_id, 0) - shares))
             self.agent.cash += proceeds
+            self._charge_transaction_fee(fee)
             total_proceeds += proceeds
+            total_fee += fee
 
             # Log margin call for this stock
             LoggingService.log_margin_call(
@@ -534,9 +558,9 @@ class MarginService:
             if self.agent.cash_lending_repo:
                 self.agent.cash_lending_repo.release_cash(self.agent.agent_id, repayment)
 
-        # Record payment
+        # Record payment (net of transaction fee)
         if total_proceeds > 0:
-            self.agent.record_payment('main', total_proceeds, 'trade', round_number)
+            self.agent.record_payment('main', total_proceeds - total_fee, 'trade', round_number)
 
         # Log overall event
         LoggingService.log_agent_state(
