@@ -191,15 +191,22 @@ class InformationService:
         metadata['accuracy'] = capability.accuracy
 
         if category == SignalCategory.MARKET:
-            # Handle market data (e.g., order book depth). Copy the dict before
-            # truncating so we never mutate the shared base signal (the same
-            # value object is handed to every agent).
-            if capability.depth is not None and isinstance(value, dict):
+            # Handle market data (e.g., order book depth). Always copy the dict
+            # so the served value never aliases the shared base signal — the same
+            # value object is handed to every agent, and under `delay > 0` it is
+            # the dict stored in a past round's `signal_history['base']` entry
+            # (see #99). The copy runs regardless of `depth` so a config combining
+            # `order_book` + `delay` cannot leak a mutable reference into history.
+            if isinstance(value, dict):
                 value = dict(value)
-                if 'buy_levels' in value:
-                    value['buy_levels'] = value['buy_levels'][:capability.depth]
-                if 'sell_levels' in value:
-                    value['sell_levels'] = value['sell_levels'][:capability.depth]
+                # Rebuild the level lists as new list objects too, so list-level
+                # mutation (append/replace) can't reach back into history either.
+                # `depth is None` copies the full list; otherwise it truncates —
+                # slicing produces a fresh list in both cases.
+                depth = capability.depth
+                for side in ('buy_levels', 'sell_levels'):
+                    if side in value:
+                        value[side] = value[side][:depth] if depth is not None else list(value[side])
 
         elif category == SignalCategory.FUNDAMENTAL:
             # Apply noise to fundamental signals
