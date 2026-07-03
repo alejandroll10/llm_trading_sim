@@ -1,6 +1,7 @@
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import os
+import copy
 import json
 import hashlib
 import numpy as np
@@ -54,8 +55,10 @@ def save_parameters(run_dir: Path, params: dict):
     with open(run_dir / 'parameters.json', 'w') as f:
         json.dump(params, f, indent=4)
     
-    # Save to latest_sim directory with scenario subfolder
-    sim_type = run_dir.parts[-2]  # Extract scenario name from run_dir path
+    # Save to latest_sim directory with scenario subfolder.
+    # sim_type is everything between the top-level 'logs' dir and the timestamp dir;
+    # it may contain slashes for nested sweep cells (sweeps/<name>/<cell_id>).
+    sim_type = str(Path(*run_dir.parts[1:-1]))  # Extract scenario name from run_dir path
     latest_dir = Path('logs') / 'latest_sim'
     latest_dir.mkdir(parents=True, exist_ok=True)
     
@@ -138,11 +141,30 @@ def run_scenario(
     allow_short_selling: bool = None,
     margin_requirement: float = None,
     borrow_rate: float = None,
+    param_overrides: dict = None,
+    sim_type_override: str = None,
 ):
-    """Run a single scenario by name"""
-    # Load scenario
+    """Run a single scenario by name.
+
+    Args:
+        param_overrides: Optional dict of top-level scenario parameters to override
+            (e.g. {"LLM_TEMPERATURE": 0.7, "LLM_SEED": 7, "MODEL_OPEN_AI": "gpt-oss-120b"}).
+            Applied on top of the scenario's parameters; used by the sweep driver.
+        sim_type_override: Optional label to use for the output directory / sim_type
+            instead of the scenario name (used by the sweep driver to give each cell
+            its own output directory).
+
+    Returns:
+        The completed BaseSimulation instance.
+    """
+    # Load scenario. Deep-copy the parameters so overrides (CLI flags, sweep cells)
+    # never mutate the shared scenario registry / leak between successive runs.
     scenario = get_scenario(scenario_name)
-    params = scenario.parameters
+    params = copy.deepcopy(scenario.parameters)
+
+    # Apply top-level parameter overrides (sweep driver) before anything reads them.
+    if param_overrides:
+        params.update(param_overrides)
 
     # Apply overrides if provided
     agent_params = params.get("AGENT_PARAMS", {})
@@ -156,13 +178,16 @@ def run_scenario(
         borrow_model.setdefault('payment_frequency', 1)
         agent_params['borrow_model'] = borrow_model
 
+    # Label used for the output directory (sweep cells override this).
+    sim_type = sim_type_override or scenario.name
+
     # Set random seeds for reproducibility
     np.random.seed(params["RANDOM_SEED"])
     random.seed(params["RANDOM_SEED"])
 
     # Create run directory with scenario info
     run_dir = create_run_directory(
-        sim_type=scenario.name,
+        sim_type=sim_type,
         description=scenario.description,
         parameters=params
     )
@@ -182,11 +207,13 @@ def run_scenario(
             agent_params=params["AGENT_PARAMS"],
             dividend_params=None,  # Per-stock dividend params in stock_configs
             model_open_ai=params["MODEL_OPEN_AI"],
+            llm_temperature=params.get("LLM_TEMPERATURE", 0.0),
+            llm_seed=params.get("LLM_SEED", 42),
             interest_params=params["INTEREST_MODEL"],
             enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False),
             fundamental_info_mode=params["FUNDAMENTAL_INFO_MODE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
-            sim_type=scenario.name,
+            sim_type=sim_type,
             stock_configs=params["STOCKS"],  # NEW: Pass stock configurations
             news_enabled=params.get("NEWS_ENABLED", False)
         )
@@ -204,10 +231,12 @@ def run_scenario(
             agent_params=params["AGENT_PARAMS"],
             dividend_params=params["DIVIDEND_PARAMS"],
             model_open_ai=params["MODEL_OPEN_AI"],
+            llm_temperature=params.get("LLM_TEMPERATURE", 0.0),
+            llm_seed=params.get("LLM_SEED", 42),
             interest_params=params["INTEREST_MODEL"],
             fundamental_info_mode=params["FUNDAMENTAL_INFO_MODE"],
             infinite_rounds=params["INFINITE_ROUNDS"],
-            sim_type=scenario.name,
+            sim_type=sim_type,
             enable_intra_round_margin_checking=params.get("ENABLE_INTRA_ROUND_MARGIN_CHECKING", False),
             news_enabled=params.get("NEWS_ENABLED", False)
         )
@@ -237,6 +266,8 @@ def run_scenario(
             f"Cash: ${state.cash:.2f}, "
             f"Shares: {state.total_shares}, "
             f"Total Value: ${state.wealth:.2f}")
+
+    return simulation
 
 def main():
     """

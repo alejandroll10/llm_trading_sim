@@ -27,6 +27,8 @@ class LLMRequest:
     round_number: int
     is_multi_stock: bool = False
     enabled_features: Set[Feature] = None  # NEW: Feature configuration for dynamic schema
+    temperature: float = 0.0  # Sampling temperature for the LLM API call
+    seed: int = 42  # Deterministic sampling seed for the LLM API call
 
     def __post_init__(self):
         """Set default features if none provided (backward compatibility)"""
@@ -54,9 +56,9 @@ class LLMService:
             self.client = openai.OpenAI(base_url=DEFAULT_LLM_BASE_URL, timeout=timeout_config)
         else:
             self.client = openai.OpenAI(timeout=timeout_config)
+        # NOTE: temperature and seed are now supplied per request (LLMRequest),
+        # configurable via scenario params LLM_TEMPERATURE / LLM_SEED.
 
-        self.seed = 42
-    
     def get_decision(self, request: LLMRequest) -> LLMResponse:
         """Get decision from LLM using dynamic schema based on enabled features"""
         # Special case for hold_llm agent type to avoid API calls
@@ -124,8 +126,8 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
                     model=request.model,
                     messages=messages,
                     response_format=dynamic_schema,
-                    temperature=0.0,
-                    seed=self.seed
+                    temperature=request.temperature,
+                    seed=request.seed
                 )
                 elapsed = time.time() - start_time
                 logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Response in {elapsed:.1f}s")

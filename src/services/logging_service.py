@@ -37,8 +37,11 @@ class LoggingService:
         cls._latest_dir = base_log_dir / 'latest_sim'
         cls._data_dir = cls._run_dir / 'data'
 
-        # Extract scenario name from run_id (format: scenario_name/timestamp)
-        scenario_name = run_id.split('/')[0] if '/' in run_id else run_id
+        # Extract scenario name from run_id (format: scenario_name/timestamp).
+        # scenario_name may itself contain slashes (e.g. sweep cells use
+        # "sweeps/<sweep_name>/<cell_id>"), so strip only the trailing timestamp
+        # rather than keeping just the first path segment.
+        scenario_name = run_id.rsplit('/', 1)[0] if '/' in run_id else run_id
 
         # Create scenario-specific directory in latest_sim
         scenario_dir = cls._latest_dir / scenario_name

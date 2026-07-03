@@ -175,6 +175,11 @@ DEFAULT_PARAMS = {
 
     # Agent parameters
     "MODEL_OPEN_AI": DEFAULT_LLM_MODEL,  # Set at top of this file
+    # LLM sampling parameters (defaults preserve prior hard-coded behavior).
+    # Per-agent-type overrides can be set via AGENT_PARAMS['type_specific_params'][type]
+    # using the 'temperature' and 'seed' keys (parallel to per-type 'model').
+    "LLM_TEMPERATURE": 0.0,  # Sampling temperature for LLM trading agents
+    "LLM_SEED": 42,          # Deterministic sampling seed for LLM trading agents
     "AGENT_PARAMS": {
         # Feature toggles for agent capabilities (opt-in by default)
         'MEMORY_ENABLED': False,  # Enable memory notes system (notes_to_self field)

@@ -19,10 +19,15 @@ class LLMAgent(BaseAgent):
                  model_open_ai: str = "gpt-oss-20b",
                  enabled_features: Set[Feature] = None,
                  fundamental_info_mode: FundamentalInfoMode = FundamentalInfoMode.FULL,
+                 llm_temperature: float = 0.0,
+                 llm_seed: int = 42,
                  *args, **kwargs):  # Usually set via scenario params
         super().__init__(agent_id, *args, **kwargs)
         self.agent_type = AGENT_TYPES[agent_type]
         self.model = model_open_ai
+        # LLM sampling parameters (per-agent; may be overridden per agent type)
+        self.llm_temperature = llm_temperature
+        self.llm_seed = llm_seed
         self._formatter = MarketStateFormatter()
         self._llm_service = LLMService()
 
@@ -114,7 +119,9 @@ class LLMAgent(BaseAgent):
                 agent_id=self.agent_id,
                 round_number=round_number,
                 is_multi_stock=is_multi_stock,
-                enabled_features=self.enabled_features
+                enabled_features=self.enabled_features,
+                temperature=self.llm_temperature,
+                seed=self.llm_seed
             )
             
             # Log prompt

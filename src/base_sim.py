@@ -64,6 +64,8 @@ class BaseSimulation:
                  hide_fundamental_price: bool = True,  # DEPRECATED: use fundamental_info_mode
                  fundamental_info_mode: Optional[FundamentalInfoMode] = None,
                  model_open_ai = "gpt-oss-20b",  # Usually set via DEFAULT_PARAMS from .env
+                 llm_temperature: float = 0.0,  # Sampling temperature for LLM agents
+                 llm_seed: int = 42,  # Deterministic sampling seed for LLM agents
                  dividend_params: dict = None,
                  interest_params: dict = None,
                  borrow_params: dict = None,
@@ -133,6 +135,8 @@ class BaseSimulation:
         self.fundamental_volatility = fundamental_volatility
         self.news_enabled = news_enabled
         self.model_open_ai = model_open_ai
+        self.llm_temperature = llm_temperature
+        self.llm_seed = llm_seed
 
         # Fundamental info mode: controls what agents see
         # Handle backwards compatibility with hide_fundamental_price
@@ -546,6 +550,11 @@ class BaseSimulation:
         # Set model name for hold_llm agent, or use type-specific model override
         model = "hold_llm" if agent_type == "hold_llm" else type_specific_params.get('model', self.model_open_ai)
 
+        # LLM sampling params: per-agent-type override (parallel to per-type 'model'),
+        # falling back to the simulation-wide defaults.
+        llm_temperature = type_specific_params.get('temperature', self.llm_temperature)
+        llm_seed = type_specific_params.get('seed', self.llm_seed)
+
         # Extract enabled features from agent_params
         from agents.LLMs.services.schema_features import FeatureRegistry
         enabled_features = FeatureRegistry.extract_features_from_config(agent_params)
@@ -556,7 +565,9 @@ class BaseSimulation:
             agent_type=agent_type,
             model_open_ai=model,
             enabled_features=enabled_features,
-            fundamental_info_mode=self.fundamental_info_mode
+            fundamental_info_mode=self.fundamental_info_mode,
+            llm_temperature=llm_temperature,
+            llm_seed=llm_seed
         )
 
     def initialize_agents(self, agent_params: dict):
