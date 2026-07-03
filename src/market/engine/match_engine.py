@@ -177,12 +177,10 @@ class MatchingEngine:
                 if short_trades:
                     self._process_margin_call_share_returns(short_trades)
 
-                # Leverage margin: repay borrowed cash from sale proceeds
-                leverage_trades = [t for t in margin_trades if hasattr(t, 'seller_id') and
-                                  any(o.agent_id == t.seller_id and o.side == 'sell'
-                                      for o in leverage_margin_orders)]
-                if leverage_trades:
-                    self._process_leverage_margin_call_repayments(leverage_trades, new_price, round_number)
+                # Leverage margin: borrowed cash is repaid automatically when the
+                # forced sell fills, via the auto debt repayment block in
+                # agent_repository.update_agent_position_after_trade. A second
+                # repayment pass here would apply the same proceeds twice (issue #92).
 
                 # Recalculate price after margin trades
                 new_price = self.trade_processing_service.calculate_new_price(trades, new_price)
@@ -511,53 +509,3 @@ class MatchingEngine:
         )
 
         return order
-
-    def _process_leverage_margin_call_repayments(self, leverage_trades: List, current_price: float, round_number: int) -> None:
-        """Process leverage margin call trades and repay borrowed cash.
-
-        When leverage margin call orders fill (agent sells shares), the proceeds
-        should be used to repay borrowed cash.
-
-        Args:
-            leverage_trades: List of filled leverage margin call trades
-            current_price: Current price for calculations
-            round_number: Current round number for context recording
-        """
-        if not leverage_trades:
-            return
-
-        logger = LoggingService.get_logger('market')
-
-        for trade in leverage_trades:
-            # Process seller side (agent liquidating their position)
-            if hasattr(trade, 'seller_id'):
-                agent = self.agent_repository.get_agent(trade.seller_id)
-
-                if agent.borrowed_cash > 0:
-                    # Calculate proceeds from sale, net of transaction fee
-                    # (the seller only receives trade_value - fee in cash)
-                    from services.shared_service_factory import SharedServiceFactory
-                    fee_rate = SharedServiceFactory.get_transaction_cost(trade.stock_id)
-                    proceeds = trade.quantity * trade.price * (1 - fee_rate)
-
-                    # Repay borrowed cash (up to what was borrowed)
-                    repayment = min(proceeds, agent.borrowed_cash)
-
-                    if repayment > 0:
-                        # Reduce borrowed cash
-                        old_borrowed = agent.borrowed_cash
-                        agent.borrowed_cash -= repayment
-
-                        # Return cash to lending pool if available
-                        if hasattr(agent, 'cash_lending_repo') and agent.cash_lending_repo:
-                            agent.cash_lending_repo.release_cash(agent.agent_id, repayment)
-
-                        # Record repayment in context for cash conservation tracking
-                        if self.context:
-                            self.context.record_leverage_cash_repaid(amount=repayment, round_number=round_number)
-
-                        logger.warning(
-                            f"[LEVERAGE_MARGIN_REPAY] Agent {agent.agent_id} repaid ${repayment:.2f} "
-                            f"from sale proceeds (${proceeds:.2f}). "
-                            f"Borrowed cash: ${old_borrowed:.2f} -> ${agent.borrowed_cash:.2f}"
-                        )
