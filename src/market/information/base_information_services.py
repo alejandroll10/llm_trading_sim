@@ -57,7 +57,7 @@ class InformationService:
                     # Build a private, capability-modified copy for each stock so
                     # asymmetric-information designs also work in multi-stock mode.
                     agent_stock_signals = {
-                        stock_id: self._generate_agent_signals(agent, stock_signals, round_number)
+                        stock_id: self._generate_agent_signals(agent, stock_signals, round_number, stock_id)
                         for stock_id, stock_signals in all_stock_signals.items()
                     }
                 else:
@@ -112,20 +112,77 @@ class InformationService:
         
         return self.current_signals[agent_id]
     
-    def _modify_signal(self, signal: InformationSignal, capability: InfoCapability, round_number: int) -> InformationSignal:
-        """Modify signal based on agent capabilities and signal category"""
+    def _get_delayed_base_signal(self, info_type: InformationType, round_number: int,
+                                 delay: int, stock_id: Optional[str]) -> Optional[InformationSignal]:
+        """Return the base signal for ``info_type`` from ``round_number - delay``.
+
+        Looks the signal up in ``signal_history`` (which is populated for the
+        current round BEFORE agent signals are generated, so past rounds are
+        always present once they exist). Returns ``None`` during the first
+        ``delay`` rounds — before any history for the target round exists — so
+        callers fall back to serving the current (freshest) signal.
+
+        Handles both layouts: single-stock ``history['base'][info_type]`` and
+        multi-stock ``history['base'][stock_id][info_type]``.
+        """
+        target_round = round_number - delay
+        if target_round < 0:
+            return None
+        history = self.signal_history.get(target_round)
+        if not history:
+            return None
+        base = history.get('base')
+        if base is None:
+            return None
+        if self.is_multi_stock:
+            stock_base = base.get(stock_id)
+            if not stock_base:
+                return None
+            return stock_base.get(info_type)
+        return base.get(info_type)
+
+    def _modify_signal(self, signal: InformationSignal, capability: InfoCapability,
+                       round_number: int, stock_id: Optional[str] = None) -> InformationSignal:
+        """Modify signal based on agent capabilities and signal category.
+
+        Capability application order (documented, order matters):
+          1. DELAY (first): if ``capability.delay > 0`` and a signal from
+             ``round_number - delay`` exists, serve that stale round's VALUE.
+             Only the value is staled; the CURRENT round's structural metadata
+             (``round``, ``periods_remaining``, ``redemption_value``) is kept,
+             because downstream horizon math combines ``periods_remaining`` with
+             the undelayed public price round (``formatting_services``), and a
+             stale ``periods_remaining`` would corrupt that horizon. The agent
+             thus gets a delayed *estimate of value* while still knowing the true
+             time-to-redemption.
+          2. NOISE / ACCURACY (second): the agent's own ``noise_level`` and
+             ``accuracy`` are then realized NOW on the (possibly stale) value —
+             modelling a latency-limited instrument reading old data, rather than
+             re-realizing the noise at the original round.
+        """
         category = SIGNAL_CATEGORIES[signal.type]
-        
+
         # 1. Handle PUBLIC signals (always pass through unchanged)
         if category == SignalCategory.PUBLIC:
             return signal
-        
+
         # 2. Check if signal is enabled for this agent
         if not capability.enabled:
             return None
-        
-        # 3. Process by category
+
+        # 3. Apply DELAY first: serve a stale VALUE from `round - delay` if that
+        # round's history exists. Structural metadata stays current (see docstring).
+        delayed_from_round = None
         value = signal.value
+        if capability.delay > 0:
+            delayed = self._get_delayed_base_signal(
+                signal.type, round_number, capability.delay, stock_id
+            )
+            if delayed is not None:
+                value = delayed.value
+                delayed_from_round = round_number - capability.delay
+
+        # 4. Process by category
         reliability = signal.reliability * capability.accuracy
         metadata = signal.metadata.copy()
         # Record the applied capability so it can be logged and (optionally)
@@ -159,8 +216,17 @@ class InformationService:
 
         # Apply common modifications
         if capability.delay > 0:
-            metadata['original_round'] = round_number
             metadata['delay'] = capability.delay
+            metadata['current_round'] = round_number
+            if delayed_from_round is not None:
+                # Served a stale value from an earlier round.
+                metadata['original_round'] = delayed_from_round
+                metadata['is_stale'] = True
+            else:
+                # First `delay` rounds: no history yet, so the current (fresh)
+                # value was served. Record this so logs don't misread it as stale.
+                metadata['original_round'] = round_number
+                metadata['is_stale'] = False
 
         # Optional prompt disclosure of this agent's own signal quality.
         if self.disclose_signal_quality:
@@ -194,17 +260,23 @@ class InformationService:
         return self._others_quality_summary
 
     def _generate_agent_signals(self, agent, base_signals: Dict[InformationType, InformationSignal],
-                              round_number: int) -> Dict[InformationType, InformationSignal]:
-        """Generate agent-specific signals based on their capabilities"""
+                              round_number: int, stock_id: Optional[str] = None) -> Dict[InformationType, InformationSignal]:
+        """Generate agent-specific signals based on their capabilities.
+
+        ``stock_id`` identifies which stock these base signals belong to (None in
+        single-stock mode); it is threaded to ``_modify_signal`` so the delay
+        capability can look the stale value up in the correct per-stock history.
+        """
         agent_signals = {}
-        
+
         for info_type, base_signal in base_signals.items():
             if hasattr(agent, 'info_capabilities') and info_type in agent.info_capabilities:
                 capability = agent.get_info_capability(info_type)
                 modified_signal = self._modify_signal(
                     base_signal,
                     capability,
-                    round_number
+                    round_number,
+                    stock_id
                 )
                 if modified_signal is not None:
                     agent_signals[info_type] = modified_signal

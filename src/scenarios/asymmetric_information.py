@@ -103,6 +103,51 @@ SCENARIOS = {
     ),
 
     # ========================================================================
+    # Regression: DELAYED fundamental signal (issue #98). Agent 1 receives the
+    # FUNDAMENTAL signal with a 1-round delay; agent 0 is the undelayed control.
+    #
+    # The framework enforces a CONSTANT fundamental value by construction
+    # (redemption_value = expected_dividend / interest_rate; see
+    # scenarios/base.py::_calculate_fundamental_values), so the delay is verified
+    # via the signal metadata rather than the value: for the delayed agent,
+    # info_signals.log must show, each round R>=1, `original_round == R - 1`,
+    # `current_round == R`, and `is_stale == True`, while round 0 falls back to
+    # the fresh value (`is_stale == False`, no history yet). Structural metadata
+    # (`periods_remaining`) must still track the CURRENT round R, not the stale
+    # round, so time-to-redemption stays correct. Deterministic gap traders keep
+    # this offline and assertable.
+    # ========================================================================
+    "asymmetric_delayed_signal_test": SimulationScenario(
+        name="asymmetric_delayed_signal_test",
+        description=(
+            "2 deterministic gap traders; agent 1 receives the FUNDAMENTAL "
+            "signal with a 1-round delay, agent 0 is the undelayed control. "
+            "Regression for functional signal delay (issue #98)."
+        ),
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 5,
+            "FUNDAMENTAL_INFO_MODE": FundamentalInfoMode.FULL,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'gap_trader': 2,
+                },
+                'info_capabilities': {
+                    'by_index': {
+                        # Agent 1 sees last round's fundamental; agent 0 is fresh.
+                        1: {'fundamental': {'delay': 1}},
+                    },
+                },
+            },
+        },
+    ),
+
+    # ========================================================================
     # Research variant: LLM value traders with heterogeneous private signals
     # AND prompt disclosure enabled (each agent is told its own signal quality
     # and the market-wide distribution). Common-knowledge asymmetric info.

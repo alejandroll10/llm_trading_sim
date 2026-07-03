@@ -43,9 +43,18 @@ Field support (see ``InformationService._modify_signal``):
                            FUNDAMENTAL-category signals (fundamental, dividend).
     - ``depth``          : truncates order-book (MARKET-category) levels.
     - ``accuracy``       : scales the signal's reported ``reliability``.
-    - ``delay``          : NOT YET FUNCTIONAL. It is recorded in the signal
-                           metadata but the service does not currently serve a
-                           stale value from history; treat as a no-op for now.
+    - ``delay``          : serves the signal VALUE from ``delay`` rounds ago
+                           (from ``signal_history``) instead of the current
+                           round; falls back to the current value for the first
+                           ``delay`` rounds (no history yet). Only the value is
+                           staled — the current round's structural metadata
+                           (``round``, ``periods_remaining``, ``redemption_value``)
+                           is preserved so time-to-redemption stays correct.
+                           Delay is applied BEFORE noise/accuracy, so the agent's
+                           own noise is realized on the stale value. Metadata
+                           records ``original_round``, ``current_round``,
+                           ``delay`` and ``is_stale``. Example:
+                           ``{'fundamental': {'delay': 1}}``.
 
 Precedence (later wins, merged per signal-type per field):
 ``default`` -> ``by_type[agent_type]`` -> ``by_index[global_index]``.
