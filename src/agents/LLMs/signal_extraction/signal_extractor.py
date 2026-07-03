@@ -22,6 +22,16 @@ class SignalExtractor:
             Dictionary containing dividend-related context data
         """
         metadata = dividend_signal.metadata
+
+        # Dividend signal disabled for this agent (value hidden via per-agent
+        # info_capabilities): expose no dividend info rather than formatting a
+        # None value (which would crash the FULL/PROCESS_ONLY template's :.2f).
+        if dividend_signal.value is None:
+            return {
+                'dividend_info_available': False,
+                'dividend_info_mode': 'unavailable'
+            }
+
         yields = metadata['yields']
 
         # Get dividend history from signal metadata (set by DividendProvider)

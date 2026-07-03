@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 
+from market.information.information_types import InformationType
 from services.short_interest_calculator import calculate_short_interest
 from services.dividend_calculator import (
     calculate_agent_dividends_received,
@@ -198,6 +199,56 @@ class DataRecorder:
                 'timestamp': timestamp
             })
 
+    @staticmethod
+    def _extract_realized_fundamental(agent) -> Dict[str, Any]:
+        """Extract the realized (as-seen) fundamental signal for an agent.
+
+        Returns the per-agent private fundamental value the agent actually
+        received this round, plus the applied noise level, reliability, and the
+        un-noised true value (when noise was applied). This is what lets us score
+        an agent's belief updating against the signal it was actually given.
+
+        Handles both single-stock (``private_signals[FUNDAMENTAL]``) and
+        multi-stock (``private_signals['multi_stock_signals'][stock][FUNDAMENTAL]``,
+        reported for the first stock) layouts. Missing signals -> None fields.
+        """
+        empty = {
+            'realized_fundamental': None,
+            'signal_noise_level': None,
+            'signal_reliability': None,
+            'signal_true_fundamental': None,
+        }
+        signals = getattr(agent, 'private_signals', None)
+        if not signals:
+            return empty
+
+        fundamental = None
+        if isinstance(signals, dict) and signals.get('is_multi_stock'):
+            multi = signals.get('multi_stock_signals') or {}
+            for stock_signals in multi.values():  # first stock with a fundamental
+                candidate = stock_signals.get(InformationType.FUNDAMENTAL)
+                if candidate is not None:
+                    fundamental = candidate
+                    break
+        elif isinstance(signals, dict):
+            fundamental = signals.get(InformationType.FUNDAMENTAL)
+
+        if fundamental is None:
+            return empty
+
+        metadata = getattr(fundamental, 'metadata', {}) or {}
+        value = fundamental.value
+        return {
+            'realized_fundamental': round(value, 4) if isinstance(value, (int, float)) else value,
+            # noise_level is stamped whenever a FUNDAMENTAL capability was applied.
+            'signal_noise_level': metadata.get('noise_level', 0.0),
+            'signal_reliability': fundamental.reliability,
+            # true_value is only stamped when noise was actually added; otherwise
+            # the realized value already IS the true value.
+            'signal_true_fundamental': round(metadata.get('true_value', value), 4)
+                if isinstance(metadata.get('true_value', value), (int, float)) else metadata.get('true_value', value),
+        }
+
     def _record_agent_data(self, round_number: int, timestamp: str, dividends: float,
                           dividends_by_stock: Dict[str, float] = None):
         """Record agent data, including dividends
@@ -256,7 +307,9 @@ class DataRecorder:
                 'dividend_cash': round(state.dividend_cash, 2),
                 'committed_cash': round(state.committed_cash, 2),  # Cash locked in pending buy orders
                 'total_cash': round(state.cash + state.committed_cash + state.dividend_cash, 2),  # Full total including committed
-                'fees_paid': round(agent.fees_paid, 2)  # Cumulative transaction fees paid
+                'fees_paid': round(agent.fees_paid, 2),  # Cumulative transaction fees paid
+                # Realized per-agent private signal (asymmetric-information designs)
+                **self._extract_realized_fundamental(agent)
             })
 
     def _record_stock_positions(self, round_number: int, market_state: dict, timestamp: str):

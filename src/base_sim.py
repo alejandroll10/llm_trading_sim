@@ -22,6 +22,10 @@ from agents.agent_manager.services.agent_decision_service import AgentDecisionSe
 from market.orders.order_service_factory import OrderServiceFactory
 from services.shared_service_factory import SharedServiceFactory
 from market.information.base_information_services import InformationService
+from market.information.info_capability_config import (
+    resolve_agent_info_capabilities,
+    validate_config as validate_info_capabilities_config,
+)
 from market.state.provider_registry import ProviderRegistry
 from services.logging_service import LoggingService
 from agents.agent_manager.services.borrowing_repository import BorrowingRepository
@@ -348,7 +352,8 @@ class BaseSimulation:
             # Create information service with all managers
             information_service = InformationService(
                 agent_repository=self.agent_repository,
-                market_state_managers=self.market_state_managers
+                market_state_managers=self.market_state_managers,
+                info_capabilities_config=self.agent_params.get('info_capabilities')
             )
 
             # Set information service on all managers
@@ -356,7 +361,10 @@ class BaseSimulation:
                 manager.information_service = information_service
         else:
             # Single stock: Original behavior
-            information_service = InformationService(agent_repository=self.agent_repository)
+            information_service = InformationService(
+                agent_repository=self.agent_repository,
+                info_capabilities_config=self.agent_params.get('info_capabilities')
+            )
             self.market_state_manager = MarketStateManager(
                 context=self.context,
                 order_book=self.order_book,
@@ -578,6 +586,13 @@ class BaseSimulation:
         # Extract required parameters
         agent_composition = agent_params['agent_composition']  # Use the provided composition directly
         self.logger.warning(f"Agent composition: {agent_composition}")
+
+        # Scenario-level per-agent private-signal config (optional). Validated once
+        # up front so bad config fails loudly at construction, not mid-simulation.
+        info_capabilities_config = agent_params.get('info_capabilities')
+        validate_info_capabilities_config(info_capabilities_config)
+        type_counters: dict = {}  # per-type index, for spreading heterogeneous signals
+
         for agent_type, count in agent_composition.items():
             for _ in range(count):
                 agent = self.create_agent(
@@ -585,6 +600,21 @@ class BaseSimulation:
                     agent_type=agent_type,
                     agent_params=agent_params
                 )
+
+                # Apply per-agent information capabilities (noise/delay/depth/etc.)
+                # resolved from the scenario config. type_index spreads by-type
+                # lists in composition order; global agent_id drives by_index/default.
+                if info_capabilities_config:
+                    type_index = type_counters.get(agent_type, 0)
+                    capabilities = resolve_agent_info_capabilities(
+                        info_capabilities_config,
+                        agent_type=agent_type,
+                        type_index=type_index,
+                        global_index=agent_id,
+                    )
+                    for info_type, capability in capabilities.items():
+                        agent.set_info_capability(info_type, capability)
+                type_counters[agent_type] = type_counters.get(agent_type, 0) + 1
 
                 # For multi-stock scenarios, set positions dict
                 if 'initial_positions' in agent_params:

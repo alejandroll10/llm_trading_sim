@@ -299,7 +299,8 @@ class MarketStateFormatter:
     def _format_order_book(order_book_signal: InformationSignal) -> str:
         """Format order book from signal"""
         lines = []
-        order_book = order_book_signal.value
+        # value is None when the order-book signal is disabled for this agent.
+        order_book = order_book_signal.value or {}
         metadata = order_book_signal.metadata
 
         # Add best bid/ask if available
@@ -338,10 +339,28 @@ class MarketStateFormatter:
 
     @staticmethod
     def _format_fundamental(fundamental_signal: InformationSignal) -> str:
-        """Format fundamental price from signal"""
+        """Format fundamental price from signal.
+
+        When the scenario enables signal-quality disclosure, the per-agent
+        capability layer stamps ``quality_disclosure`` / ``others_quality_disclosure``
+        into the signal metadata; surface it here so the prompt reflects that the
+        value is a private, possibly-noisy estimate (no template changes needed).
+        """
         if fundamental_signal.value is None:
-            return "Unavailable"
-        return f"${fundamental_signal.value:.2f}"
+            base = "Unavailable"
+        else:
+            base = f"${fundamental_signal.value:.2f}"
+
+        disclosures = []
+        own = fundamental_signal.metadata.get('quality_disclosure')
+        if own:
+            disclosures.append(own)
+        others = fundamental_signal.metadata.get('others_quality_disclosure')
+        if others:
+            disclosures.append(others)
+        if disclosures:
+            return base + "\n" + "\n".join(disclosures)
+        return base
 
     @staticmethod
     def _format_dividend_info_by_mode(
@@ -358,6 +377,10 @@ class MarketStateFormatter:
         Returns:
             Formatted dividend info string
         """
+        # Dividend signal disabled for this agent (value hidden): no dividend info.
+        if not context.get('dividend_info_available', True):
+            return DIVIDEND_INFO_NONE_TEMPLATE
+
         # NONE mode: minimal info
         if mode == FundamentalInfoMode.NONE:
             return DIVIDEND_INFO_NONE_TEMPLATE
@@ -655,7 +678,8 @@ class MarketStateFormatter:
                 )
 
             # Show order book depth from order_book_signal
-            if order_book_signal:
+            # (value is None when the order-book signal is disabled for this agent)
+            if order_book_signal and order_book_signal.value:
                 order_book = order_book_signal.value
                 buy_orders = len(order_book.get('buy_levels', []))
                 sell_orders = len(order_book.get('sell_levels', []))
