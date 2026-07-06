@@ -69,10 +69,17 @@ class OrderBookModifiers:
         if existing_buys or existing_sells:
             self._log_removals(existing_buys, existing_sells)
         
-        # Remove orders and update states
+        # Remove orders and update states. A filtered list comprehension does NOT
+        # preserve the heap invariant (removing a non-leaf element can leave the
+        # array unordered), so re-heapify. Skipping this leaves sell_orders[0] /
+        # buy_orders[0] pointing at a non-extreme order, which makes get_best_ask/
+        # get_best_bid and every crossing check read a phantom top-of-book and can
+        # produce a crossed market (issue #88/#101).
         self.buy_orders = [entry for entry in self.buy_orders if entry.agent_id != agent_id]
         self.sell_orders = [entry for entry in self.sell_orders if entry.agent_id != agent_id]
-        
+        heapq.heapify(self.buy_orders)
+        heapq.heapify(self.sell_orders)
+
         # Update states for removed orders
         for entry in existing_buys + existing_sells:
             if entry.order.state in [OrderState.ACTIVE, OrderState.PARTIALLY_FILLED]:
@@ -105,13 +112,18 @@ class OrderBookModifiers:
         if order.state in [OrderState.ACTIVE, OrderState.PARTIALLY_FILLED]:
             self.order_repository.transition_state(order.order_id, OrderState.CANCELLED)
 
-        # Remove from appropriate side
+        # Remove from appropriate side. Re-heapify after the filtered rebuild:
+        # a plain list comprehension breaks the min-heap invariant when the removed
+        # order is not a leaf, leaving heap[0] non-extreme. That corrupts best-bid/
+        # best-ask and crossing detection and can create a crossed market (#88/#101).
         if order.side == 'buy':
             self.buy_orders = [entry for entry in self.buy_orders
                               if entry.order.order_id != order.order_id]
+            heapq.heapify(self.buy_orders)
         else:
             self.sell_orders = [entry for entry in self.sell_orders
                               if entry.order.order_id != order.order_id]
+            heapq.heapify(self.sell_orders)
 
         self._update_public_view()
 
