@@ -1,6 +1,15 @@
 from typing import Dict, Any
 from enum import Enum
-from calculate_fundamental import calculate_fundamental_price, calibrate_redemption_value
+from calculate_fundamental import (
+    calculate_fundamental_price,
+    calibrate_redemption_value,
+    build_expected_dividend_path,
+    calculate_fundamental_path,
+    expected_dividend_from_params,
+    resolve_regime_params,
+    validate_regime_schedule,
+    verify_fundamental_path_consistency,
+)
 
 
 class FundamentalInfoMode(str, Enum):
@@ -133,6 +142,13 @@ class SimulationScenario:
 
         # Get dividend parameters
         dividend_params = params.get("DIVIDEND_PARAMS", {})
+
+        # Regime schedules (issue #96) produce a piecewise fundamental path
+        # instead of a constant fundamental value
+        if dividend_params.get("regime_schedule"):
+            self._calculate_regime_fundamental_values()
+            return
+
         base_dividend = dividend_params.get("base_dividend", 1.4)
         dividend_probability = dividend_params.get("dividend_probability", 0.5)
         dividend_variation = dividend_params.get("dividend_variation", 0.0)
@@ -171,6 +187,50 @@ class SimulationScenario:
             # The difference should be very small (floating point precision)
             difference = abs(test_fundamental - constant_fundamental)
             assert difference < 1e-10, f"Fundamental value not constant: {test_fundamental} != {constant_fundamental}"
+
+    def _calculate_regime_fundamental_values(self):
+        """Calculate the piecewise fundamental path for scenarios with a
+        dividend regime schedule (issue #96).
+
+        With DIVIDEND_PARAMS['regime_schedule'] = [{'round': r, ...overrides}, ...]
+        the fundamental value is no longer constant. Conventions:
+
+        - Redemption (finite horizon): K = terminal-regime E[d] / r, so the
+          fundamental is constant and equal to K within the terminal regime
+          segment, and follows the no-arbitrage recursion before it.
+        - FUNDAMENTAL_PRICE is the round-0 value of the path; the full
+          per-round path is stored in FUNDAMENTAL_PATH and applied each round
+          by the simulation (recorded in market_data.csv).
+        - Shifts are NOT announced to agents: under REALIZATIONS_ONLY agents
+          can only infer the change from realized dividends. Info modes that
+          reveal model parameters will truthfully show the active regime.
+        """
+        params = self.parameters
+        num_rounds = params["NUM_ROUNDS"]
+        is_infinite = params.get("INFINITE_ROUNDS", False)
+        dividend_params = params["DIVIDEND_PARAMS"]
+        interest_rate = params.get("INTEREST_MODEL", {}).get("rate", 0.05)
+
+        validate_regime_schedule(dividend_params, num_rounds)
+
+        expected_dividends = build_expected_dividend_path(dividend_params, num_rounds)
+        terminal_expected = expected_dividend_from_params(
+            resolve_regime_params(dividend_params, num_rounds - 1)
+        )
+        # Terminal anchor: redemption value for finite horizons, terminal-regime
+        # continuation value for infinite horizons (same number by convention)
+        terminal_value = terminal_expected / interest_rate
+
+        path = calculate_fundamental_path(expected_dividends, interest_rate, terminal_value)
+        verify_fundamental_path_consistency(path, expected_dividends, interest_rate, terminal_value)
+
+        params["FUNDAMENTAL_PRICE"] = path[0]
+        params["FUNDAMENTAL_PATH"] = path
+
+        if is_infinite:
+            params.pop("REDEMPTION_VALUE", None)
+        else:
+            params["REDEMPTION_VALUE"] = terminal_value
 
 # Base constants
 FUNDAMENTAL_WITH_DEFAULT_PARAMS = 28.0

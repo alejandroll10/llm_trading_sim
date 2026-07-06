@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from agents.agent_manager.services.payment_services import PaymentDestination
 from typing import Optional
 from services.logging_service import LoggingService
+from calculate_fundamental import resolve_regime_params, validate_regime_schedule
 
 @dataclass
 class DividendPaymentResult:
@@ -253,7 +254,24 @@ class DividendPaymentProcessor:
 class DividendService:
     """Coordinates dividend operations"""
     def __init__(self, agent_repository, logger, dividend_params, redemption_value=None, stock_id="DEFAULT_STOCK"):
-        self.calculator = DividendCalculator(dividend_params)
+        if not dividend_params:
+            raise ValueError("dividend_params is required")
+        # Regime schedule support (issue #96): dividend parameters can shift
+        # mid-run at scheduled round boundaries. The active parameters are
+        # resolved per round in _sync_regime; the payment destination stays
+        # fixed at its construction-time value.
+        self.dividend_params = dividend_params
+        validate_regime_schedule(dividend_params)
+        self.regime_schedule = sorted(
+            dividend_params.get('regime_schedule') or [], key=lambda e: e['round']
+        )
+        # Optional contrast cell: when announce_regime_shifts is true, agents
+        # receive a notice (via DividendProvider) that the process changed;
+        # by default shifts are silent
+        self.announce_regime_shifts = bool(dividend_params.get('announce_regime_shifts', False))
+        self._last_shift_round = None
+        self._active_regime_round = self._active_regime_start(0)
+        self.calculator = DividendCalculator(resolve_regime_params(dividend_params, 0))
         self.payment_processor = DividendPaymentProcessor(agent_repository, logger, stock_id)
         self.stock_id = stock_id
         self.dividend_history = []  # List of DividendRealization objects
@@ -270,6 +288,39 @@ class DividendService:
         except ValueError as e:
             LoggingService.get_logger('dividend').warning(f"{e}, defaulting to dividend account")
             self.dividend_destination = PaymentDestination.DIVIDEND_ACCOUNT
+
+    def _active_regime_start(self, round_number: int) -> Optional[int]:
+        """Start round of the schedule entry active at round_number (None = base params)."""
+        active_start = None
+        for entry in self.regime_schedule:
+            if entry['round'] <= round_number:
+                active_start = entry['round']
+            else:
+                break
+        return active_start
+
+    def _sync_regime(self, round_number: int):
+        """Switch the dividend model when crossing a regime boundary (issue #96).
+
+        Shifts are silent: nothing is pushed to agents here. Under
+        REALIZATIONS_ONLY agents can only infer the change from realized
+        dividends; info modes that reveal model parameters will truthfully
+        report the active regime via get_state().
+        """
+        if not self.regime_schedule:
+            return
+        active_start = self._active_regime_start(round_number)
+        if active_start != self._active_regime_round:
+            self._active_regime_round = active_start
+            self._last_shift_round = round_number
+            active_params = resolve_regime_params(self.dividend_params, round_number)
+            self.calculator = DividendCalculator(active_params)
+            LoggingService.get_logger('dividend').info(
+                f"Dividend regime shift for {self.stock_id} at round {round_number}: "
+                f"base={active_params.get('base_dividend')}, "
+                f"variation={active_params.get('dividend_variation')}, "
+                f"probability={active_params.get('dividend_probability')}"
+            )
 
     def process_dividend_payments(
         self,
@@ -324,6 +375,7 @@ class DividendService:
             DividendPaymentResult if payments were made, None otherwise
         """
         self.current_round = round_number
+        self._sync_regime(round_number)
         LoggingService.get_logger('dividend').info(f"Processing round end {round_number}")
 
         if self.calculator.should_pay_dividends(round_number) and not is_final_round:
@@ -352,6 +404,7 @@ class DividendService:
     def update(self, round_number: int):
         """Update state for the current round"""
         self.current_round = round_number
+        self._sync_regime(round_number)
         self._should_pay_this_round = self.calculator.should_pay_dividends(round_number)
 
     def get_last_realization(self) -> Optional[DividendRealization]:
@@ -366,6 +419,18 @@ class DividendService:
         # For backwards compatibility, extract total_dividend as float
         last_paid = last_realization.total_dividend if last_realization else None
 
+        # Regime-shift announcement (issue #96): only populated when the
+        # scenario opts in via announce_regime_shifts (contrast cell).
+        # Persistent from the shift round onward; rounds shown 1-indexed to
+        # match what agents see. The new parameters are NOT revealed.
+        regime_announcement = None
+        if self.announce_regime_shifts and self._last_shift_round is not None:
+            regime_announcement = (
+                f"ANNOUNCEMENT: The dividend process changed in round "
+                f"{self._last_shift_round + 1}. Dividends before that round were "
+                f"drawn from a different process."
+            )
+
         return {
             'model': model_info,
             'last_paid_dividend': last_paid,
@@ -373,5 +438,6 @@ class DividendService:
             'redemption_value': self.redemption_value,
             'next_payment_round': self._get_next_payment_round(),
             'should_pay': self._should_pay_this_round,
-            'style': self.style
+            'style': self.style,
+            'regime_announcement': regime_announcement
         }

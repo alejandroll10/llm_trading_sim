@@ -467,5 +467,53 @@ SCENARIOS = {
             }
         }
     ),
+    "test_regime_shift": SimulationScenario(
+        name="test_regime_shift",
+        description="Regression scenario for issue #96: unannounced dividend regime shift "
+                    "at round 5 (E[d] 1.4 -> 1.0) with deterministic agents; dividends and "
+                    "the piecewise fundamental path must track the active regime",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 10,
+            "INITIAL_PRICE": 28.0,
+            # Agents only observe realized dividends, never the model -
+            # the shift is unannounced by construction
+            "FUNDAMENTAL_INFO_MODE": "realizations_only",
+            "DIVIDEND_PARAMS": {
+                'type': 'stochastic',
+                'base_dividend': 1.4,
+                'dividend_frequency': 1,
+                'dividend_growth': 0.0,
+                'dividend_probability': 0.5,
+                'dividend_variation': 1.0,
+                'destination': 'dividend',
+                # Rounds 0-4: E[d] = 1.4 (FV drifts from ~21.75 toward 20)
+                # Rounds 5-9: E[d] = 1.0 (FV constant at 20 = redemption)
+                'regime_schedule': [
+                    {'round': 5, 'base_dividend': 1.0},
+                ],
+            },
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    # Deterministic agents only: no LLM calls, fully reproducible
+                    'gap_trader': 1,
+                    'deterministic_market_maker': 1,
+                    'hold_trader': 1,
+                },
+                'deterministic_params': {
+                    'gap_trader': {
+                        'threshold': 0.05,
+                        'max_proportion': 0.5,
+                        'scaling_factor': 2.0
+                    }
+                }
+            }
+        }
+    ),
 }
 

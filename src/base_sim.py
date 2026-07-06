@@ -33,6 +33,13 @@ from agents.agent_manager.services.borrowing_repository import BorrowingReposito
 from agents.agent_manager.services.cash_lending_repository import CashLendingRepository
 from verification.simulation_verifier import SimulationVerifier
 from scenarios.base import FundamentalInfoMode
+from calculate_fundamental import (
+    build_expected_dividend_path,
+    calculate_fundamental_path,
+    expected_dividend_from_params,
+    resolve_regime_params,
+    verify_fundamental_path_consistency,
+)
 import random
 import warnings
 from wordcloud import WordCloud
@@ -278,6 +285,12 @@ class BaseSimulation:
                 redemption_value=self.context.redemption_value
             ) if dividend_params else None
 
+        # Piecewise fundamental path for dividend regime schedules (issue #96):
+        # None for stationary scenarios, one value per round otherwise
+        self.fundamental_path = self._build_fundamental_path(interest_params)
+        if self.fundamental_path is not None:
+            self.context.fundamental_price = self.fundamental_path[0]
+
         # Initialize dividend shock structure (for systematic vs idiosyncratic shocks)
         # Can be configured at the agent_params level or individually per stock
         self.shock_config = agent_params.get('shock_structure', {}) if agent_params else {}
@@ -479,7 +492,8 @@ class BaseSimulation:
             cash_lending_repo=self.cash_lending_repo if self.leverage_enabled else None,
             interest_service=self.interest_service,
             borrow_service=self.borrow_service,
-            leverage_interest_service=self.leverage_interest_service if self.leverage_enabled else None
+            leverage_interest_service=self.leverage_interest_service if self.leverage_enabled else None,
+            fundamental_path=self.fundamental_path
         )
 
     def execute_round(self, round_number):
@@ -770,6 +784,48 @@ class BaseSimulation:
         else:
             self.market_state_manager.update_market_depth()
 
+    def _build_fundamental_path(self, interest_params: dict) -> Optional[list]:
+        """Build the per-round fundamental value path for a dividend regime
+        schedule (issue #96). Returns None for stationary scenarios.
+
+        The path follows the no-arbitrage recursion V_t = (e_t + V_{t+1})/(1+r)
+        anchored at the redemption value (finite horizon) or the terminal-regime
+        continuation value E[d]/r (infinite horizon). It is applied to
+        context.fundamental_price at the start of every round, so recorded
+        market data reflects the active regime.
+        """
+        if self.is_multi_stock:
+            for stock_id, config in self.stock_configs.items():
+                if (config.get('DIVIDEND_PARAMS') or {}).get('regime_schedule'):
+                    raise ValueError(
+                        f"Stock {stock_id}: dividend regime schedules are not yet "
+                        f"supported in multi-stock mode"
+                    )
+            return None
+        if not self.dividend_params or not self.dividend_params.get('regime_schedule'):
+            return None
+
+        interest_rate = (
+            interest_params or self.agent_params.get('interest_model', {})
+        ).get('rate', 0.05)
+        num_rounds = self.context._num_rounds
+
+        expected_dividends = build_expected_dividend_path(self.dividend_params, num_rounds)
+        if not self.infinite_rounds and self.context.redemption_value is not None:
+            terminal_value = self.context.redemption_value
+        else:
+            terminal_value = expected_dividend_from_params(
+                resolve_regime_params(self.dividend_params, num_rounds - 1)
+            ) / interest_rate
+
+        path = calculate_fundamental_path(expected_dividends, interest_rate, terminal_value)
+        verify_fundamental_path_consistency(path, expected_dividends, interest_rate, terminal_value)
+        self.logger.info(
+            f"Dividend regime schedule active: fundamental path {path[0]:.4f} -> {path[-1]:.4f}, "
+            f"terminal anchor {terminal_value:.4f}"
+        )
+        return path
+
     def _phase_update_market(self, round_number: int) -> dict:
         """Phase 1: Update market state and prepare for trading
 
@@ -868,6 +924,11 @@ class BaseSimulation:
             information_service.distribute_information(round_number)
         else:
             # Single stock: Original behavior
+            if self.fundamental_path is not None:
+                # Regime schedules: fundamental reflects the active dividend regime
+                self.context.fundamental_price = self.fundamental_path[
+                    min(round_number, len(self.fundamental_path) - 1)
+                ]
             self.context.update_public_info(round_number, last_volume)
             market_state = self.market_state_manager.update(
                 round_number=round_number,

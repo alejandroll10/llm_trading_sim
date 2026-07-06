@@ -37,6 +37,9 @@ class SignalExtractor:
         # Get dividend history from signal metadata (set by DividendProvider)
         dividend_history = metadata.get('dividend_history', [])
 
+        # Regime-shift notice (issue #96); None unless announce_regime_shifts is on
+        regime_announcement = metadata.get('regime_announcement')
+
         # NONE mode: no dividend information at all
         if mode == FundamentalInfoMode.NONE:
             return {
@@ -60,7 +63,8 @@ class SignalExtractor:
                 # Payment schedule (when, not how much)
                 'next_payment_round': metadata['next_payment_round'],
                 'dividend_destination': metadata.get('destination', 'dividend'),
-                'dividend_tradeable': metadata.get('tradeable', 'non-tradeable')
+                'dividend_tradeable': metadata.get('tradeable', 'non-tradeable'),
+                'regime_announcement': regime_announcement
             }
 
         # AVERAGE mode: show running statistics of past dividends
@@ -87,7 +91,8 @@ class SignalExtractor:
                 # Payment schedule
                 'next_payment_round': metadata['next_payment_round'],
                 'dividend_destination': metadata.get('destination', 'dividend'),
-                'dividend_tradeable': metadata.get('tradeable', 'non-tradeable')
+                'dividend_tradeable': metadata.get('tradeable', 'non-tradeable'),
+                'regime_announcement': regime_announcement
             }
 
         # PROCESS_ONLY and FULL modes: show full dividend model
@@ -118,7 +123,8 @@ class SignalExtractor:
             'next_payment_round': metadata['next_payment_round'],
             'should_pay': metadata['should_pay'],
             'dividend_destination': metadata.get('destination', 'dividend'),
-            'dividend_tradeable': metadata.get('tradeable', 'non-tradeable')
+            'dividend_tradeable': metadata.get('tradeable', 'non-tradeable'),
+            'regime_announcement': regime_announcement
         }
 
     @staticmethod

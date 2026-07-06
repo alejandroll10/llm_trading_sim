@@ -1,4 +1,131 @@
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional
+
+
+def expected_dividend_from_params(dividend_params: Dict[str, Any]) -> float:
+    """
+    Expected per-round dividend implied by a dividend parameter dict.
+
+    Uses the same two-point distribution as DividendCalculator:
+    E[d] = p * (base + variation) + (1 - p) * (base - variation)
+    """
+    base = dividend_params.get('base_dividend', 1.4)
+    variation = dividend_params.get('dividend_variation', 0.0)
+    prob = dividend_params.get('dividend_probability', 0.5)
+    return prob * (base + variation) + (1 - prob) * (base - variation)
+
+
+def validate_regime_schedule(dividend_params: Dict[str, Any], num_rounds: Optional[int] = None) -> None:
+    """
+    Validate DIVIDEND_PARAMS['regime_schedule'].
+
+    A schedule is a list of dicts, each with a 0-indexed 'round' key plus the
+    dividend-parameter overrides that take effect from that round onward.
+    Rounds must be unique, non-negative, and (if num_rounds is given) within
+    the simulation horizon.
+    """
+    schedule = dividend_params.get('regime_schedule')
+    if not schedule:
+        return
+    seen_rounds = set()
+    for entry in schedule:
+        if not isinstance(entry, dict) or 'round' not in entry:
+            raise ValueError(f"regime_schedule entries must be dicts with a 'round' key, got: {entry}")
+        start_round = entry['round']
+        if not isinstance(start_round, int) or start_round < 0:
+            raise ValueError(f"regime_schedule 'round' must be a non-negative int, got: {start_round}")
+        if start_round in seen_rounds:
+            raise ValueError(f"regime_schedule has duplicate round {start_round}")
+        seen_rounds.add(start_round)
+        if num_rounds is not None and start_round >= num_rounds:
+            raise ValueError(
+                f"regime_schedule round {start_round} is outside the simulation horizon ({num_rounds} rounds)"
+            )
+
+
+def resolve_regime_params(dividend_params: Dict[str, Any], round_number: int) -> Dict[str, Any]:
+    """
+    Resolve the active dividend parameters for a round under a regime schedule.
+
+    Each schedule entry {'round': r, **overrides} applies its overrides on top
+    of the base parameters (non-cumulatively: entries do not stack on each
+    other) for rounds >= r, until the next entry takes over. Rounds before the
+    first entry use the base parameters unchanged. The 'destination' of
+    dividend payments is fixed at construction by DividendService and should
+    not be overridden by a regime.
+    """
+    active = {k: v for k, v in dividend_params.items() if k != 'regime_schedule'}
+    current_entry = None
+    for entry in sorted(dividend_params.get('regime_schedule') or [], key=lambda e: e['round']):
+        if entry['round'] <= round_number:
+            current_entry = entry
+        else:
+            break
+    if current_entry is not None:
+        active.update({k: v for k, v in current_entry.items() if k != 'round'})
+    return active
+
+
+def build_expected_dividend_path(dividend_params: Dict[str, Any], num_rounds: int) -> List[float]:
+    """Per-round expected dividends implied by the (possibly scheduled) dividend params."""
+    return [
+        expected_dividend_from_params(resolve_regime_params(dividend_params, r))
+        for r in range(num_rounds)
+    ]
+
+
+def calculate_fundamental_path(
+    expected_dividends: List[float],
+    interest_rate: float,
+    terminal_value: float
+) -> List[float]:
+    """
+    Piecewise fundamental value path via backward recursion.
+
+    path[t] is the fundamental value at the start of round t (0-indexed), with
+    the round-t dividend paid at the end of the round (discounted one period):
+
+        V_T = terminal_value
+        V_t = (e_t + V_{t+1}) / (1 + r)
+
+    terminal_value is the redemption value K for finite horizons, or the
+    terminal-regime continuation value E[d]/r for infinite horizons. With a
+    constant e and terminal_value = e/r this reproduces the constant
+    fundamental e/r in every round, matching calculate_fundamental_price.
+    """
+    path = []
+    continuation = terminal_value
+    for expected in reversed(expected_dividends):
+        continuation = (expected + continuation) / (1 + interest_rate)
+        path.append(continuation)
+    path.reverse()
+    return path
+
+
+def verify_fundamental_path_consistency(
+    path: List[float],
+    expected_dividends: List[float],
+    interest_rate: float,
+    terminal_value: float,
+    tolerance: float = 1e-9
+) -> None:
+    """
+    Verify the no-arbitrage recursion FV_t * (1+r) = e_t + FV_{t+1} holds at
+    every round, including across regime boundaries. Raises ValueError on the
+    first violation.
+    """
+    if len(path) != len(expected_dividends):
+        raise ValueError(
+            f"Fundamental path length {len(path)} != expected dividends length {len(expected_dividends)}"
+        )
+    for t, (fv, expected) in enumerate(zip(path, expected_dividends)):
+        continuation = path[t + 1] if t + 1 < len(path) else terminal_value
+        gap = abs(fv * (1 + interest_rate) - (expected + continuation))
+        if gap > tolerance:
+            raise ValueError(
+                f"Fundamental path inconsistent at round {t}: "
+                f"FV={fv}, E[d]={expected}, continuation={continuation}, gap={gap}"
+            )
+
 
 def calculate_fundamental_price(
     num_rounds: int,

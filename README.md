@@ -135,6 +135,34 @@ This lifecycle is orchestrated by the `execute_round` method in `src/base_sim.py
 
 ### Advanced Features
 
+#### Dividend Regime Shifts (Time-Varying Dividend Parameters)
+The dividend process can change mid-run at scheduled round boundaries, enabling out-of-distribution robustness experiments: do agents' valuations update toward the new regime, and does the price re-converge?
+
+**Configuration:**
+```python
+"DIVIDEND_PARAMS": {
+    'base_dividend': 1.4,
+    'dividend_probability': 0.5,
+    'dividend_variation': 1.0,
+    # From round 5 (0-indexed) onward, base_dividend drops to 1.0.
+    # Each entry overrides the base params (entries do not stack).
+    'regime_schedule': [
+        {'round': 5, 'base_dividend': 1.0},
+    ],
+    # Optional contrast cell: announce the shift to agents (default: silent)
+    'announce_regime_shifts': False,
+}
+```
+
+**Conventions:**
+- The fundamental value follows the piecewise no-arbitrage path `FV_t = (E[d_t] + FV_{t+1}) / (1+r)`, computed per round and recorded in `market_data.csv` (`fundamental_price` reflects the active regime).
+- Redemption (finite horizon) equals the terminal-regime fundamental `E[d_last]/r`, so the fundamental is constant within the terminal regime segment.
+- Shifts are unannounced by default: use `FUNDAMENTAL_INFO_MODE = "realizations_only"` so agents can only infer the change from realized dividends. Info modes that reveal model parameters truthfully show the active regime. Setting `announce_regime_shifts: true` adds a notice (without revealing the new parameters) to agents' dividend info from the shift round onward.
+- The simulation verifier checks every round that the recorded fundamental matches the scheduled path.
+- Not yet supported in multi-stock mode.
+
+**Example Scenario:** `test_regime_shift` - deterministic agents with an unannounced shift at round 5 (E[d] 1.4 → 1.0, fundamental 21.73 → 20.00)
+
 #### Leverage Trading (Margin Trading)
 Agents can borrow cash to amplify their long positions, enabling research on leveraged trading strategies and risk management.
 

@@ -36,7 +36,8 @@ class SimulationVerifier:
                  cash_lending_repo=None,
                  interest_service=None,
                  borrow_service=None,
-                 leverage_interest_service=None):
+                 leverage_interest_service=None,
+                 fundamental_path=None):
         """
         Initialize the verifier with references to simulation components.
 
@@ -59,6 +60,8 @@ class SimulationVerifier:
             interest_service: Interest service for interest rate verification
             borrow_service: Borrow service for borrow fee verification
             leverage_interest_service: Leverage interest service for leverage interest verification
+            fundamental_path: Per-round fundamental values for dividend regime
+                schedules (issue #96); None for stationary scenarios
         """
         self.agent_repository = agent_repository
         self.context = context
@@ -78,6 +81,7 @@ class SimulationVerifier:
         self.interest_service = interest_service
         self.borrow_service = borrow_service
         self.leverage_interest_service = leverage_interest_service
+        self.fundamental_path = fundamental_path
 
         self.logger = LoggingService.get_logger('verification')
 
@@ -129,10 +133,36 @@ class SimulationVerifier:
         self.verify_wealth_conservation(pre_round_states)
         self.verify_commitment_order_matching()
         self.verify_agent_equity_non_negative()  # CRITICAL: Check no agent has negative equity
+        self.verify_fundamental_path()  # Regime schedules: FV must track the piecewise path
 
         # Multi-stock specific invariants
         if self.is_multi_stock:
             self.verify_multi_stock_invariants()
+
+    def verify_fundamental_path(self):
+        """Verify the recorded fundamental price matches the scheduled
+        piecewise path for the round just completed (issue #96).
+
+        At verification time context.round_number has already been advanced to
+        round_number + 1, so the round just completed is round_number - 1
+        (0-indexed into the path).
+        """
+        if not self.fundamental_path:
+            return
+
+        round_idx = self.context.round_number - 1
+        round_idx = max(0, min(round_idx, len(self.fundamental_path) - 1))
+        expected_fv = self.fundamental_path[round_idx]
+        actual_fv = self.context.fundamental_price
+
+        if abs(actual_fv - expected_fv) > 1e-9:
+            msg = (f"Fundamental price deviates from regime-schedule path at round {round_idx}:\n"
+                   f"Expected: {expected_fv}\n"
+                   f"Actual: {actual_fv}")
+            self.logger.error(msg)
+            raise ValueError(msg)
+
+        self.logger.info(f"✓ Fundamental path verified for round {round_idx} (FV={actual_fv:.4f})")
 
     def verify_borrowing_pool_consistency(self):
         """Verify borrowing pool accounting is consistent"""

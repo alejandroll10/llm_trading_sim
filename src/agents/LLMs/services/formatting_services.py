@@ -385,6 +385,11 @@ class MarketStateFormatter:
         if mode == FundamentalInfoMode.NONE:
             return DIVIDEND_INFO_NONE_TEMPLATE
 
+        # Regime-shift notice appended when the scenario opted in via
+        # announce_regime_shifts (issue #96); empty by default
+        announcement = context.get('regime_announcement')
+        announcement_suffix = f"\n{announcement}" if announcement else ""
+
         # REALIZATIONS_ONLY mode: show past payments only
         if mode == FundamentalInfoMode.REALIZATIONS_ONLY:
             # Get history from context (populated from signal metadata)
@@ -403,7 +408,7 @@ class MarketStateFormatter:
                 next_payment_round=context.get('next_payment_round', 'N/A'),
                 dividend_destination=context.get('dividend_destination', 'dividend'),
                 dividend_tradeable=context.get('dividend_tradeable', 'non-tradeable')
-            )
+            ) + announcement_suffix
 
         # AVERAGE mode: show summary statistics
         if mode == FundamentalInfoMode.AVERAGE:
@@ -420,10 +425,10 @@ class MarketStateFormatter:
                 next_payment_round=context.get('next_payment_round', 'N/A'),
                 dividend_destination=context.get('dividend_destination', 'dividend'),
                 dividend_tradeable=context.get('dividend_tradeable', 'non-tradeable')
-            )
+            ) + announcement_suffix
 
         # FULL and PROCESS_ONLY modes: show full dividend model
-        return DIVIDEND_INFO_TEMPLATE.format(**context)
+        return DIVIDEND_INFO_TEMPLATE.format(**context) + announcement_suffix
 
     @staticmethod
     def _format_outstanding_orders(orders: Dict[str, List[Dict[str, Any]]]) -> str:

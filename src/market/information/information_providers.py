@@ -234,7 +234,10 @@ class DividendProvider(BaseProvider):
                 'destination': dividend_state.get('destination', 'cash'),
                 'tradeable': dividend_state.get('tradeable', 'non-tradeable'),
                 # Full dividend history for REALIZATIONS_ONLY and AVERAGE modes
-                'dividend_history': dividend_history
+                'dividend_history': dividend_history,
+                # Regime-shift notice (issue #96); None unless the scenario
+                # opts in via announce_regime_shifts
+                'regime_announcement': dividend_state.get('regime_announcement')
             }
         )
         
@@ -279,7 +282,10 @@ class DividendProvider(BaseProvider):
                 'destination': dividend_state.get('destination', 'cash'),
                 'tradeable': dividend_state.get('tradeable', 'non-tradeable'),
                 # Full dividend history for REALIZATIONS_ONLY and AVERAGE modes
-                'dividend_history': dividend_history
+                'dividend_history': dividend_history,
+                # Regime-shift notice (issue #96); None unless the scenario
+                # opts in via announce_regime_shifts
+                'regime_announcement': dividend_state.get('regime_announcement')
             }
         )
 
