@@ -1,25 +1,10 @@
-import sys, logging, types
+import sys
 from pathlib import Path
 
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 from agents.base_agent import BaseAgent
 from agents.agent_manager.agent_repository import AgentRepository

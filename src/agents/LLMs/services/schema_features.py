@@ -234,7 +234,8 @@ class FeatureRegistry:
             Set of enabled Feature enums
 
         Example:
-            >>> config = {"MEMORY_ENABLED": True, "SOCIAL_ENABLED": False}
+            >>> config = {"MEMORY_ENABLED": True, "SOCIAL_ENABLED": False,
+            ...           "LAST_REASONING_ENABLED": False}
             >>> features = FeatureRegistry.extract_features_from_config(config)
             >>> # features == {Feature.MEMORY}
         """

@@ -3,27 +3,11 @@
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _logging_stub
+_logging_stub.install()
 
-import types
-import logging
 
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-    @staticmethod
-    def log_margin_call(*args, **kwargs):
-        pass
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 from agents.base_agent import BaseAgent
 from agents.agents_api import TradeDecision
@@ -72,17 +56,21 @@ def test_default_stock_in_prices_margin_status():
 
 
 def test_default_stock_in_prices_margin_call():
-    """Test that DEFAULT_STOCK in prices dict doesn't cause issues in margin call"""
+    """Test that DEFAULT_STOCK in prices dict doesn't cause issues in margin call.
+
+    Note: since commits 54ef1a4 / 91ddd2e, DEFAULT_STOCK is NOT an accumulator
+    in multi-stock mode. Per-stock borrowed_positions are the source of truth,
+    handle_multi_stock_margin_call never touches DEFAULT_STOCK, and the agent
+    verifier warns if a nonzero DEFAULT_STOCK appears alongside real stocks.
+    """
     print("Test: DEFAULT_STOCK in prices (margin call)...")
 
     agent = DummyAgent("test", initial_cash=5000, initial_shares=0,
                        allow_short_selling=True, margin_requirement=0.5, margin_base="cash")
 
-    # Create a margin violation
+    # Create a margin violation (per-stock tracking only; no DEFAULT_STOCK writes)
     agent.borrowed_positions["STOCK_A"] = 100  # Value: 10000
-    agent.borrowed_shares += 100
     agent.borrowed_positions["STOCK_B"] = 50   # Value: 10000
-    agent.borrowed_shares += 50
 
     # Prices dict INCORRECTLY includes DEFAULT_STOCK
     prices_with_default = {
@@ -91,29 +79,35 @@ def test_default_stock_in_prices_margin_call():
         "DEFAULT_STOCK": 150  # Should be ignored!
     }
 
-    initial_default_stock = agent.borrowed_shares
-    initial_stock_a = agent.borrowed_positions["STOCK_A"]
-    initial_stock_b = agent.borrowed_positions["STOCK_B"]
+    initial_cash = agent.cash
 
     # Trigger margin call
     agent.handle_multi_stock_margin_call(prices_with_default, round_number=1)
 
-    # DEFAULT_STOCK should still be consistent with sum of other stocks
+    # Borrowed value 20000 vs max borrowable 5000 / 0.5 = 10000 -> excess 10000,
+    # covered proportionally (50/50 by value):
+    #   STOCK_A covers 5000 / 100 = 50 shares -> 50 remain
+    #   STOCK_B covers 5000 / 200 = 25 shares -> 25 remain
     final_stock_a = agent.borrowed_positions.get("STOCK_A", 0)
     final_stock_b = agent.borrowed_positions.get("STOCK_B", 0)
-    final_default = agent.borrowed_shares
+    assert abs(final_stock_a - 50) < 0.01, f"Expected 50, got {final_stock_a}"
+    assert abs(final_stock_b - 25) < 0.01, f"Expected 25, got {final_stock_b}"
 
-    # After covering, DEFAULT_STOCK should equal sum of others
-    assert abs(final_default - (final_stock_a + final_stock_b)) < 0.01, \
-        f"Accumulator inconsistent: DEFAULT={final_default}, A+B={final_stock_a + final_stock_b}"
+    # Total sums the real stocks only
+    assert abs(agent.total_borrowed_shares - 75) < 0.01, \
+        f"Expected total 75, got {agent.total_borrowed_shares}"
 
-    # Some shares should have been covered
-    assert agent.total_borrowed_shares < 150, "Should have covered some shares"
-
-    # DEFAULT_STOCK in borrowed_positions should not have been directly modified
-    # (it's only modified via the accumulator pattern)
-    assert "DEFAULT_STOCK" not in agent.positions or agent.positions.get("DEFAULT_STOCK", 0) == 0, \
+    # DEFAULT_STOCK must be ignored entirely: no borrowed entry touched and no
+    # long position created for it
+    assert agent.borrowed_positions.get("DEFAULT_STOCK", 0) == 0, \
+        "DEFAULT_STOCK borrowed position should stay 0 in multi-stock mode"
+    assert agent.positions.get("DEFAULT_STOCK", 0) == 0, \
         "DEFAULT_STOCK should not have been added to positions"
+
+    # Cash reduced by exactly the covered value (10000), proving the
+    # DEFAULT_STOCK price of 150 never entered the covering math
+    assert abs((initial_cash - agent.cash) - 10000) < 0.01, \
+        f"Expected cash reduction of 10000, got {initial_cash - agent.cash}"
 
     print("  ✓ PASSED - DEFAULT_STOCK safely ignored in margin call")
 

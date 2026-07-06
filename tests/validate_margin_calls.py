@@ -7,31 +7,9 @@ This script tests the key functionality without requiring pytest.
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
-
-# Mock the logging service
-import types
-import logging
-
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_margin_call(*args, **kwargs):
-        pass
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _logging_stub
+_logging_stub.install()
 
 from agents.base_agent import BaseAgent
 from agents.agents_api import TradeDecision
@@ -199,7 +177,13 @@ def test_update_wealth_integration():
 
 
 def test_backward_compatibility():
-    """Test 6: Verify single-stock scenarios still work"""
+    """Test 6: Verify single-stock scenarios still work.
+
+    Since commit 1c8442b, the single-stock update_wealth() path no longer
+    performs direct-manipulation margin calls: enforcement moved to the
+    order-based intra-round margin system at the match engine level.
+    update_wealth() now only revalues the portfolio.
+    """
     print("Test 6: Backward compatibility with single-stock...")
 
     agent = DummyAgent(
@@ -213,14 +197,17 @@ def test_backward_compatibility():
     agent.last_update_round = 1
 
     # Use single-stock API
-    agent.borrowed_shares = 50  # Value: 5000
+    agent.borrowed_shares = 50  # Value: 5000 at price 100
 
     price = 100.0
 
-    # Max: 2000, Borrowed: 5000, Violation!
+    # Borrowed value (5000) exceeds max borrowable (1000 / 0.5 = 2000), but
+    # update_wealth() must NOT force a buy-to-cover anymore.
     agent.update_wealth(price)
 
-    assert agent.borrowed_shares < 50, "Single-stock margin call should have triggered"
+    assert agent.borrowed_shares == 50, "update_wealth must not force a cover"
+    # Wealth reflects the short liability: 1000 + (0 - 50) * 100 = -4000
+    assert abs(agent.wealth - (-4000)) < 1e-9, f"Expected wealth -4000, got {agent.wealth}"
 
     print("  ✓ PASSED")
 

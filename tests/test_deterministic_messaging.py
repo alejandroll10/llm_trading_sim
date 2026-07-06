@@ -4,26 +4,8 @@ import sys
 # add src to path
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-import types
-import logging
 
 
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 from agents.deterministic.hold_agent import HoldTrader
 from services.messaging_service import MessagingService

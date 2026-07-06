@@ -15,28 +15,11 @@ runs crashed.
 """
 
 import sys
-import types
-import logging
 from pathlib import Path
 
 import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
-
-
-class _NoOpMeta(type):
-    def __getattr__(cls, name):  # any missing attribute becomes a no-op callable
-        return lambda *args, **kwargs: None
-
-
-class _TestLoggingService(metaclass=_NoOpMeta):
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 from agents.agent_manager.agent_repository import AgentRepository
 from agents.agent_manager.services.order_services import is_active

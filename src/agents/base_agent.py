@@ -1167,7 +1167,10 @@ class BaseAgent(ABC):
         return self.margin_service.get_gross_position_value(prices)
 
     def get_leverage_margin_ratio(self, prices: Dict[str, float]) -> float:
-        """Calculate current margin ratio for leverage (equity / gross_position_value).
+        """Calculate leverage ratio as borrowed_cash / equity.
+
+        A higher ratio means more leverage is being used. When this exceeds
+        the max leverage threshold, a margin call is triggered.
 
         REFACTORED: Delegates to MarginService (issue #57 Phase 2)
 
@@ -1175,7 +1178,10 @@ class BaseAgent(ABC):
             prices: Dict mapping stock_id to current price
 
         Returns:
-            Margin ratio (0.0 to infinity). Returns infinity if no positions held.
+            Leverage ratio (0.0 to infinity).
+            - 0 if no borrowed cash (no leverage)
+            - infinity if equity <= 0 but has debt (critical violation)
+            - borrowed_cash/equity otherwise
         """
         return self.margin_service.get_leverage_margin_ratio(prices)
 

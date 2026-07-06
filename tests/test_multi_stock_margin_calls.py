@@ -1,29 +1,12 @@
-import sys, logging, types
+import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _logging_stub
+_logging_stub.install()
 
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_margin_call(*args, **kwargs):
-        pass
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 from agents.base_agent import BaseAgent
 from agents.agents_api import TradeDecision
@@ -172,17 +155,29 @@ def test_multi_stock_margin_call_forces_cover():
     initial_cash = agent.cash
     agent.handle_multi_stock_margin_call(prices, round_number=1)
 
-    # Verify shares were covered
-    assert agent.borrowed_positions["STOCK_A"] < 150
-    assert agent.borrowed_positions["STOCK_B"] < 50
+    # The handler covers exactly the PRE-CALL excess (5000), proportionally by
+    # borrowed value (STOCK_A 15000/25000 = 60%, STOCK_B 10000/25000 = 40%):
+    #   STOCK_A: 5000 * 0.6 / 100 = 30 shares covered -> 120 remain
+    #   STOCK_B: 5000 * 0.4 / 200 = 10 shares covered -> 40 remain
+    assert agent.borrowed_positions["STOCK_A"] == pytest.approx(120)
+    assert agent.borrowed_positions["STOCK_B"] == pytest.approx(40)
 
-    # Verify cash was reduced (to buy shares)
-    assert agent.cash < initial_cash
+    # Verify cash was reduced by the covered value (5000)
+    assert initial_cash - agent.cash == pytest.approx(5000)
 
-    # Verify margin is now satisfied
+    # Borrowed value drops by the covered excess: 25000 -> 20000
     status = agent.get_portfolio_margin_status(prices)
-    # After covering, should be close to meeting requirements (may not be exact due to rounding)
-    assert status['excess_borrowed_value'] < 100  # Small tolerance for rounding
+    assert status['borrowed_value'] == pytest.approx(20000)
+
+    # NOTE: with margin_base="cash", the cash spent on the buy-to-cover shrinks
+    # the collateral itself (10000 -> 5000, so max borrowable 20000 -> 10000),
+    # leaving a residual violation after this single-pass handler. This has
+    # been the handler's behavior since it was introduced (#38, commit
+    # 2b592f6); full restoration is handled iteratively by the order-based
+    # margin system at the match engine level (commit 7f656f8,
+    # enable_intra_round_margin_checking), not by this direct-manipulation
+    # fallback.
+    assert status['excess_borrowed_value'] == pytest.approx(10000)
 
 
 def test_multi_stock_margin_call_proportional_covering():
@@ -275,7 +270,14 @@ def test_update_wealth_triggers_multi_stock_margin_call():
 
 
 def test_backward_compatibility_single_stock():
-    """Test that single-stock margin calls still work (backward compatibility)"""
+    """Test single-stock update_wealth backward compatibility.
+
+    Since commit 1c8442b, the single-stock update_wealth() path no longer
+    performs direct-manipulation margin calls: the old handle_margin_call()
+    was deprecated in favor of the order-based intra-round margin system at
+    the match engine level (enable_intra_round_margin_checking, see also
+    commit 7f656f8). update_wealth() now only revalues the portfolio.
+    """
     agent = DummyAgent(
         "test_agent",
         initial_cash=1000,
@@ -291,14 +293,15 @@ def test_backward_compatibility_single_stock():
 
     price = 100.0
 
-    # Max borrowable: 1000 / 0.5 = 2000
-    # Current borrowed value: 5000
-    # Violation!
+    # Borrowed value (5000) exceeds max borrowable (1000 / 0.5 = 2000), but
+    # update_wealth() must NOT force a buy-to-cover anymore.
 
     agent.update_wealth(price)
 
-    # Should have triggered margin call
-    assert agent.borrowed_shares < 50
+    # No direct margin call: borrowed position unchanged
+    assert agent.borrowed_shares == 50
+    # Wealth reflects the short liability: 1000 + (0 - 50) * 100 = -4000
+    assert agent.wealth == pytest.approx(-4000)
 
 
 def test_wealth_based_margin_calculation():

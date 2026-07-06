@@ -12,7 +12,6 @@ reported best bid/ask always equals the true min-ask / max-bid of the remaining
 orders after removals.
 """
 import sys
-import types
 import logging
 from pathlib import Path
 
@@ -20,18 +19,6 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-# Stub logging service so OrderBook construction/logging doesn't need full init.
-_stub = types.ModuleType("services.logging_service")
-class _LS:
-    @staticmethod
-    def get_logger(name): return logging.getLogger(name)
-    @staticmethod
-    def log_order_state(*a, **k): pass
-    @staticmethod
-    def log_market_state(*a, **k): pass
-_stub.LoggingService = _LS
-sys.modules.setdefault("services.logging_service", _stub)
-sys.modules["services.logging_service"].LoggingService = _LS
 
 from market.orders.order import Order, OrderState
 from market.orders.order_book import OrderBook

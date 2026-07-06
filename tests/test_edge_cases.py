@@ -3,27 +3,11 @@
 
 import sys
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _logging_stub
+_logging_stub.install()
 
-import types
-import logging
 
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-    @staticmethod
-    def log_margin_call(*args, **kwargs):
-        pass
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 from agents.base_agent import BaseAgent
 from agents.agents_api import TradeDecision
@@ -34,38 +18,56 @@ class DummyAgent(BaseAgent):
 
 
 def test_accumulator_consistency():
-    """Test that DEFAULT_STOCK accumulator is always consistent"""
-    print("Test: Accumulator consistency...")
+    """Test that multi-stock borrowed totals stay consistent.
+
+    Note: since commits 54ef1a4 / 91ddd2e, DEFAULT_STOCK is NOT maintained as
+    an accumulator in multi-stock mode. Per-stock borrowed_positions are the
+    source of truth, total_borrowed_shares sums the non-DEFAULT stocks, and
+    the agent verifier warns if a nonzero DEFAULT_STOCK appears alongside
+    real stocks.
+    """
+    print("Test: Borrowed totals consistency...")
 
     agent = DummyAgent("test", initial_cash=10000, initial_shares=0,
                        allow_short_selling=True, margin_requirement=0.5, margin_base="wealth")
 
-    # Simulate borrowing with accumulator pattern
+    # Borrow per-stock only; DEFAULT_STOCK is never written in multi-stock mode
     agent.borrowed_positions["STOCK_A"] = 50
-    agent.borrowed_shares += 50
     agent.borrowed_positions["STOCK_B"] = 30
-    agent.borrowed_shares += 30
 
-    # Verify total
+    # Verify total sums the real stocks; DEFAULT_STOCK stays 0
     assert agent.total_borrowed_shares == 80, f"Expected 80, got {agent.total_borrowed_shares}"
-    assert agent.borrowed_shares == 80, f"Expected DEFAULT_STOCK=80, got {agent.borrowed_shares}"
+    assert agent.borrowed_shares == 0, f"Expected DEFAULT_STOCK=0, got {agent.borrowed_shares}"
 
     # Trigger margin call
+    # Borrowed value: 50*150 + 30*200 = 13500
+    # Wealth collateral: 10000 + (0 - 13500) = -3500 -> max borrowable < 0,
+    # so the excess exceeds all borrowing and everything is covered.
     prices = {"STOCK_A": 150, "STOCK_B": 200}
     agent.handle_multi_stock_margin_call(prices, round_number=1)
 
     # After margin call, check consistency
     expected_total = agent.borrowed_positions.get("STOCK_A", 0) + agent.borrowed_positions.get("STOCK_B", 0)
+    assert expected_total == 0, f"Expected full cover, got {expected_total}"
     assert agent.total_borrowed_shares == expected_total, \
         f"Total inconsistent: {agent.total_borrowed_shares} != {expected_total}"
-    assert agent.borrowed_shares == expected_total, \
-        f"DEFAULT_STOCK inconsistent: {agent.borrowed_shares} != {expected_total}"
+    # DEFAULT_STOCK is untouched by multi-stock covering
+    # (see MarginService.handle_multi_stock_margin_call)
+    assert agent.borrowed_shares == 0, \
+        f"DEFAULT_STOCK should remain 0, got {agent.borrowed_shares}"
 
     print("  ✓ PASSED")
 
 
 def test_single_stock_still_works():
-    """Test that DEFAULT_STOCK-only scenarios still work"""
+    """Test that DEFAULT_STOCK-only scenarios still work.
+
+    Note: since commit 1c8442b, single-stock update_wealth() no longer forces
+    a direct buy-to-cover. The old direct-manipulation margin call was
+    deprecated in favor of the order-based intra-round margin system at the
+    match engine level (enable_intra_round_margin_checking, commit 7f656f8),
+    so update_wealth() only revalues the portfolio.
+    """
     print("Test: Single-stock (DEFAULT_STOCK only)...")
 
     agent = DummyAgent("test", initial_cash=1000, initial_shares=0,
@@ -77,11 +79,13 @@ def test_single_stock_still_works():
 
     assert agent.total_borrowed_shares == 100, f"Expected 100, got {agent.total_borrowed_shares}"
 
-    # Trigger via update_wealth
-    agent.update_wealth(150.0)  # High price triggers margin call
+    # Revalue at a high price; margin is violated but no direct covering occurs
+    agent.update_wealth(150.0)
 
-    # Should have covered some
-    assert agent.borrowed_shares < 100, "Should have triggered margin call"
+    # Borrowed position unchanged (no direct margin call from update_wealth)
+    assert agent.borrowed_shares == 100, "update_wealth should not force-cover directly"
+    # Wealth reflects the short liability: 1000 + (0 - 100) * 150 = -14000
+    assert abs(agent.wealth - (-14000)) < 0.01, f"Expected wealth -14000, got {agent.wealth}"
 
     print("  ✓ PASSED")
 

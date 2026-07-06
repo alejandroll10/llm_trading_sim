@@ -7,31 +7,11 @@ NOT run a second repayment pass over margin-call trades — doing so applied
 the same sale proceeds twice in the partial-repayment case (debt understated,
 lending pool double-credited).
 """
-import sys, logging, types
+import sys, logging
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        return logging.getLogger(name)
-
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_margin_call(*args, **kwargs):
-        pass
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-if not hasattr(sys.modules["services.logging_service"], "LoggingService"):
-    sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 from agents.base_agent import BaseAgent
 from agents.agents_api import TradeDecision

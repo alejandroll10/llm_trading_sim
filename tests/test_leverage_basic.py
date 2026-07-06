@@ -10,45 +10,12 @@ import sys
 from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _logging_stub
+_logging_stub.install()
 
 # Mock the logging service
-import types
-import logging
 
-class _TestLoggingService:
-    @staticmethod
-    def get_logger(name):
-        logger = logging.getLogger(name)
-        logger.setLevel(logging.WARNING)  # Reduce noise
-        return logger
-
-    @staticmethod
-    def initialize(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_agent_state(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_validation_error(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_margin_call(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_decision(*args, **kwargs):
-        pass
-
-    @staticmethod
-    def log_structured_decision(*args, **kwargs):
-        pass
-
-sys.modules.setdefault("services.logging_service", types.ModuleType("services.logging_service"))
-sys.modules["services.logging_service"].LoggingService = _TestLoggingService
 
 # Now import the actual components
 from agents.agent_manager.services.cash_lending_repository import CashLendingRepository
@@ -117,9 +84,12 @@ def test_leverage_helper_methods():
     assert gross_value == 10000, f"Expected gross value 10000, got {gross_value}"
 
     # Test margin ratio
-    # margin_ratio = equity / gross_position_value = 15000 / 10000 = 1.5
+    # Since commit 4508dcb (leverage margin fix), the "margin ratio" is a
+    # leverage ratio: borrowed_cash / equity = 5000 / 15000 = 0.333
+    # (higher = more leveraged; was previously equity / gross_position_value)
     margin_ratio = agent.get_leverage_margin_ratio(prices)
-    assert abs(margin_ratio - 1.5) < 0.01, f"Expected margin ratio 1.5, got {margin_ratio}"
+    expected_ratio = 5000 / 15000
+    assert abs(margin_ratio - expected_ratio) < 0.01, f"Expected margin ratio {expected_ratio:.3f}, got {margin_ratio}"
 
     # Test borrowing power
     # Max position = equity * leverage_ratio = 15000 * 2 = 30000
@@ -128,7 +98,9 @@ def test_leverage_helper_methods():
     borrowing_power = agent.get_available_borrowing_power(prices)
     assert borrowing_power == 20000, f"Expected borrowing power 20000, got {borrowing_power}"
 
-    # Test under-margin check (should be False with 1.5 margin ratio)
+    # Test under-margin check: margin call triggers when
+    # borrowed_cash/equity > (1 - maintenance_margin) / maintenance_margin = 0.75/0.25 = 3.0
+    # Here 0.333 << 3.0, so not under-margined
     under_margin = agent.is_under_leverage_margin(prices)
     assert not under_margin, "Should not be under-margined"
 
@@ -149,10 +121,13 @@ def test_leverage_margin_call_trigger():
     )
 
     # Set up highly leveraged position
+    # Since commit 4508dcb, the margin call condition is:
+    #   leverage_ratio = borrowed_cash / equity > (1 - maintenance_margin) / maintenance_margin
+    # With maintenance_margin = 0.25, the max allowed leverage ratio is 0.75 / 0.25 = 3.0
     agent.positions["STOCK_A"] = 200  # 200 shares at $100 = $20,000
     agent.borrowed_cash = 12000  # Borrowed $12,000
     # Equity = 10000 + 20000 - 12000 = 18000
-    # Margin ratio = 18000 / 20000 = 0.9 (above 0.25, OK)
+    # Leverage ratio = 12000 / 18000 = 0.667 (below 3.0, OK)
 
     prices = {"STOCK_A": 100}
     assert not agent.is_under_leverage_margin(prices), "Should not trigger margin call initially"
@@ -161,36 +136,36 @@ def test_leverage_margin_call_trigger():
     prices = {"STOCK_A": 50}
     # Position value = 200 * 50 = 10000
     # Equity = 10000 + 10000 - 12000 = 8000
-    # Margin ratio = 8000 / 10000 = 0.8 (still above 0.25)
-    assert not agent.is_under_leverage_margin(prices), "Should not trigger at 0.8 margin"
+    # Leverage ratio = 12000 / 8000 = 1.5 (still below 3.0)
+    assert not agent.is_under_leverage_margin(prices), "Should not trigger at 1.5 leverage"
 
     # Price drops to $40
     prices = {"STOCK_A": 40}
     # Position value = 200 * 40 = 8000
     # Equity = 10000 + 8000 - 12000 = 6000
-    # Margin ratio = 6000 / 8000 = 0.75 (still above 0.25)
-    assert not agent.is_under_leverage_margin(prices), "Should not trigger at 0.75 margin"
+    # Leverage ratio = 12000 / 6000 = 2.0 (still below 3.0)
+    assert not agent.is_under_leverage_margin(prices), "Should not trigger at 2.0 leverage"
 
     # Price drops to $30
     prices = {"STOCK_A": 30}
     # Position value = 200 * 30 = 6000
     # Equity = 10000 + 6000 - 12000 = 4000
-    # Margin ratio = 4000 / 6000 = 0.667 (still above 0.25)
-    assert not agent.is_under_leverage_margin(prices), "Should not trigger at 0.667 margin"
+    # Leverage ratio = 12000 / 4000 = 3.0 (exactly at limit; trigger is strictly >)
+    assert not agent.is_under_leverage_margin(prices), "Should not trigger at exactly 3.0 leverage (boundary)"
 
     # Price drops to $20
     prices = {"STOCK_A": 20}
     # Position value = 200 * 20 = 4000
     # Equity = 10000 + 4000 - 12000 = 2000
-    # Margin ratio = 2000 / 4000 = 0.5 (still above 0.25)
-    assert not agent.is_under_leverage_margin(prices), "Should not trigger at 0.5 margin"
+    # Leverage ratio = 12000 / 2000 = 6.0 (ABOVE 3.0 -> margin call)
+    assert agent.is_under_leverage_margin(prices), "Should trigger margin call at 6.0 leverage"
 
     # Price drops to $10
     prices = {"STOCK_A": 10}
     # Position value = 200 * 10 = 2000
     # Equity = 10000 + 2000 - 12000 = 0
-    # Margin ratio = 0 / 2000 = 0 (BELOW 0.25!)
-    assert agent.is_under_leverage_margin(prices), "Should trigger margin call at 0 margin"
+    # Leverage ratio = infinity (debt with zero equity -> critical violation)
+    assert agent.is_under_leverage_margin(prices), "Should trigger margin call at zero equity"
 
     print("  ✓ PASSED")
 
@@ -199,7 +174,10 @@ def test_leverage_interest_service():
     """Test 4: Leverage interest charging"""
     print("Test 4: Leverage Interest Service...")
 
-    service = LeverageInterestService(annual_interest_rate=0.12)  # 12% annual
+    # Since commit d4ce95b, the service takes a simple per-round rate
+    # (annualization via rounds_per_year was removed)
+    per_round_rate = 0.12 / 252  # equivalent of 12% annual over 252 rounds
+    service = LeverageInterestService(interest_rate=per_round_rate)
 
     agent1 = DummyAgent("agent_1", initial_cash=10000, initial_shares=0)
     agent1.borrowed_cash = 10000  # Borrowed $10,000
@@ -207,11 +185,11 @@ def test_leverage_interest_service():
     agent2 = DummyAgent("agent_2", initial_cash=5000, initial_shares=0)
     agent2.borrowed_cash = 0  # No borrowed cash
 
-    # Charge interest (252 trading days per year)
-    interest_charged = service.charge_interest([agent1, agent2], rounds_per_year=252)
+    # Charge one round of interest
+    interest_charged = service.charge_interest([agent1, agent2])
 
     # Expected interest for agent1: 10000 * (0.12 / 252) = 10000 * 0.000476 ≈ 4.76
-    expected_interest = 10000 * (0.12 / 252)
+    expected_interest = 10000 * per_round_rate
     actual_interest = interest_charged.get("agent_1", 0)
 
     assert abs(actual_interest - expected_interest) < 0.01, f"Expected {expected_interest:.2f}, got {actual_interest:.2f}"
@@ -440,13 +418,15 @@ def test_interest_payment_history():
     agent.borrowed_cash = 10000
     agent.last_update_round = 1
 
-    service = LeverageInterestService(annual_interest_rate=0.12)
+    # Since commit d4ce95b, the service takes a simple per-round rate
+    per_round_rate = 0.12 / 252  # equivalent of 12% annual over 252 rounds
+    service = LeverageInterestService(interest_rate=per_round_rate)
 
     # Initial state
     initial_interest_payments = len(agent.payment_history['interest'])
 
-    # Charge interest
-    service.charge_interest([agent], rounds_per_year=252)
+    # Charge one round of interest
+    service.charge_interest([agent])
 
     # Verify payment was recorded
     new_interest_payments = len(agent.payment_history['interest'])
@@ -457,7 +437,7 @@ def test_interest_payment_history():
     assert latest_payment.account == 'main', "Should be charged to main account"
     assert latest_payment.amount < 0, "Interest payment should be negative (outflow)"
 
-    expected_interest = 10000 * (0.12 / 252)
+    expected_interest = 10000 * per_round_rate
     assert abs(abs(latest_payment.amount) - expected_interest) < 0.01, "Interest amount should match expected"
 
     print("  ✓ PASSED")
@@ -576,9 +556,9 @@ def test_multi_stock_leverage():
     equity = agent.get_equity(prices)
     assert abs(equity - 16000) < 0.01, f"Expected 16000, got {equity}"
 
-    # Margin ratio = equity / gross_position = 16000 / 11000 ≈ 1.45
+    # Since commit 4508dcb: margin ratio = borrowed_cash / equity = 5000 / 16000 = 0.3125
     margin_ratio = agent.get_leverage_margin_ratio(prices)
-    expected_ratio = 16000 / 11000
+    expected_ratio = 5000 / 16000
     assert abs(margin_ratio - expected_ratio) < 0.01, f"Expected {expected_ratio:.3f}, got {margin_ratio:.3f}"
 
     # Borrowing power = (equity * leverage) - gross_position
@@ -612,21 +592,32 @@ def test_bankruptcy_scenario():
     agent.borrowed_cash = 15000
     repo.allocate_cash("test_agent", 15000)
 
-    # At $200: position = 20000, equity = 5000 + 20000 - 15000 = 10000, ratio = 10000/20000 = 0.5 (healthy)
+    # Since commit 4508dcb, the margin call condition is:
+    #   borrowed_cash / equity > (1 - maintenance_margin) / maintenance_margin = 3.0
+    # With borrowed = 15000 and cash = 5000, that means:
+    #   equity = 5000 + 100*p - 15000 < 15000/3 = 5000  <=>  p < 150
+
+    # At $200: position = 20000, equity = 5000 + 20000 - 15000 = 10000
+    # Leverage ratio = 15000/10000 = 1.5 (below 3.0, healthy)
     prices = {"STOCK_A": 200}
     assert not agent.is_under_leverage_margin(prices), "Should be healthy at $200"
 
-    # Price crashes to $140: position = 14000, equity = 5000 + 14000 - 15000 = 4000, ratio = 4000/14000 = 0.286 (still above 0.25)
+    # Price crashes to $160: position = 16000, equity = 5000 + 16000 - 15000 = 6000
+    # Leverage ratio = 15000/6000 = 2.5 (still below 3.0)
+    prices = {"STOCK_A": 160}
+    assert not agent.is_under_leverage_margin(prices), "Should still be OK at $160"
+
+    # Price crashes to $140: position = 14000, equity = 5000 + 14000 - 15000 = 4000
+    # Leverage ratio = 15000/4000 = 3.75 > 3.0 (margin call!)
     prices = {"STOCK_A": 140}
-    assert not agent.is_under_leverage_margin(prices), "Should still be OK at $140"
-
-    # Price crashes to $130: position = 13000, equity = 5000 + 13000 - 15000 = 3000, ratio = 3000/13000 = 0.23 < 0.25 (margin call!)
-    prices = {"STOCK_A": 130}
     equity = agent.get_equity(prices)
-    assert abs(equity - 3000) < 0.01, f"Equity should be ~3000, got {equity}"
-    assert agent.is_under_leverage_margin(prices), "Should trigger margin call at $130"
+    assert abs(equity - 4000) < 0.01, f"Equity should be ~4000, got {equity}"
+    assert agent.is_under_leverage_margin(prices), "Should trigger margin call at $140"
 
-    # Execute margin call - should liquidate to restore to initial_margin
+    # Execute margin call - liquidates down to target position = equity / initial_margin
+    # = 4000 / 0.5 = 8000, i.e. sells 6000/140 ≈ 42.86 shares; proceeds repay debt
+    # (15000 - 6000 = 9000 remaining). New equity = 5000 + 8000 - 9000 = 4000,
+    # new leverage ratio = 9000/4000 = 2.25 (back below 3.0)
     initial_position = agent.positions["STOCK_A"]
     initial_borrowed = agent.borrowed_cash
     agent.handle_leverage_margin_call(prices, round_number=1)
@@ -635,11 +626,13 @@ def test_bankruptcy_scenario():
     assert agent.positions["STOCK_A"] < initial_position, "Should have liquidated some position"
     assert agent.borrowed_cash < initial_borrowed, "Should have repaid some debt"
 
-    # After liquidation, should be at or above maintenance margin
+    # After liquidation, leverage ratio should be back at or below the max allowed
     new_margin_ratio = agent.get_leverage_margin_ratio(prices)
-    # Should aim for initial_margin (0.5) but may be slightly different
-    assert new_margin_ratio >= agent.maintenance_margin or agent.positions["STOCK_A"] == 0, \
-        f"Should restore healthy margin or liquidate all, got ratio {new_margin_ratio:.3f}"
+    max_leverage_ratio = (1 - agent.maintenance_margin) / agent.maintenance_margin  # 3.0
+    assert new_margin_ratio <= max_leverage_ratio or agent.positions["STOCK_A"] == 0, \
+        f"Should restore healthy leverage or liquidate all, got ratio {new_margin_ratio:.3f}"
+    assert abs(new_margin_ratio - 2.25) < 0.05, \
+        f"Expected leverage ratio ~2.25 after liquidation, got {new_margin_ratio:.3f}"
 
     print("  ✓ PASSED")
 

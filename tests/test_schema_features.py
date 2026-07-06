@@ -8,6 +8,13 @@ Tests:
     - Field validation for all combinations
 """
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import _logging_stub
+_logging_stub.install()
+
 import pytest
 from pydantic import ValidationError
 from agents.LLMs.services.schema_features import (
@@ -20,20 +27,26 @@ from agents.LLMs.services.schema_features import (
 class TestFeatureExtraction:
     """Test extracting features from configuration dictionaries"""
 
+    # LAST_REASONING (added in fb4711d) defaults to enabled for backward
+    # compatibility, like MEMORY and SOCIAL, so it must be disabled explicitly
+    # in the "only X" cases below.
+
     def test_all_features_enabled(self):
         """Test extracting all enabled features"""
         config = {
             'MEMORY_ENABLED': True,
-            'SOCIAL_ENABLED': True
+            'SOCIAL_ENABLED': True,
+            'LAST_REASONING_ENABLED': True
         }
         features = FeatureRegistry.extract_features_from_config(config)
-        assert features == {Feature.MEMORY, Feature.SOCIAL}
+        assert features == {Feature.MEMORY, Feature.SOCIAL, Feature.LAST_REASONING}
 
     def test_only_memory_enabled(self):
         """Test with only memory enabled"""
         config = {
             'MEMORY_ENABLED': True,
-            'SOCIAL_ENABLED': False
+            'SOCIAL_ENABLED': False,
+            'LAST_REASONING_ENABLED': False
         }
         features = FeatureRegistry.extract_features_from_config(config)
         assert features == {Feature.MEMORY}
@@ -42,7 +55,8 @@ class TestFeatureExtraction:
         """Test with only social enabled"""
         config = {
             'MEMORY_ENABLED': False,
-            'SOCIAL_ENABLED': True
+            'SOCIAL_ENABLED': True,
+            'LAST_REASONING_ENABLED': False
         }
         features = FeatureRegistry.extract_features_from_config(config)
         assert features == {Feature.SOCIAL}
@@ -51,7 +65,8 @@ class TestFeatureExtraction:
         """Test with all features disabled"""
         config = {
             'MEMORY_ENABLED': False,
-            'SOCIAL_ENABLED': False
+            'SOCIAL_ENABLED': False,
+            'LAST_REASONING_ENABLED': False
         }
         features = FeatureRegistry.extract_features_from_config(config)
         assert features == set()
@@ -60,7 +75,7 @@ class TestFeatureExtraction:
         """Test that features default to enabled for backward compatibility"""
         config = {}  # No feature flags specified
         features = FeatureRegistry.extract_features_from_config(config)
-        assert features == {Feature.MEMORY, Feature.SOCIAL}
+        assert features == {Feature.MEMORY, Feature.SOCIAL, Feature.LAST_REASONING}
 
 
 class TestSchemaGeneration:
