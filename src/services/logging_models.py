@@ -101,6 +101,10 @@ class DecisionLogEntry:
     notes_to_self: str = ""  # Agent's memory notes for future rounds
     post_message: str = ""  # Message posted to social feed
     message_reasoning: str = ""  # Reasoning for the social message
+    valuation_confidence: float = 0.0  # Confidence (0-1) in valuation estimate
+    prediction_confidence: float = 0.0  # Confidence (0-1) in price predictions
+    others_avg_valuation: float = 0.0  # Second-order belief: predicted avg valuation of other agents
+    others_avg_valuation_reasoning: str = ""  # Reasoning for second-order belief
 
     @staticmethod
     def from_decision(
@@ -136,6 +140,14 @@ class DecisionLogEntry:
         post_message = sanitize_for_csv(decision_dict.get('post_message') or '') if 'post_message' in decision_dict else ''
         message_reasoning = sanitize_for_csv(decision_dict.get('message_reasoning') or '') if 'message_reasoning' in decision_dict else ''
 
+        # Extract confidence fields (0.0 when CONFIDENCE feature disabled)
+        valuation_confidence = decision_dict.get('valuation_confidence') or 0.0
+        prediction_confidence = decision_dict.get('prediction_confidence') or 0.0
+
+        # Extract second-order belief fields (defaults when SECOND_ORDER feature disabled)
+        others_avg_valuation = decision_dict.get('others_avg_valuation') or 0.0
+        others_avg_valuation_reasoning = sanitize_for_csv(decision_dict.get('others_avg_valuation_reasoning') or '')
+
         if not decision_dict.get('orders'):
             # Log hold decision
             entries.append(DecisionLogEntry(
@@ -157,7 +169,11 @@ class DecisionLogEntry:
                 price_prediction_reasoning=price_prediction_reasoning,
                 notes_to_self=notes_to_self,
                 post_message=post_message,
-                message_reasoning=message_reasoning
+                message_reasoning=message_reasoning,
+                valuation_confidence=valuation_confidence,
+                prediction_confidence=prediction_confidence,
+                others_avg_valuation=others_avg_valuation,
+                others_avg_valuation_reasoning=others_avg_valuation_reasoning
             ))
             return entries
             
@@ -182,9 +198,13 @@ class DecisionLogEntry:
                 price_prediction_reasoning=price_prediction_reasoning,
                 notes_to_self=notes_to_self,
                 post_message=post_message,
-                message_reasoning=message_reasoning
+                message_reasoning=message_reasoning,
+                valuation_confidence=valuation_confidence,
+                prediction_confidence=prediction_confidence,
+                others_avg_valuation=others_avg_valuation,
+                others_avg_valuation_reasoning=others_avg_valuation_reasoning
             ))
-        
+
         return entries
 
     def to_csv(self) -> str:
@@ -195,7 +215,9 @@ class DecisionLogEntry:
             f"{self.order_type},{self.quantity},{self.price},\"{self.reasoning}\","
             f"{self.valuation},{self.price_prediction_t},{self.price_prediction_t1},{self.price_prediction_t2},"
             f"\"{self.valuation_reasoning}\",\"{self.price_prediction_reasoning}\",\"{self.notes_to_self}\","
-            f"\"{self.post_message}\",\"{self.message_reasoning}\""
+            f"\"{self.post_message}\",\"{self.message_reasoning}\","
+            f"{self.valuation_confidence},{self.prediction_confidence},"
+            f"{self.others_avg_valuation},\"{self.others_avg_valuation_reasoning}\""
         )
 
 @dataclass

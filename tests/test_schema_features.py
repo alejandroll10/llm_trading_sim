@@ -238,6 +238,85 @@ class TestSchemaValidation:
             )
 
 
+class TestConfidenceAndSecondOrder:
+    """Test the CONFIDENCE and SECOND_ORDER features (issue #97)"""
+
+    CORE_KWARGS = dict(
+        valuation_reasoning="Analysis",
+        valuation=30.0,
+        price_prediction_reasoning="Prediction",
+        price_prediction_t=30.5,
+        price_prediction_t1=32.0,
+        price_prediction_t2=33.0,
+        reasoning="Strategy",
+        orders=[],
+        replace_decision="Add",
+    )
+
+    def test_flags_default_off(self):
+        """CONFIDENCE and SECOND_ORDER must be opt-in (schema-stable default)"""
+        features = FeatureRegistry.extract_features_from_config({})
+        assert Feature.CONFIDENCE not in features
+        assert Feature.SECOND_ORDER not in features
+
+    def test_flags_opt_in(self):
+        """Flags enable the corresponding features"""
+        config = {
+            'MEMORY_ENABLED': False,
+            'SOCIAL_ENABLED': False,
+            'LAST_REASONING_ENABLED': False,
+            'CONFIDENCE_ENABLED': True,
+            'SECOND_ORDER_ENABLED': True,
+        }
+        features = FeatureRegistry.extract_features_from_config(config)
+        assert features == {Feature.CONFIDENCE, Feature.SECOND_ORDER}
+
+    def test_schema_with_confidence(self):
+        """Confidence fields appear only when CONFIDENCE is enabled"""
+        schema_class = FeatureRegistry.get_schema_for_features({Feature.CONFIDENCE})
+        assert 'valuation_confidence' in schema_class.model_fields
+        assert 'prediction_confidence' in schema_class.model_fields
+        assert 'others_avg_valuation' not in schema_class.model_fields
+
+        base_schema = FeatureRegistry.get_schema_for_features(set())
+        assert 'valuation_confidence' not in base_schema.model_fields
+        assert 'prediction_confidence' not in base_schema.model_fields
+
+    def test_schema_with_second_order(self):
+        """Second-order fields appear only when SECOND_ORDER is enabled"""
+        schema_class = FeatureRegistry.get_schema_for_features({Feature.SECOND_ORDER})
+        assert 'others_avg_valuation' in schema_class.model_fields
+        assert 'others_avg_valuation_reasoning' in schema_class.model_fields
+        assert 'valuation_confidence' not in schema_class.model_fields
+
+        base_schema = FeatureRegistry.get_schema_for_features(set())
+        assert 'others_avg_valuation' not in base_schema.model_fields
+        assert 'others_avg_valuation_reasoning' not in base_schema.model_fields
+
+    def test_valid_decision_with_both_features(self):
+        """A decision with confidence and second-order fields validates"""
+        features = {Feature.CONFIDENCE, Feature.SECOND_ORDER}
+        schema_class = FeatureRegistry.get_schema_for_features(features)
+        decision = schema_class(
+            **self.CORE_KWARGS,
+            valuation_confidence=0.8,
+            prediction_confidence=0.6,
+            others_avg_valuation_reasoning="Others seem bullish",
+            others_avg_valuation=32.5,
+        )
+        assert decision.valuation_confidence == 0.8
+        assert decision.prediction_confidence == 0.6
+        assert decision.others_avg_valuation == 32.5
+
+    def test_fields_are_required_when_enabled(self):
+        """Confidence/second-order fields are mandatory when the feature is on"""
+        schema_class = FeatureRegistry.get_schema_for_features(
+            {Feature.CONFIDENCE, Feature.SECOND_ORDER}
+        )
+        with pytest.raises(ValidationError):
+            schema_class(**self.CORE_KWARGS)  # Missing the feature fields
+
+
 class TestSchemaCaching:
     """Test that schema caching works correctly"""
 

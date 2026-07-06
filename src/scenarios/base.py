@@ -268,6 +268,8 @@ DEFAULT_PARAMS = {
         'MEMORY_ENABLED': False,  # Enable memory notes system (notes_to_self field)
         'SOCIAL_ENABLED': False,  # Enable social media messaging (post_message field)
         'SELF_MODIFY_ENABLED': False,  # Enable self-modification of system prompts (experimental)
+        'CONFIDENCE_ENABLED': False,  # Elicit confidence (0-1) in valuation and price predictions
+        'SECOND_ORDER_ENABLED': False,  # Elicit beliefs about other agents' average stated valuation
 
         'allow_short_selling': False,
         'margin_requirement': 0.5,

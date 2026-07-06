@@ -47,6 +47,26 @@ Strategic Considerations:
 - Consider: What do you want other agents to believe?
 - Be explicit about your messaging strategy in 'message_reasoning'""",
 
+        Feature.CONFIDENCE: """
+CONFIDENCE REPORTING:
+Report how confident you are in your estimates, on a 0-1 scale:
+- 'valuation_confidence': confidence in your fundamental value estimate
+- 'prediction_confidence': confidence in your price predictions
+
+Calibration guide: 0 = pure guess, 0.5 = moderately confident, 1 = certain.
+Be honest and calibrated - report LOW confidence when information is scarce or
+signals conflict, HIGH confidence only when evidence strongly supports your estimate.""",
+
+        Feature.SECOND_ORDER: """
+BELIEFS ABOUT OTHER AGENTS:
+Each round, every agent (including you) states its own valuation of the stock.
+Predict 'others_avg_valuation': the AVERAGE valuation the OTHER agents will state THIS round.
+Explain your estimate in 'others_avg_valuation_reasoning'.
+
+Important: this is about THEIR beliefs, not yours. Other agents may value the
+stock differently than you do - your prediction should reflect what you think
+they actually believe, even if you think they are wrong.""",
+
         Feature.SELF_MODIFY: """
 STRATEGY REPLACEMENT:
 You can REPLACE your trading strategy using 'prompt_modification'.

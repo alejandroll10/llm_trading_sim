@@ -91,6 +91,12 @@ class LLMService:
             if Feature.SELF_MODIFY in request.enabled_features:
                 decision_dict["prompt_modification"] = None
                 decision_dict["modification_reasoning"] = None
+            if Feature.CONFIDENCE in request.enabled_features:
+                decision_dict["valuation_confidence"] = 0.0
+                decision_dict["prediction_confidence"] = 0.0
+            if Feature.SECOND_ORDER in request.enabled_features:
+                decision_dict["others_avg_valuation_reasoning"] = "LLM Hold Agent: Always hold strategy"
+                decision_dict["others_avg_valuation"] = 0.0
 
             decision_dict["agent_id"] = request.agent_id
 
@@ -201,6 +207,14 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
                 decision_dict["prompt_modification"] = getattr(parsed_response, 'prompt_modification', None)
                 decision_dict["modification_reasoning"] = getattr(parsed_response, 'modification_reasoning', None)
 
+            if Feature.CONFIDENCE in request.enabled_features:
+                decision_dict["valuation_confidence"] = getattr(parsed_response, 'valuation_confidence', 0.0)
+                decision_dict["prediction_confidence"] = getattr(parsed_response, 'prediction_confidence', 0.0)
+
+            if Feature.SECOND_ORDER in request.enabled_features:
+                decision_dict["others_avg_valuation_reasoning"] = getattr(parsed_response, 'others_avg_valuation_reasoning', '')
+                decision_dict["others_avg_valuation"] = getattr(parsed_response, 'others_avg_valuation', 0.0)
+
             decision_dict["agent_id"] = request.agent_id
 
             return LLMResponse(
@@ -243,6 +257,14 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
         if Feature.SELF_MODIFY in enabled_features:
             fallback["prompt_modification"] = None
             fallback["modification_reasoning"] = None
+
+        if Feature.CONFIDENCE in enabled_features:
+            fallback["valuation_confidence"] = 0.0
+            fallback["prediction_confidence"] = 0.0
+
+        if Feature.SECOND_ORDER in enabled_features:
+            fallback["others_avg_valuation_reasoning"] = "Fallback decision due to parsing error"
+            fallback["others_avg_valuation"] = 0.0
 
         fallback["agent_id"] = agent_id
         return fallback

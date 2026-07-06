@@ -30,6 +30,8 @@ class Feature(str, Enum):
     SOCIAL = "social"
     LAST_REASONING = "last_reasoning"  # Show agent their reasoning from last round
     SELF_MODIFY = "self_modify"  # Allow agents to modify their own system prompts
+    CONFIDENCE = "confidence"  # Elicit confidence (0-1) in valuation and price predictions
+    SECOND_ORDER = "second_order"  # Elicit beliefs about other agents' average stated valuation
     # Future features can be added here:
     # ADVANCED_ORDERS = "advanced_orders"
     # PORTFOLIO_ANALYSIS = "portfolio_analysis"
@@ -120,6 +122,26 @@ class FeatureRegistry:
             'post_message': (
                 Optional[str],
                 Field(None, description="Optional: Post a message to the social feed visible to other agents next round")
+            ),
+        },
+        Feature.CONFIDENCE: {
+            'valuation_confidence': (
+                float,
+                Field(..., description="Your confidence in your fundamental value estimate, from 0 (pure guess) to 1 (certain)")
+            ),
+            'prediction_confidence': (
+                float,
+                Field(..., description="Your confidence in your price predictions, from 0 (pure guess) to 1 (certain)")
+            ),
+        },
+        Feature.SECOND_ORDER: {
+            'others_avg_valuation_reasoning': (
+                str,
+                Field(..., description="Brief reasoning for your estimate of the other agents' average stated valuation this round")
+            ),
+            'others_avg_valuation': (
+                float,
+                Field(..., description="What will the AVERAGE stated valuation of the OTHER agents be this round? This is about their beliefs, which may differ from your own valuation")
             ),
         },
         Feature.SELF_MODIFY: {
@@ -254,6 +276,15 @@ class FeatureRegistry:
         # Self-modify is opt-in (default False) - experimental feature
         if config.get('SELF_MODIFY_ENABLED', False):
             features.add(Feature.SELF_MODIFY)
+
+        # Confidence elicitation is opt-in (default False) to keep existing
+        # scenarios/logs schema-stable
+        if config.get('CONFIDENCE_ENABLED', False):
+            features.add(Feature.CONFIDENCE)
+
+        # Second-order beliefs (about other agents) is opt-in (default False)
+        if config.get('SECOND_ORDER_ENABLED', False):
+            features.add(Feature.SECOND_ORDER)
 
         return features
 
