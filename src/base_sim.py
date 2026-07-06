@@ -21,6 +21,7 @@ from market.state.services.leverage_interest_service import LeverageInterestServ
 from agents.agent_manager.services.agent_decision_service import AgentDecisionService
 from market.orders.order_service_factory import OrderServiceFactory
 from services.shared_service_factory import SharedServiceFactory
+from services.messaging_service import MessagingService
 from market.information.base_information_services import InformationService
 from market.information.info_capability_config import (
     resolve_agent_info_capabilities,
@@ -156,6 +157,14 @@ class BaseSimulation:
         
         # Set default agent parameters if none provided
         self.agent_params = agent_params
+
+        # Configure the social-feed transform (issue #95): readers see the
+        # transformed feed, raw messages are still logged. Seeded with
+        # llm_seed so 'scrambled' reproduces exactly on matched-seed runs.
+        MessagingService.configure(
+            transform=(agent_params or {}).get('FEED_TRANSFORM', 'identity'),
+            seed=llm_seed,
+        )
 
         # Initialize agents with explicit parameters
         agents = self.initialize_agents(self.agent_params)

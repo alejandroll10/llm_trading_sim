@@ -17,7 +17,55 @@ from .base import (
     BASE_INITIAL_SHARES, BASE_MAX_ORDER_SIZE, BASE_POSITION_LIMIT
 )
 
+def _feed_transform_scenario(transform: str) -> SimulationScenario:
+    """Matched-seed counterfactual-feed scenario (issue #95, the De Long test).
+
+    Identical populations, rounds, and seeds across all four variants; only
+    the feed transform differs. If full-language != sentiment_only on
+    beliefs/prices, language content matters beyond sentiment.
+    """
+    return SimulationScenario(
+        name=f"feed_{transform}",
+        description=f"Counterfactual social feed A/B: FEED_TRANSFORM={transform}",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 15,
+            "INITIAL_PRICE": 28.0,
+            "RANDOM_SEED": 42,
+            "LLM_SEED": 42,
+            "LLM_TEMPERATURE": 0.0,
+            "AGENT_PARAMS": {
+                **DEFAULT_PARAMS["AGENT_PARAMS"],
+                'MEMORY_ENABLED': False,
+                'SOCIAL_ENABLED': True,
+                'FEED_TRANSFORM': transform,
+
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'influencer': 2,
+                    'herd_follower': 4,
+                    'value': 2,
+                    'contrarian': 1,
+                }
+            }
+        }
+    )
+
+
 SCENARIOS = {
+    # ========================================================================
+    # A/B Test 0: Counterfactual feed transforms (issue #95, De Long test)
+    # Run all four on matched seeds and compare beliefs/prices.
+    # ========================================================================
+    "feed_identity": _feed_transform_scenario("identity"),
+    "feed_sentiment_only": _feed_transform_scenario("sentiment_only"),
+    "feed_scrambled": _feed_transform_scenario("scrambled"),
+    "feed_muted": _feed_transform_scenario("muted"),
+
     # ========================================================================
     # A/B Test 1: Memory Impact on Social Manipulation (Llama 3.1 70B)
     # ========================================================================

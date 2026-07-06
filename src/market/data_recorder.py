@@ -485,10 +485,14 @@ class DataRecorder:
 
     def record_social_message(self, round_number: int, agent_id: str, message: str):
         """Record a social media post from an agent"""
+        from services.sentiment_scorer import score_sentiment, sentiment_label
+        score = score_sentiment(message)
         self.social_messages.append({
             'round': round_number,
             'agent_id': agent_id,
             'message': message,
+            'sentiment_score': round(score, 4),
+            'sentiment_label': sentiment_label(score),
             'timestamp': datetime.now().isoformat()
         })
 
