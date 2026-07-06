@@ -12,7 +12,7 @@ Usage:
 """
 
 from .base import (
-    SimulationScenario, DEFAULT_PARAMS,
+    SimulationScenario, DEFAULT_PARAMS, DEFAULT_LLM_MODEL,
     FUNDAMENTAL_WITH_DEFAULT_PARAMS, BASE_NUM_ROUNDS, BASE_INITIAL_CASH,
     BASE_INITIAL_SHARES, BASE_MAX_ORDER_SIZE, BASE_POSITION_LIMIT
 )
@@ -254,7 +254,7 @@ SCENARIOS = {
         description="Social manipulation WITH memory - GPT-OSS 120B reasoning model",
         parameters={
             **DEFAULT_PARAMS,
-            "MODEL_OPEN_AI": "gpt-oss-120b",  # Override model
+            "MODEL_OPEN_AI": DEFAULT_LLM_MODEL,  # Override model (follows configured backend)
             "NUM_ROUNDS": 15,
             "INITIAL_PRICE": 28.0,
             "AGENT_PARAMS": {
@@ -283,7 +283,7 @@ SCENARIOS = {
         description="Social manipulation WITHOUT memory - GPT-OSS 120B reasoning model",
         parameters={
             **DEFAULT_PARAMS,
-            "MODEL_OPEN_AI": "gpt-oss-120b",  # Override model
+            "MODEL_OPEN_AI": DEFAULT_LLM_MODEL,  # Override model (follows configured backend)
             "NUM_ROUNDS": 15,
             "INITIAL_PRICE": 28.0,
             "AGENT_PARAMS": {
@@ -312,7 +312,7 @@ SCENARIOS = {
         description="Social manipulation WITH memory and MISPRICING - test memory with actual trades",
         parameters={
             **DEFAULT_PARAMS,
-            "MODEL_OPEN_AI": "gpt-oss-120b",  # Override model
+            "MODEL_OPEN_AI": DEFAULT_LLM_MODEL,  # Override model (follows configured backend)
             "NUM_ROUNDS": 10,  # Reduced for faster testing
             "INITIAL_PRICE": 35.0,  # 25% above fundamental ($28) to generate trades
             "AGENT_PARAMS": {

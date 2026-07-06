@@ -1,12 +1,13 @@
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, List, Literal, Set
+import os
 import openai
 import time
 import logging
 from agents.agents_api import TradeDecision, OrderDetails
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
-from scenarios.base import DEFAULT_LLM_BASE_URL
+from scenarios.base import DEFAULT_LLM_BASE_URL, resolve_llm_api_key
 from .schema_features import Feature, FeatureRegistry
 
 logger = logging.getLogger("llm_timing")
@@ -49,13 +50,18 @@ class LLMService:
 
         # Initialize OpenAI client with configured base_url and timeout
         # (base_url set in scenarios/base.py - non-sensitive config)
-        # Use httpx timeout for reliable request timeout (20s default)
+        # Read timeout is generous because reasoning models doing structured
+        # output can take tens of seconds per call; override via LLM_REQUEST_TIMEOUT.
+        # max_retries=0 so the outer retry loop below is the single (logged)
+        # retry mechanism -- the SDK's own retries would otherwise multiply the
+        # wall-clock wait (~3x) before a timeout ever surfaces to that loop.
         import httpx
-        timeout_config = httpx.Timeout(20.0, connect=10.0)
+        read_timeout = float(os.environ.get("LLM_REQUEST_TIMEOUT", "120"))
+        timeout_config = httpx.Timeout(read_timeout, connect=10.0)
         if DEFAULT_LLM_BASE_URL:
-            self.client = openai.OpenAI(base_url=DEFAULT_LLM_BASE_URL, timeout=timeout_config)
+            self.client = openai.OpenAI(base_url=DEFAULT_LLM_BASE_URL, api_key=resolve_llm_api_key(), timeout=timeout_config, max_retries=0)
         else:
-            self.client = openai.OpenAI(timeout=timeout_config)
+            self.client = openai.OpenAI(timeout=timeout_config, max_retries=0)
         # NOTE: temperature and seed are now supplied per request (LLMRequest),
         # configurable via scenario params LLM_TEMPERATURE / LLM_SEED.
 
@@ -117,7 +123,12 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
         start_time = time.time()
         prompt_len = len(request.system_prompt) + len(request.user_prompt)
 
-        max_retries = 20  # High retry count for flaky API (timeout ~60s per attempt)
+        # High retry count for flaky APIs, but bounded: worst-case wall-clock per
+        # call is roughly max_retries * LLM_REQUEST_TIMEOUT (+ backoff), so with the
+        # generous 120s read timeout a very high count could block a round for a long
+        # time on a hung endpoint. Default 10 keeps that bound reasonable; override
+        # via LLM_MAX_RETRIES for genuinely flaky backends.
+        max_retries = max(1, int(os.environ.get("LLM_MAX_RETRIES", "10")))
 
         for attempt in range(max_retries):
             try:
@@ -135,7 +146,14 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
             except Exception as e:
                 elapsed = time.time() - start_time
                 if attempt < max_retries - 1:
-                    logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Timeout/error after {elapsed:.1f}s, retrying...")
+                    # Capped exponential backoff before retrying. The OpenAI SDK's
+                    # own retry/backoff is disabled (max_retries=0 on the client) so
+                    # this loop is the sole retry path; without a delay a rate-limit
+                    # (429) or 5xx would be hammered 20x back-to-back. Cap at 8s so
+                    # the worst case stays bounded.
+                    backoff = min(0.5 * (2 ** attempt), 8.0)
+                    logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Timeout/error after {elapsed:.1f}s, retrying in {backoff:.1f}s...")
+                    time.sleep(backoff)
                     continue
                 else:
                     logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Failed after {max_retries} attempts ({elapsed:.1f}s total)")

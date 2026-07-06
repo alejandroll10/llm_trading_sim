@@ -47,6 +47,29 @@ except ImportError:
     # Default: UF Hypergator API (works for most users)
     DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"
     DEFAULT_LLM_MODEL = "gpt-oss-120b"
+
+
+def resolve_llm_api_key():
+    """Resolve the API key for the configured LLM backend.
+
+    Call this at client-construction time (after load_dotenv()), not at import
+    time, so the .env has already been loaded. DeepInfra authenticates with
+    DEEPINFRA_TOKEN; every other backend (UF, OpenAI) uses OPENAI_API_KEY.
+    Falls back to OPENAI_API_KEY so an unset token doesn't crash construction.
+    """
+    import os
+    if DEFAULT_LLM_BASE_URL and "deepinfra" in DEFAULT_LLM_BASE_URL:
+        token = os.environ.get("DEEPINFRA_TOKEN")
+        if not token:
+            import logging
+            logging.getLogger("llm_timing").warning(
+                "DEEPINFRA_TOKEN not set; falling back to OPENAI_API_KEY for the "
+                "DeepInfra endpoint. This will likely 401 unless that key is a "
+                "valid DeepInfra token."
+            )
+            token = os.environ.get("OPENAI_API_KEY")
+        return token
+    return os.environ.get("OPENAI_API_KEY")
 # =============================================================================
 
 class SimulationScenario:

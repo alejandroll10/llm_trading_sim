@@ -8,7 +8,7 @@ Testing scenarios with multiple stocks:
 """
 
 from .base import (
-    SimulationScenario, DEFAULT_PARAMS,
+    SimulationScenario, DEFAULT_PARAMS, DEFAULT_LLM_MODEL,
     FUNDAMENTAL_WITH_DEFAULT_PARAMS, BASE_NUM_ROUNDS, BASE_INITIAL_CASH,
     BASE_INITIAL_SHARES, BASE_MAX_ORDER_SIZE, BASE_POSITION_LIMIT
 )
@@ -413,7 +413,7 @@ SCENARIOS = {
         description="Multi-stock memory test with GPT-OSS - 3 stocks with different mispricing levels",
         parameters={
             **DEFAULT_PARAMS,
-            "MODEL_OPEN_AI": "gpt-oss-120b",  # Use GPT-OSS reasoning model
+            "MODEL_OPEN_AI": DEFAULT_LLM_MODEL,  # GPT-OSS reasoning model (follows configured backend)
             "NUM_ROUNDS": 8,  # Medium length for memory testing
             "IS_MULTI_STOCK": True,
             "HIDE_FUNDAMENTAL_PRICE": False,

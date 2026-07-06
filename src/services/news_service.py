@@ -25,7 +25,7 @@ import openai
 import logging
 from dotenv import load_dotenv
 
-from scenarios.base import DEFAULT_LLM_BASE_URL
+from scenarios.base import DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, resolve_llm_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +207,7 @@ def create_news_user_prompt(context: Dict[str, Any]) -> str:
 @dataclass
 class NewsServiceConfig:
     """Configuration for news generation"""
-    model: str = "gpt-oss-120b"  # Use same model as agents (UF HiPerGator compatible)
+    model: str = DEFAULT_LLM_MODEL  # Follow the configured LLM backend (same as agents)
     enabled: bool = True
     max_items_per_round: int = 3
 
@@ -221,7 +221,7 @@ class NewsService:
 
         # Initialize OpenAI client
         if DEFAULT_LLM_BASE_URL:
-            self.client = openai.OpenAI(base_url=DEFAULT_LLM_BASE_URL)
+            self.client = openai.OpenAI(base_url=DEFAULT_LLM_BASE_URL, api_key=resolve_llm_api_key())
         else:
             self.client = openai.OpenAI()
 
