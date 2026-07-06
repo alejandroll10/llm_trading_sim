@@ -44,24 +44,26 @@ class BuyTrader(BaseAgent):
         # Split quantity between two orders
         aggressive_quantity = int(total_quantity * 0.6)  # 60% at higher price
         patient_quantity = total_quantity - aggressive_quantity  # 40% at lower price
-        
-        orders = [
-            # More aggressive order at 1% above market
-            OrderDetails(
+
+        # Only emit legs with a positive quantity: when total_quantity is small
+        # (e.g. 1), the 60/40 split can round one leg to 0, which fails
+        # OrderDetails validation ("quantity must be positive").
+        orders = []
+        if aggressive_quantity > 0:
+            orders.append(OrderDetails(
                 decision="Buy",
                 quantity=aggressive_quantity,
                 order_type=OrderType.LIMIT,
-                price_limit=price * 1.01
-            ),
-            # More patient order at 1% below market
-            OrderDetails(
+                price_limit=price * 1.01  # More aggressive order at 1% above market
+            ))
+        if patient_quantity > 0:
+            orders.append(OrderDetails(
                 decision="Buy",
                 quantity=patient_quantity,
                 order_type=OrderType.LIMIT,
-                price_limit=price * 0.99
-            )
-        ]
-        
+                price_limit=price * 0.99  # More patient order at 1% below market
+            ))
+
         return TradeDecision(
             orders=orders,
             replace_decision="Replace",  # Replace any existing orders
