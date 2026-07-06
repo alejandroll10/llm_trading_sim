@@ -154,22 +154,47 @@ def test_remove_agent_orders_preserves_both_sides():
     assert book.get_best_bid() <= book.get_best_ask()
 
 
-def test_no_crossed_book_after_cancel_then_add():
-    """The exact #101 shape: resting ask 21.1, cancel a higher order, add buy 21.4.
+def test_crossing_check_correct_after_cancel():
+    """End-to-end of the #101 bug->symptom boundary.
 
-    After the fix, best ask is the true 21.1, so a buy at 21.4 is seen as crossing
-    (bid would exceed ask) rather than being mislabeled non-crossing on a phantom.
+    Reproduces the crash shape: resting ask 21.1 buried under a 30.0 order that a
+    market maker then cancels (replace). The ENGINE decides whether an incoming
+    buy @ 21.4 crosses by calling LimitOrderBookService._would_cross_market, which
+    reads peek_best_sell() == sell_orders[0]. With the heap corrupted (no fix),
+    sell_orders[0] is the phantom 30.0 -> the buy is mislabeled NON-crossing and
+    would rest on the book on top of the 21.1 ask (the crossed market). With the
+    fix, peek_best_sell() is the true 21.1 -> the buy is correctly flagged crossing
+    and the engine routes it to matching instead of resting it.
     """
-    book = _make_book()
-    _add_sell(book, "s", 21.1)       # resting true best ask
-    high = _add_sell(book, "mm", 30.0)
-    _add_sell(book, "s", 21.3)
-    book.remove_order(high)          # cancel the 30.0 (replace)
-    _add_buy(book, "b", 21.4)        # incoming aggressive buy rests (test-level)
+    from market.orders.handlers.services.order_book_service import LimitOrderBookService
 
-    # The book as-constructed is crossed ONLY because we added the buy directly;
-    # the point is that get_best_ask now reports the TRUE 21.1, which is what the
-    # crossing check in the engine relies on to route the buy to matching.
-    assert book.get_best_ask() == 21.1, (
-        f"phantom best ask {book.get_best_ask()} would hide the cross from the "
-        "engine's crossing check (root cause of #88/#101)")
+    book = _make_book()
+    # A valid min-heap array where removing the ROOT (the market maker's best-ask
+    # quote at 20.0) leaves, without re-heapify, a phantom root of 30.0 while the
+    # TRUE next-best ask is 21.1. This mirrors the crash: a cancel/replace removed
+    # the best quote and left a far-too-high phantom best ask.
+    prices = [20.0, 30.0, 21.1, 40.0, 50.0, 21.2]  # valid min-heap on price
+    sells = []
+    for p in prices:
+        o = Order(agent_id="mm" if p == 20.0 else "s", stock_id="DEFAULT_STOCK",
+                  order_type="limit", side="sell", quantity=100, price=p, round_placed=1)
+        o.state = OrderState.ACTIVE
+        sells.append(o)
+    book.sell_orders = [OrderEntry.create_sell(o) for o in sells]  # exact heap-array order
+    assert book.get_best_ask() == 20.0
+
+    book.remove_order(sells[0])      # market maker cancels its best quote (a replace)
+
+    # get_best_ask and peek_best_sell must both reflect the TRUE resting ask 21.1,
+    # not the phantom 30.0 that a non-heapified removal would leave at index 0.
+    assert book.get_best_ask() == 21.1
+    assert book.peek_best_sell().price == 21.1
+
+    # The engine's actual crossing check must classify a buy @ 21.4 as crossing.
+    svc = LimitOrderBookService(order_book=book, order_state_manager=None)
+    incoming_buy = Order(agent_id="b", stock_id="DEFAULT_STOCK", order_type="limit",
+                         side="buy", quantity=100, price=21.4, round_placed=1)
+    assert svc._would_cross_market(incoming_buy) is True, (
+        "buy @ 21.4 must be detected as crossing resting ask @ 21.1; a phantom "
+        "best ask from the un-heapified removal would return False here and let "
+        "the buy rest on the book -> crossed market (#88/#101)")
