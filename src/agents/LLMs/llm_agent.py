@@ -21,9 +21,16 @@ class LLMAgent(BaseAgent):
                  fundamental_info_mode: FundamentalInfoMode = FundamentalInfoMode.FULL,
                  llm_temperature: float = 0.0,
                  llm_seed: int = 42,
+                 system_prompt_override: str = None,
                  *args, **kwargs):  # Usually set via scenario params
         super().__init__(agent_id, *args, **kwargs)
         self.agent_type = AGENT_TYPES[agent_type]
+        # Prompt-family sweeps (issue #102): a scenario/variant may replace this
+        # agent type's system prompt while keeping the type's identity and stats.
+        self.base_system_prompt = (
+            system_prompt_override if system_prompt_override is not None
+            else self.agent_type.system_prompt
+        )
         self.model = model_open_ai
         # LLM sampling parameters (per-agent; may be overridden per agent type)
         self.llm_temperature = llm_temperature
@@ -47,8 +54,8 @@ class LLMAgent(BaseAgent):
 
         # Conditionally initialize self-modification based on feature flags
         if Feature.SELF_MODIFY in self.enabled_features:
-            self.current_system_prompt = self.agent_type.system_prompt
-            self.prompt_history = [(0, self.agent_type.system_prompt)]  # (round, prompt) tuples
+            self.current_system_prompt = self.base_system_prompt
+            self.prompt_history = [(0, self.base_system_prompt)]  # (round, prompt) tuples
 
     def make_decision(self, market_state, history, round_number):
         try:
@@ -411,11 +418,12 @@ class LLMAgent(BaseAgent):
         """Get the current (possibly modified) system prompt.
 
         Returns:
-            Modified prompt if self-modify enabled, otherwise original prompt
+            Modified prompt if self-modify enabled, otherwise the base prompt
+            (the type's default, or the scenario's SYSTEM_PROMPT_OVERRIDES entry)
         """
         if Feature.SELF_MODIFY in self.enabled_features and hasattr(self, 'current_system_prompt'):
             return self.current_system_prompt
-        return self.agent_type.system_prompt
+        return self.base_system_prompt
 
     def get_modification_count(self) -> int:
         """Get the number of prompt modifications made.

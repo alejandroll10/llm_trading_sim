@@ -651,7 +651,8 @@ class DataRecorder:
             # Check if agent has prompt_history attribute (only LLMAgents with SELF_MODIFY do)
             if hasattr(agent, 'prompt_history') and agent.prompt_history:
                 agent_type_name = getattr(agent.agent_type, 'name', 'unknown')
-                original_prompt = agent.agent_type.system_prompt
+                # base_system_prompt honors scenario-level SYSTEM_PROMPT_OVERRIDES
+                original_prompt = getattr(agent, 'base_system_prompt', agent.agent_type.system_prompt)
 
                 for round_num, prompt in agent.prompt_history:
                     # Determine if this is a modification or the original

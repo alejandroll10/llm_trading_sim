@@ -112,6 +112,25 @@ To run the simulation, you can execute the `run_base_sim.py` script from the `sr
 
     Simulation results, including plots and data, will be saved in the `logs/` directory.
 
+3.  **Run a Robustness Sweep:**
+    `src/run_sweep.py` runs one scenario across a grid of seeds × temperatures × models × prompt/param variants, with a resumable manifest and a pre-launch cost estimate. `src/aggregate_sweep.py` collects the per-cell CSVs into tidy panels with `cell_id`, `seed`, `temperature`, `model`, `variant`, and `prompt_family` metadata columns (`prompt_family` is the clustering key for inference — runs sharing a prompt family are not independent draws).
+    ```bash
+    # Sweep seeds x temperatures, then aggregate
+    python3 src/run_sweep.py simple_mixed_traders --seeds 42 7 13 --temperatures 0.0 0.5 --yes
+    python3 src/aggregate_sweep.py logs/sweeps/<sweep_name>
+    ```
+
+    **Prompt-family variant packs** (`sweeps/variants/`): checked-in JSON packs for robustness across prompt wordings, consumed via `--variants-file`. Each pack has one unmodified control plus variants that set `SYSTEM_PROMPT_OVERRIDES` (agent type → replacement system prompt) and optionally `FUNDAMENTAL_INFO_MODE`:
+    - `paraphrases_<persona>.json` — 4 semantically equivalent paraphrases each for `default`, `value`, `momentum`, `market_maker`, `optimistic`, `profit_maximizer`
+    - `persona_families.json` — index-matched paraphrases applied to all six personas at once (for mixed compositions)
+    - `framing_cook.json` — trader vs. financial-advisor framing × explicit vs. masked economic context (advisor rewrites exist only for the six workhorse personas, so use compositions drawn from those)
+    - `objective_framing_a3.json` — the same value strategy under different stated objectives (maximize wealth / follow the strategy even at a loss / maximize risk-adjusted return / no objective)
+
+    ```bash
+    python3 src/run_sweep.py prompt_variant_smoke --variants-file sweeps/variants/paraphrases_value.json --dry-run
+    ```
+    The packs are generated artifacts — edit `scripts/generate_prompt_variant_packs.py` (the single source of truth) and rerun it; `tests/test_prompt_variants.py` fails if the JSON drifts from the generator.
+
 ## Simulation Lifecycle
 
 The simulation operates in discrete rounds. The following steps occur in each round:

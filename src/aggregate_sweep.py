@@ -3,8 +3,10 @@ Aggregate the per-cell outputs of a sweep (see run_sweep.py) into tidy panels.
 
 For each requested CSV (default: structured_decisions.csv and market_data.csv) it
 collects that file from every completed cell, prepends the cell's metadata columns
-(cell_id, seed, temperature, model, variant, run_dir), and concatenates everything
-into a single long / tidy panel written under <sweep_root>/aggregated/.
+(cell_id, seed, temperature, model, variant, prompt_family, run_dir), and concatenates
+everything into a single long / tidy panel written under <sweep_root>/aggregated/.
+prompt_family is the clustering key for inference: runs sharing a prompt family
+(or model family) are not independent draws.
 
 Usage
 -----
@@ -27,8 +29,17 @@ from pathlib import Path
 import pandas as pd
 
 
-# Metadata columns prepended to every aggregated row, in order.
-META_COLUMNS = ["cell_id", "seed", "temperature", "model", "variant", "run_dir"]
+# Metadata columns prepended to every aggregated row, in order. prompt_family is
+# the clustering key for inference across runs sharing a prompt family (#102).
+META_COLUMNS = ["cell_id", "seed", "temperature", "model", "variant", "prompt_family", "run_dir"]
+
+
+def cell_prompt_family(cell: dict) -> str:
+    """Resolve a cell's prompt-family label, tolerating pre-#102 manifests."""
+    return (cell.get("prompt_family")
+            or cell.get("param_overrides", {}).get("PROMPT_FAMILY")
+            or cell.get("variant")
+            or "baseline")
 
 DEFAULT_FILES = ["structured_decisions.csv", "market_data.csv"]
 
@@ -66,6 +77,7 @@ def aggregate_file(cells, filename: str) -> pd.DataFrame:
             "temperature": cell.get("temperature"),
             "model": cell.get("model"),
             "variant": cell.get("variant"),
+            "prompt_family": cell_prompt_family(cell),
             "run_dir": str(run_dir),
         }
         for col in reversed(META_COLUMNS):

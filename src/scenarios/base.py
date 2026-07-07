@@ -263,6 +263,13 @@ DEFAULT_PARAMS = {
     # using the 'temperature' and 'seed' keys (parallel to per-type 'model').
     "LLM_TEMPERATURE": 0.0,  # Sampling temperature for LLM trading agents
     "LLM_SEED": 42,          # Deterministic sampling seed for LLM trading agents
+    # Prompt-family robustness (issue #102): replacement system prompts keyed by
+    # agent type (e.g. {"value": "..."}), plus a label identifying which prompt
+    # family the run belongs to (the clustering key for inference across runs
+    # sharing a prompt family). Both are typically set per sweep variant; see
+    # sweeps/variants/ for the shipped packs.
+    "SYSTEM_PROMPT_OVERRIDES": {},
+    "PROMPT_FAMILY": "baseline",
     "AGENT_PARAMS": {
         # Feature toggles for agent capabilities (opt-in by default)
         'MEMORY_ENABLED': False,  # Enable memory notes system (notes_to_self field)

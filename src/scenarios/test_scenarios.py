@@ -12,6 +12,32 @@ from .base import (
 )
 
 SCENARIOS = {
+    "prompt_variant_smoke": SimulationScenario(
+        name="prompt_variant_smoke",
+        description="Minimal 2-round market with all six workhorse personas, for "
+                    "smoke-testing prompt-family variant packs (sweeps/variants/, issue #102)",
+        parameters={
+            **DEFAULT_PARAMS,
+            "NUM_ROUNDS": 2,
+            "INITIAL_PRICE": 28.0,
+            "AGENT_PARAMS": {
+                'allow_short_selling': False,
+                'position_limit': BASE_POSITION_LIMIT,
+                'initial_cash': BASE_INITIAL_CASH,
+                'initial_shares': BASE_INITIAL_SHARES,
+                'max_order_size': BASE_MAX_ORDER_SIZE,
+                'agent_composition': {
+                    'default': 1,
+                    'value': 1,
+                    'momentum': 1,
+                    'market_maker': 1,
+                    'optimistic': 1,
+                    'profit_maximizer': 1,
+                },
+                'deterministic_params': {}
+            }
+        }
+    ),
     "test_default_trader": SimulationScenario(
         name="test_default_trader",
         description="Testing behavior of default traders in a minimal setting",

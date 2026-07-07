@@ -1,0 +1,31 @@
+{
+  "_meta": {
+    "pack": "paraphrases_default",
+    "version": "1.0.0",
+    "issue": "https://github.com/alejandroll10/llm_trading_sim/issues/102",
+    "generated_by": "scripts/generate_prompt_variant_packs.py (do not edit by hand)",
+    "description": "Semantically equivalent paraphrases of the 'default' system prompt. default_p0 is the unmodified control; p1-p4 replace the wording only.",
+    "usage": "python src/run_sweep.py <scenario> --variants-file sweeps/variants/paraphrases_default.json"
+  },
+  "default_p0": {},
+  "default_p1": {
+    "SYSTEM_PROMPT_OVERRIDES": {
+      "default": "You are an autonomous agent participating as a trader in a simulated financial market."
+    }
+  },
+  "default_p2": {
+    "SYSTEM_PROMPT_OVERRIDES": {
+      "default": "You act as a trader operating in a simulated stock market."
+    }
+  },
+  "default_p3": {
+    "SYSTEM_PROMPT_OVERRIDES": {
+      "default": "You are one of several trading agents taking part in a financial market simulation."
+    }
+  },
+  "default_p4": {
+    "SYSTEM_PROMPT_OVERRIDES": {
+      "default": "Your role is that of a trading agent active in a simulated financial market."
+    }
+  }
+}

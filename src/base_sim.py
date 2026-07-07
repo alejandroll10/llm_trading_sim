@@ -44,6 +44,28 @@ import random
 import warnings
 from wordcloud import WordCloud
 
+
+def validate_system_prompt_overrides(overrides: dict):
+    """Validate SYSTEM_PROMPT_OVERRIDES (prompt-family sweeps, issue #102).
+
+    Each key must name a known, non-deterministic agent type and map to a
+    non-empty replacement system prompt. Raises ValueError so a typo'd pack
+    fails at simulation construction, not silently mid-sweep.
+    """
+    for override_type, override_prompt in (overrides or {}).items():
+        if override_type not in AGENT_TYPES:
+            raise ValueError(
+                f"SYSTEM_PROMPT_OVERRIDES references unknown agent type '{override_type}'. "
+                f"Known types: {sorted(AGENT_TYPES.keys())}")
+        if override_type in DETERMINISTIC_AGENTS:
+            raise ValueError(
+                f"SYSTEM_PROMPT_OVERRIDES targets deterministic agent type "
+                f"'{override_type}', which does not use a prompt.")
+        if not isinstance(override_prompt, str) or not override_prompt.strip():
+            raise ValueError(
+                f"SYSTEM_PROMPT_OVERRIDES['{override_type}'] must be a non-empty string.")
+
+
 class BaseSimulation:
     """
     The core class for running a trading simulation.
@@ -78,6 +100,7 @@ class BaseSimulation:
                  model_open_ai = "gpt-oss-20b",  # Usually set via DEFAULT_PARAMS from .env
                  llm_temperature: float = 0.0,  # Sampling temperature for LLM agents
                  llm_seed: int = 42,  # Deterministic sampling seed for LLM agents
+                 system_prompt_overrides: dict = None,  # agent_type -> replacement system prompt (prompt-family sweeps)
                  dividend_params: dict = None,
                  interest_params: dict = None,
                  borrow_params: dict = None,
@@ -149,6 +172,12 @@ class BaseSimulation:
         self.model_open_ai = model_open_ai
         self.llm_temperature = llm_temperature
         self.llm_seed = llm_seed
+
+        # System-prompt overrides (prompt-family robustness sweeps, issue #102):
+        # agent_type -> replacement system prompt. Validated up front so a typo'd
+        # agent type fails at construction, not silently mid-sweep.
+        self.system_prompt_overrides = system_prompt_overrides or {}
+        validate_system_prompt_overrides(self.system_prompt_overrides)
 
         # Fundamental info mode: controls what agents see
         # Handle backwards compatibility with hide_fundamental_price
@@ -598,7 +627,8 @@ class BaseSimulation:
             enabled_features=enabled_features,
             fundamental_info_mode=self.fundamental_info_mode,
             llm_temperature=llm_temperature,
-            llm_seed=llm_seed
+            llm_seed=llm_seed,
+            system_prompt_override=self.system_prompt_overrides.get(agent_type)
         )
 
     def initialize_agents(self, agent_params: dict):
