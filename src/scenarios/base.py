@@ -263,6 +263,14 @@ DEFAULT_PARAMS = {
     # using the 'temperature' and 'seed' keys (parallel to per-type 'model').
     "LLM_TEMPERATURE": 0.0,  # Sampling temperature for LLM trading agents
     "LLM_SEED": 42,          # Deterministic sampling seed for LLM trading agents
+    # Concurrent agent decisions (LLM calls) per round. Agents decide
+    # simultaneously on the same market state, so this only changes wall-clock
+    # time, never results. Set to 1 for endpoints that misbehave under
+    # concurrent load (serial mode paces requests 500ms apart). The UF
+    # Hypergator fallback endpoint historically rate-limited concurrent
+    # gpt-oss calls, so it keeps the old paced-serial behavior by default;
+    # any explicitly configured backend (llm_config.py) gets parallel.
+    "LLM_MAX_CONCURRENCY": 1 if "ai.it.ufl.edu" in (DEFAULT_LLM_BASE_URL or "") else 8,
     # Prompt-family robustness (issue #102): replacement system prompts keyed by
     # agent type (e.g. {"value": "..."}), plus a label identifying which prompt
     # family the run belongs to (the clustering key for inference across runs

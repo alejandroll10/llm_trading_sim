@@ -14,7 +14,8 @@ class AgentDecisionService:
         order_state_manager,
         agents_logger,
         decisions_logger,
-        context
+        context,
+        max_concurrency: int = 8
     ):
         self.agent_repository = agent_repository
         self.order_repository = order_repository
@@ -22,23 +23,22 @@ class AgentDecisionService:
         self.agents_logger = agents_logger
         self.decisions_logger = decisions_logger
         self.context = context
+        # How many agent decisions (LLM calls) may be in flight at once within a
+        # round. Agents decide simultaneously on the same market state, so the
+        # result is identical to serial collection; decisions are processed in
+        # the shuffled agent order below either way. Set to 1 (LLM_MAX_CONCURRENCY
+        # scenario param) for endpoints that misbehave under concurrent load.
+        self.max_concurrency = max(1, int(max_concurrency))
 
     def collect_decisions(self, market_state, history, round_number):
         agent_ids = self.agent_repository.get_shuffled_agent_ids()
         new_orders = []
 
-        # Check if we should use serial execution (for gpt-oss models on remote APIs with rate limits)
-        # Local vLLM endpoints can handle parallel requests fine
-        from scenarios.base import DEFAULT_LLM_MODEL, DEFAULT_LLM_BASE_URL
-        is_local = DEFAULT_LLM_BASE_URL and 'localhost' in DEFAULT_LLM_BASE_URL
-        use_serial = 'gpt-oss' in DEFAULT_LLM_MODEL.lower() and not is_local
-
         decisions = {}
-        if use_serial:
-            # Serial execution for gpt-oss (more reliable)
+        if self.max_concurrency == 1:
+            # Serial execution, paced to avoid rate limits on fragile endpoints
             import time as _time
             for i, agent_id in enumerate(agent_ids):
-                # Add small delay between requests to avoid rate limiting
                 if i > 0:
                     _time.sleep(0.5)  # 500ms delay between requests
                 decisions[agent_id] = self.agent_repository.get_agent_decision(
@@ -48,8 +48,7 @@ class AgentDecisionService:
                     round_number=round_number
                 )
         else:
-            # Parallel execution for other models (faster)
-            with ThreadPoolExecutor(max_workers=min(len(agent_ids), 2)) as executor:
+            with ThreadPoolExecutor(max_workers=min(len(agent_ids), self.max_concurrency)) as executor:
                 future_to_agent = {
                     executor.submit(
                         self.agent_repository.get_agent_decision,

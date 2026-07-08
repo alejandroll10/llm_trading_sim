@@ -33,6 +33,8 @@ from scenarios.base import FundamentalInfoMode
 
 # Top-level scenario params a variant pack is allowed to override.
 ALLOWED_OVERRIDE_KEYS = {"SYSTEM_PROMPT_OVERRIDES", "FUNDAMENTAL_INFO_MODE", "PROMPT_FAMILY"}
+# Parameter grids (_meta.kind == "param_grid") may additionally sweep market params.
+PARAM_GRID_EXTRA_KEYS = {"INITIAL_PRICE", "LLM_MAX_CONCURRENCY"}
 
 PACK_PATHS = sorted(VARIANTS_DIR.glob("*.json"))
 
@@ -60,12 +62,17 @@ class TestPackStructure:
         variants = variant_items(pack)
         assert variants, f"{path.name}: no variants"
 
-        controls = [name for name, ov in variants.items() if ov == {}]
-        assert len(controls) == 1, f"{path.name}: expected exactly one unmodified control variant"
+        # Prompt packs need exactly one unmodified {} control as the baseline.
+        # Parameter grids (_meta.kind == "param_grid", e.g. a1_info_ladder) are
+        # full factorials where every cell intentionally carries overrides.
+        if meta.get("kind") != "param_grid":
+            controls = [name for name, ov in variants.items() if ov == {}]
+            assert len(controls) == 1, f"{path.name}: expected exactly one unmodified control variant"
 
+        allowed = ALLOWED_OVERRIDE_KEYS | (PARAM_GRID_EXTRA_KEYS if meta.get("kind") == "param_grid" else set())
         for name, overrides in variants.items():
             assert isinstance(overrides, dict), f"{path.name}:{name}: overrides must be an object"
-            unknown = set(overrides) - ALLOWED_OVERRIDE_KEYS
+            unknown = set(overrides) - allowed
             assert not unknown, f"{path.name}:{name}: unexpected override keys {unknown}"
 
             if "FUNDAMENTAL_INFO_MODE" in overrides:

@@ -100,6 +100,7 @@ class BaseSimulation:
                  model_open_ai = "gpt-oss-20b",  # Usually set via DEFAULT_PARAMS from .env
                  llm_temperature: float = 0.0,  # Sampling temperature for LLM agents
                  llm_seed: int = 42,  # Deterministic sampling seed for LLM agents
+                 llm_max_concurrency: int = 8,  # Concurrent agent decisions (LLM calls) per round; 1 = serial
                  system_prompt_overrides: dict = None,  # agent_type -> replacement system prompt (prompt-family sweeps)
                  dividend_params: dict = None,
                  interest_params: dict = None,
@@ -507,7 +508,8 @@ class BaseSimulation:
             order_state_manager=self.order_state_manager,
             agents_logger=LoggingService.get_logger('agents'),
             decisions_logger=LoggingService.get_logger('decisions'),
-            context=self.context
+            context=self.context,
+            max_concurrency=llm_max_concurrency
         )
 
         # Initialize verification service
