@@ -12,6 +12,7 @@ from pathlib import Path
 from datetime import datetime
 from services.logging_service import LoggingService
 from scenarios import get_scenario, list_scenarios
+from scenarios.base import FundamentalInfoMode
 import shutil
 from visualization.plot_generator import PlotGenerator
 
@@ -185,6 +186,14 @@ def run_scenario(
     # Apply top-level parameter overrides (sweep driver) before anything reads them.
     if param_overrides:
         params.update(param_overrides)
+        # Overrides bypass SimulationScenario.__init__ normalization, so a variant
+        # pack that supplies FUNDAMENTAL_INFO_MODE as a raw string (e.g.
+        # {"FUNDAMENTAL_INFO_MODE": "realizations_only"} from a sweep) would leave a
+        # plain str where the formatters expect the enum and call mode.value.
+        # Re-coerce here, mirroring SimulationScenario._normalize_fundamental_info_mode.
+        mode = params.get("FUNDAMENTAL_INFO_MODE")
+        if isinstance(mode, str):
+            params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode(mode)
 
     # Apply overrides if provided
     agent_params = params.get("AGENT_PARAMS", {})

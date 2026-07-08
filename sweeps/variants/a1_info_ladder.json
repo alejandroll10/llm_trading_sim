@@ -1,0 +1,91 @@
+{
+  "_meta": {
+    "pack": "a1_info_ladder",
+    "version": "1.0.0",
+    "issue": "https://github.com/alejandroll10/llm_trading_sim/issues/103",
+    "generated_by": "hand-authored (issue #103, Paper A experiment A1)",
+    "description": "Experiment A1: information ladder x price anchor. 15 cells = FUNDAMENTAL_INFO_MODE in {full, process_only, realizations_only, average, none} x INITIAL_PRICE in {0.5x, 1x, 2x} FV. Run on the neutral base scenario a1_information_ladder (default x 8, INFINITE_ROUNDS). PROMPT_FAMILY is held at 'a1_default' across all cells (single prompt family) so mode/anchor are the experimental axes and prompt_family stays a clean clustering key. Variant names encode <mode>__<anchor> and are the estimator's key into (mode, anchor).",
+    "fundamental_value": "FV = E[d]/r = 1.40/0.05 = 28.00 under INFINITE_ROUNDS. E[d] = 0.5*(1.4+1.0) + 0.5*(1.4-1.0) = 1.40 (DIVIDEND_PARAMS base_dividend=1.4, probability=0.5, variation=1.0); r = 0.05 (INTEREST_MODEL.rate). Price anchors: 0.5xFV=14.00, 1xFV=28.00, 2xFV=56.00.",
+    "usage": "python src/run_sweep.py a1_information_ladder --variants-file sweeps/variants/a1_info_ladder.json --seeds 1 2 3 4 5 --temperatures 0.0 --dry-run"
+  },
+
+  "full__0p5x": {
+    "FUNDAMENTAL_INFO_MODE": "full",
+    "INITIAL_PRICE": 14.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "full__1x": {
+    "FUNDAMENTAL_INFO_MODE": "full",
+    "INITIAL_PRICE": 28.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "full__2x": {
+    "FUNDAMENTAL_INFO_MODE": "full",
+    "INITIAL_PRICE": 56.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+
+  "process_only__0p5x": {
+    "FUNDAMENTAL_INFO_MODE": "process_only",
+    "INITIAL_PRICE": 14.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "process_only__1x": {
+    "FUNDAMENTAL_INFO_MODE": "process_only",
+    "INITIAL_PRICE": 28.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "process_only__2x": {
+    "FUNDAMENTAL_INFO_MODE": "process_only",
+    "INITIAL_PRICE": 56.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+
+  "realizations_only__0p5x": {
+    "FUNDAMENTAL_INFO_MODE": "realizations_only",
+    "INITIAL_PRICE": 14.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "realizations_only__1x": {
+    "FUNDAMENTAL_INFO_MODE": "realizations_only",
+    "INITIAL_PRICE": 28.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "realizations_only__2x": {
+    "FUNDAMENTAL_INFO_MODE": "realizations_only",
+    "INITIAL_PRICE": 56.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+
+  "average__0p5x": {
+    "FUNDAMENTAL_INFO_MODE": "average",
+    "INITIAL_PRICE": 14.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "average__1x": {
+    "FUNDAMENTAL_INFO_MODE": "average",
+    "INITIAL_PRICE": 28.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "average__2x": {
+    "FUNDAMENTAL_INFO_MODE": "average",
+    "INITIAL_PRICE": 56.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+
+  "none__0p5x": {
+    "FUNDAMENTAL_INFO_MODE": "none",
+    "INITIAL_PRICE": 14.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "none__1x": {
+    "FUNDAMENTAL_INFO_MODE": "none",
+    "INITIAL_PRICE": 28.0,
+    "PROMPT_FAMILY": "a1_default"
+  },
+  "none__2x": {
+    "FUNDAMENTAL_INFO_MODE": "none",
+    "INITIAL_PRICE": 56.0,
+    "PROMPT_FAMILY": "a1_default"
+  }
+}

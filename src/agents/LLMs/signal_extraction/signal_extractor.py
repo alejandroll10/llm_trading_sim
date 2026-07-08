@@ -34,8 +34,14 @@ class SignalExtractor:
 
         yields = metadata['yields']
 
-        # Get dividend history from signal metadata (set by DividendProvider)
-        dividend_history = metadata.get('dividend_history', [])
+        # Get dividend history from signal metadata (set by DividendProvider).
+        # It holds DividendRealization objects; every downstream consumer here
+        # (AVERAGE stats, REALIZATIONS_ONLY payment list) wants the per-share
+        # dividend amount as a plain float, so normalize once up front.
+        dividend_history = [
+            d.total_dividend if hasattr(d, 'total_dividend') else d
+            for d in metadata.get('dividend_history', [])
+        ]
 
         # Regime-shift notice (issue #96); None unless announce_regime_shifts is on
         regime_announcement = metadata.get('regime_announcement')

@@ -37,6 +37,7 @@ from . import bubbles_professionals
 from . import comprehensive_tests
 from . import paper_management_science
 from . import asymmetric_information
+from . import experiment_a1
 
 # Combine all scenarios into a single registry
 SCENARIOS = {
@@ -52,6 +53,7 @@ SCENARIOS = {
     **comprehensive_tests.SCENARIOS,
     **paper_management_science.SCENARIOS,
     **asymmetric_information.SCENARIOS,
+    **experiment_a1.SCENARIOS,
 }
 
 # Backwards-compatible API

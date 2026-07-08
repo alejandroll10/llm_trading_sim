@@ -395,7 +395,11 @@ class MarketStateFormatter:
             # Get history from context (populated from signal metadata)
             history = context.get('dividend_history', [])
             if history:
-                history_text = ", ".join([f"${d:.2f}" for d in history[-10:]])  # Last 10
+                # history is normally already numeric (SignalExtractor flattens the
+                # DividendRealization objects), but coerce defensively so a raw
+                # realization list can never crash the :.2f formatting.
+                amounts = [getattr(d, 'total_dividend', d) for d in history[-10:]]
+                history_text = ", ".join([f"${d:.2f}" for d in amounts])  # Last 10
                 if len(history) > 10:
                     history_text = f"... {history_text}"
             else:
