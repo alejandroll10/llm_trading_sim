@@ -96,6 +96,60 @@ from pathlib import Path
 from scenarios import get_scenario
 from scenarios.base import DEFAULT_LLM_MODEL
 from run_base_sim import run_scenario
+from services.model_pricing import compute_cost
+from services.usage_tracker import aggregate_summaries
+
+
+# Persisted per-model realized averages, used to turn the pre-launch call-count
+# estimate into a tokens/$ estimate (issue #104). Written after every sweep.
+CALIBRATION_PATH = Path('logs') / 'sweeps' / 'calibration.json'
+
+
+def load_calibration() -> dict:
+    """Load the per-model tokens-per-call calibration table (may be empty)."""
+    if CALIBRATION_PATH.exists():
+        try:
+            with open(CALIBRATION_PATH) as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError):
+            return {}
+    return {}
+
+
+def estimate_tokens_and_cost(model: str, calls: int, calibration: dict):
+    """Turn a cell's estimated call count into estimated tokens/$ via calibration.
+
+    Returns None when the model has no calibration entry yet (first-ever sweep of
+    that model), so the caller can fall back to quoting raw call counts.
+    """
+    cal = calibration.get(model)
+    if not cal:
+        return None
+    in_tok = calls * cal.get("input_per_call", 0.0)
+    out_tok = calls * cal.get("output_per_call", 0.0)
+    return {"tokens": in_tok + out_tok, "cost_usd": compute_cost(model, in_tok, out_tok)}
+
+
+def update_calibration(by_model: dict) -> None:
+    """Overwrite calibration entries with the latest realized per-call averages.
+
+    Latest-wins (not a running blend): the most recent sweep of a model is the
+    best guide to the next one, and keeps the file simple and dependency-free.
+    """
+    cal = load_calibration()
+    for model, stats in by_model.items():
+        calls = stats.get("calls", 0)
+        if not calls:
+            continue
+        cal[model] = {
+            "input_per_call": round(stats.get("prompt_tokens", 0) / calls, 2),
+            "output_per_call": round(stats.get("completion_tokens", 0) / calls, 2),
+            "tokens_per_call": round(stats.get("total_tokens", 0) / calls, 2),
+            "n_calls": calls,
+        }
+    CALIBRATION_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(CALIBRATION_PATH, 'w') as f:
+        json.dump(cal, f, indent=2)
 
 
 def sanitize(value) -> str:
@@ -259,9 +313,14 @@ def main():
     # Cost estimate (per-cell so variant overrides that change call count are honored).
     done_ids = {cid for cid, c in manifest["cells"].items() if c.get("status") == "done"}
     remaining_cells = [c for c in cells if not (args.resume and c["cell_id"] in done_ids)]
+    calibration = load_calibration()
     for c in cells:
         c["est_calls"] = estimate_calls_per_cell(base_params, c["variant_overrides"])
+        c["est_usage"] = estimate_tokens_and_cost(c["model"], c["est_calls"], calibration)
     total_calls = sum(c["est_calls"] for c in remaining_cells)
+    est_usages = [c["est_usage"] for c in remaining_cells if c.get("est_usage")]
+    total_est_tokens = sum(u["tokens"] for u in est_usages)
+    total_est_cost = sum(u["cost_usd"] for u in est_usages)
 
     print(f"\n=== Sweep: {sweep_name} ===")
     print(f"Base scenario : {args.scenario}")
@@ -270,11 +329,19 @@ def main():
     if args.resume and done_ids:
         print(f"Resuming      : {len(done_ids)} already done, {len(remaining_cells)} to run")
     print(f"Est. LLM calls: ~{total_calls} total across {len(remaining_cells)} cells")
+    if est_usages:
+        print(f"Est. tokens/$ : ~{total_est_tokens:,.0f} tokens, ~${total_est_cost:.2f} "
+              f"(from calibration, {len(est_usages)}/{len(remaining_cells)} cells)")
+    else:
+        print("Est. tokens/$ : no calibration yet -- run one sweep to enable token/$ estimates")
     print(f"Output root   : {sweep_root}\n")
     print("Cells to run:")
     for c in remaining_cells:
+        usage_str = ""
+        if c.get("est_usage"):
+            usage_str = f", ~{c['est_usage']['tokens']:,.0f} tok/${c['est_usage']['cost_usd']:.3f}"
         print(f"  - {c['cell_id']}  (seed={c['seed']}, temp={c['temperature']}, "
-              f"model={c['model']}, variant={c['variant']}, ~{c['est_calls']} calls)")
+              f"model={c['model']}, variant={c['variant']}, ~{c['est_calls']} calls{usage_str})")
     print()
 
     if args.dry_run:
@@ -336,7 +403,15 @@ def main():
             )
             cell_record["status"] = "done"
             cell_record["run_dir"] = str(simulation.run_dir)
-            print(f"  -> done: {simulation.run_dir}")
+            # Surface realized token/cost usage in the manifest per cell (#104).
+            usage = getattr(simulation, "llm_usage_summary", None)
+            if usage:
+                cell_record["llm_usage"] = usage
+                print(f"  -> done: {simulation.run_dir} | "
+                      f"{usage['total_tokens']:,} tokens, ${usage['cost_usd']:.4f}, "
+                      f"{usage['calls']} calls")
+            else:
+                print(f"  -> done: {simulation.run_dir}")
         except Exception as e:
             cell_record["status"] = "failed"
             cell_record["error"] = str(e)
@@ -350,7 +425,49 @@ def main():
     done = sum(1 for c in manifest["cells"].values() if c.get("status") == "done")
     failed = sum(1 for c in manifest["cells"].values() if c.get("status") == "failed")
     print(f"\n=== Sweep complete: {done} done, {failed} failed ===")
-    print(f"Manifest: {manifest_path}")
+
+    # Roll up realized usage across all done cells, report totals, and
+    # self-calibrate the estimator for future dry-runs (issue #104).
+    usage_summaries = [c.get("llm_usage") for c in manifest["cells"].values()
+                       if c.get("status") == "done"]
+    rollup = aggregate_summaries(usage_summaries)
+    if rollup["calls"]:
+        # Persist the rollup into the manifest so aggregate_sweep / audits can read it.
+        manifest["llm_usage"] = rollup
+        save_manifest(manifest_path, manifest)
+
+        print(f"\nRealized LLM usage ({rollup['runs_with_usage']} runs):")
+        print(f"  Calls   : {rollup['calls']:,} ({rollup['failed_calls']} failed, "
+              f"{rollup['attempts']:,} attempts incl. retries)")
+        print(f"  Tokens  : {rollup['total_tokens']:,} "
+              f"({rollup['prompt_tokens']:,} in / {rollup['completion_tokens']:,} out)")
+        print(f"  Cost    : ${rollup['cost_usd']:.4f}")
+        print(f"  Avg/call: {rollup['avg_tokens_per_call']:,.1f} tokens")
+        if rollup.get("unpriced_models"):
+            print(f"  [warn] no price-table entry (counted as $0): "
+                  f"{', '.join(rollup['unpriced_models'])}")
+
+        # Self-calibration: estimated vs realized call count. Sum estimates only
+        # over cells that actually contributed realized usage (have an llm_usage
+        # entry), so the ratio's numerator (rollup calls) and denominator stay
+        # apples-to-apples even on resumed / pre-#104 sweeps. Reuse the est_calls
+        # already computed above rather than recomputing.
+        usage_cell_ids = {cid for cid, cc in manifest["cells"].items()
+                          if cc.get("status") == "done" and cc.get("llm_usage")}
+        est_total = sum(c["est_calls"] for c in cells if c["cell_id"] in usage_cell_ids)
+        if est_total:
+            ratio = rollup["calls"] / est_total
+            print(f"  Estimator: predicted ~{est_total} calls, realized {rollup['calls']} "
+                  f"({ratio:.2f}x). Per-model avg tokens/call:")
+            for model, mb in rollup["by_model"].items():
+                print(f"    - {model}: {mb['avg_tokens_per_call']:,.1f} tok/call "
+                      f"({mb['avg_prompt_tokens_per_call']:,.1f} in / "
+                      f"{mb['avg_completion_tokens_per_call']:,.1f} out)")
+
+        update_calibration(rollup["by_model"])
+        print(f"  Calibration updated: {CALIBRATION_PATH}")
+
+    print(f"\nManifest: {manifest_path}")
     print(f"Aggregate with: python src/aggregate_sweep.py {sweep_root}")
 
 

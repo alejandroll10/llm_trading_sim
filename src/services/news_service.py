@@ -22,10 +22,12 @@ from typing import List, Dict, Any, Optional, Literal
 from pydantic import BaseModel, Field, field_validator
 from dataclasses import dataclass
 import openai
+import time
 import logging
 from dotenv import load_dotenv
 
 from scenarios.base import DEFAULT_LLM_BASE_URL, DEFAULT_LLM_MODEL, resolve_llm_api_key
+from services.usage_tracker import UsageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -254,11 +256,16 @@ class NewsService:
             round_number, total_rounds, market_state, price_history, stock_id
         )
 
+        logger.debug(f"[NEWS] Generating news for round {round_number}")
+
+        # Split API call from response parsing so usage is recorded exactly once
+        # (#104): a failure *after* a successful call (bad/empty parse) must not
+        # also append a success=False row for the same call. Prompt building stays
+        # inside this first try so its failure is still swallowed (return []) as
+        # before, rather than propagating to callers that don't catch it.
         try:
             user_prompt = create_news_user_prompt(context)
-
-            logger.debug(f"[NEWS] Generating news for round {round_number}")
-
+            _t0 = time.time()
             completion = self.client.beta.chat.completions.parse(
                 model=self.config.model,
                 messages=[
@@ -268,7 +275,14 @@ class NewsService:
                 response_format=NewsGenerationOutput,
                 temperature=0.7,  # Some creativity for varied news
             )
+        except Exception as e:
+            logger.warning(f"[NEWS] Failed to generate news: {e}")
+            self._record_usage(round_number, None, 0.0, success=False)
+            return []
 
+        self._record_usage(round_number, completion, time.time() - _t0)
+
+        try:
             parsed = completion.choices[0].message.parsed
             news_items = parsed.news_items[:self.config.max_items_per_round]
 
@@ -277,9 +291,8 @@ class NewsService:
                 logger.debug(f"[NEWS]   - {item.headline} ({item.sentiment}, {item.magnitude})")
 
             return news_items
-
         except Exception as e:
-            logger.warning(f"[NEWS] Failed to generate news: {e}")
+            logger.warning(f"[NEWS] Failed to parse news response: {e}")
             return []
 
     def generate_news_multi_stock(
@@ -325,11 +338,14 @@ class NewsService:
                 'last_dividend': dividend.get('last_paid_dividend'),
             }
 
+        logger.debug(f"[NEWS] Generating multi-stock news for round {round_number} ({len(stocks_data)} stocks)")
+
+        # See generate_news: record usage once, keyed on the API call succeeding,
+        # not on the parse succeeding (#104). Prompt building stays inside this
+        # first try so its failure is swallowed as before.
         try:
             user_prompt = create_news_user_prompt(context)
-
-            logger.debug(f"[NEWS] Generating multi-stock news for round {round_number} ({len(stocks_data)} stocks)")
-
+            _t0 = time.time()
             completion = self.client.beta.chat.completions.parse(
                 model=self.config.model,
                 messages=[
@@ -339,7 +355,14 @@ class NewsService:
                 response_format=NewsGenerationOutput,
                 temperature=0.7,
             )
+        except Exception as e:
+            logger.warning(f"[NEWS] Failed to generate multi-stock news: {e}")
+            self._record_usage(round_number, None, 0.0, success=False)
+            return []
 
+        self._record_usage(round_number, completion, time.time() - _t0)
+
+        try:
             parsed = completion.choices[0].message.parsed
             news_items = parsed.news_items[:self.config.max_items_per_round]
 
@@ -349,10 +372,33 @@ class NewsService:
                 logger.debug(f"[NEWS]   - [{stocks_str}] {item.headline}")
 
             return news_items
-
         except Exception as e:
-            logger.warning(f"[NEWS] Failed to generate multi-stock news: {e}")
+            logger.warning(f"[NEWS] Failed to parse multi-stock news response: {e}")
             return []
+
+    def _record_usage(self, round_number: int, completion, latency_s: float, success: bool = True) -> None:
+        """Feed a news-generation call into the run's UsageTracker (issue #104).
+
+        agent_id is the sentinel "__news__" and call_type is "news" so news cost
+        is separable from trading-agent cost in the per-run breakdown. Best-effort:
+        accounting must never break news generation.
+        """
+        try:
+            usage = getattr(completion, "usage", None) if completion is not None else None
+            UsageTracker.record(
+                round_number=round_number,
+                agent_id="__news__",
+                model=self.config.model,
+                call_type="news",
+                prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+                completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+                total_tokens=getattr(usage, "total_tokens", None) if usage else None,
+                latency_s=latency_s,
+                attempts=1,
+                success=success,
+            )
+        except Exception:  # pragma: no cover - accounting must not break news
+            pass
 
     def _prepare_public_context(
         self,
