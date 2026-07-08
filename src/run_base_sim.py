@@ -70,6 +70,26 @@ def save_parameters(run_dir: Path, params: dict):
     with open(scenario_dir / 'parameters.json', 'w') as f:
         json.dump(params, f, indent=4)
 
+def write_usage_to_metadata(simulation):
+    """Merge the run's realized LLM usage summary into its metadata.json (#104).
+
+    Adds a top-level "llm_usage" key (tokens, dollars, per-model breakdown) to the
+    metadata written up-front by create_run_directory. No-op for runs that made no
+    LLM calls (all-deterministic scenarios), which leave llm_usage_summary as None.
+    """
+    summary = getattr(simulation, 'llm_usage_summary', None)
+    if not summary:
+        return
+    metadata_path = simulation.run_dir / 'metadata.json'
+    try:
+        with open(metadata_path) as f:
+            metadata = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        metadata = {}
+    metadata['llm_usage'] = summary
+    with open(metadata_path, 'w') as f:
+        json.dump(metadata, f, indent=4)
+
 def save_plots(simulation, params: dict):
     """Save all simulation plots to both run directory and latest_sim"""
     plot_generator = PlotGenerator(simulation)
@@ -247,7 +267,11 @@ def run_scenario(
     save_parameters(simulation.run_dir, params)
     simulation.run()
     save_plots(simulation, params)
-    
+
+    # Fold realized LLM token/cost accounting into metadata.json (issue #104)
+    # before copying to latest_sim, so the copied metadata carries it too.
+    write_usage_to_metadata(simulation)
+
     # Copy all data files to latest_sim
     copy_data_to_latest(simulation)
 

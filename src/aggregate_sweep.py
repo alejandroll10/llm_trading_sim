@@ -28,6 +28,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from services.usage_tracker import aggregate_summaries
+
 
 # Metadata columns prepended to every aggregated row, in order. prompt_family is
 # the clustering key for inference across runs sharing a prompt family (#102).
@@ -89,6 +91,60 @@ def aggregate_file(cells, filename: str) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def write_usage_rollup(cells, out_dir: Path) -> None:
+    """Roll per-cell realized LLM usage up to a sweep total (issue #104).
+
+    Reads the llm_usage summary each cell carries in the manifest (written by
+    run_sweep), writes a per-cell panel (llm_usage_by_cell.csv) and a sweep-total
+    summary (llm_usage_summary.json), and prints the headline tokens/$ figure. A
+    no-op (with a note) for pre-#104 sweeps whose cells lack usage data.
+    """
+    summaries = [c.get("llm_usage") for c in cells if c.get("llm_usage")]
+    if not summaries:
+        print("\nllm_usage: no per-cell usage recorded (pre-#104 sweep?) -- skipping rollup.")
+        return
+
+    rollup = aggregate_summaries(summaries)
+
+    # Per-cell panel: one row per cell with its usage totals + cell metadata.
+    rows = []
+    for cell in cells:
+        u = cell.get("llm_usage")
+        if not u:
+            continue
+        rows.append({
+            "cell_id": cell["cell_id"],
+            "seed": cell.get("seed"),
+            "temperature": cell.get("temperature"),
+            "model": cell.get("model"),
+            "variant": cell.get("variant"),
+            "prompt_family": cell_prompt_family(cell),
+            "calls": u.get("calls", 0),
+            "failed_calls": u.get("failed_calls", 0),
+            "prompt_tokens": u.get("prompt_tokens", 0),
+            "completion_tokens": u.get("completion_tokens", 0),
+            "total_tokens": u.get("total_tokens", 0),
+            "cost_usd": u.get("cost_usd", 0.0),
+            "avg_tokens_per_call": u.get("avg_tokens_per_call", 0.0),
+        })
+    panel_path = out_dir / "llm_usage_by_cell.csv"
+    pd.DataFrame(rows).to_csv(panel_path, index=False)
+
+    summary_path = out_dir / "llm_usage_summary.json"
+    with open(summary_path, "w") as f:
+        json.dump(rollup, f, indent=2)
+
+    print(f"\nllm_usage: {rollup['total_tokens']:,} tokens "
+          f"({rollup['prompt_tokens']:,} in / {rollup['completion_tokens']:,} out), "
+          f"${rollup['cost_usd']:.4f}, {rollup['calls']:,} calls "
+          f"across {rollup['runs_with_usage']} cells")
+    if rollup.get("unpriced_models"):
+        print(f"  [warn] no price-table entry (counted as $0): "
+              f"{', '.join(rollup['unpriced_models'])}")
+    print(f"  -> {panel_path}")
+    print(f"  -> {summary_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Aggregate sweep cell CSVs into tidy panels with cell metadata columns.",
@@ -132,6 +188,9 @@ def main():
         panel.to_csv(out_path, index=False)
         print(f"  -> {len(panel)} rows across {panel['cell_id'].nunique() if len(panel) else 0} cells "
               f"written to {out_path}")
+
+    # Roll up realized token/cost usage across cells (issue #104).
+    write_usage_rollup(cells, out_dir)
 
     print(f"\nDone. Panels in {out_dir}")
 

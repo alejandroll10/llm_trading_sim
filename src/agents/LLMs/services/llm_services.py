@@ -8,6 +8,7 @@ from agents.agents_api import TradeDecision, OrderDetails
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 from scenarios.base import DEFAULT_LLM_BASE_URL, resolve_llm_api_key
+from services.usage_tracker import UsageTracker
 from .schema_features import Feature, FeatureRegistry
 
 logger = logging.getLogger("llm_timing")
@@ -148,6 +149,22 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
                 )
                 elapsed = time.time() - start_time
                 logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Response in {elapsed:.1f}s")
+                # Record realized token usage (issue #104). attempt+1 counts every
+                # try including the retries that preceded this success. usage may be
+                # absent on some self-hosted endpoints -- default to 0 tokens then.
+                usage = getattr(completion, "usage", None)
+                UsageTracker.record(
+                    round_number=request.round_number,
+                    agent_id=request.agent_id,
+                    model=request.model,
+                    call_type="decision",
+                    prompt_tokens=getattr(usage, "prompt_tokens", 0) if usage else 0,
+                    completion_tokens=getattr(usage, "completion_tokens", 0) if usage else 0,
+                    total_tokens=getattr(usage, "total_tokens", None) if usage else None,
+                    latency_s=elapsed,
+                    attempts=attempt + 1,
+                    success=True,
+                )
                 break  # Success, exit retry loop
             except Exception as e:
                 elapsed = time.time() - start_time
@@ -163,6 +180,17 @@ IMPORTANT: This is a MULTI-STOCK scenario. You MUST include stock_id for each or
                     continue
                 else:
                     logger.warning(f"[LLM_CALL] Agent {request.agent_id} R{request.round_number}: Failed after {max_retries} attempts ({elapsed:.1f}s total)")
+                    # Record the exhausted call so realized call counts still
+                    # reconcile against the estimate. No usage is available.
+                    UsageTracker.record(
+                        round_number=request.round_number,
+                        agent_id=request.agent_id,
+                        model=request.model,
+                        call_type="decision",
+                        latency_s=elapsed,
+                        attempts=max_retries,
+                        success=False,
+                    )
                     raise e
 
         # Get raw response from LLM

@@ -110,6 +110,14 @@ class BaseSimulation:
                  enable_intra_round_margin_checking: bool = False,
                  news_enabled: bool = False):
         SharedServiceFactory.reset()
+        # Reset per-run LLM token/cost accounting (issue #104). Sweeps call many
+        # runs in one process, so this must clear before the first API call.
+        from services.usage_tracker import UsageTracker
+        UsageTracker.reset()
+
+        # Populated at end of run() from UsageTracker (None if the run made no
+        # LLM calls). run_base_sim merges this into the run's metadata.json.
+        self.llm_usage_summary = None
 
         self.infinite_rounds = infinite_rounds
         # Setup logging with sim_type directory structure
@@ -708,7 +716,25 @@ class BaseSimulation:
                 self.data_recorder.save_simulation_data()
             except Exception as e:
                 LoggingService.log_simulation(f"Failed to save final data: {str(e)}")
+            # Persist realized LLM token/cost accounting (issue #104). Best-effort:
+            # a failure here must not mask a simulation result.
+            try:
+                self._save_llm_usage()
+            except Exception as e:
+                LoggingService.log_simulation(f"Failed to save LLM usage: {str(e)}")
        # Clean up expired orders at end of round
+
+    def _save_llm_usage(self):
+        """Write data/llm_usage.csv and stash the run's usage summary (issue #104).
+
+        No CSV is written for all-deterministic runs (no LLM calls). The summary
+        is left on self.llm_usage_summary for run_base_sim to fold into metadata.
+        """
+        from services.usage_tracker import UsageTracker
+        csv_path = self.data_dir / 'llm_usage.csv'
+        UsageTracker.save_csv(csv_path)
+        summary = UsageTracker.summary()
+        self.llm_usage_summary = summary if summary.get("calls", 0) else None
 
     def _generate_dividend_shocks(self) -> dict:
         """Generate systematic and style-level dividend shocks for the current round.
