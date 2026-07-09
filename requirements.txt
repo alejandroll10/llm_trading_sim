@@ -1,12 +1,13 @@
-graphviz==0.20.3
+# Runtime dependencies (pinned). Dev-only tools (pytest, call-graph utilities)
+# live in pyproject.toml under [project.optional-dependencies] dev:
+#   pip install -e .[dev]
 matplotlib==3.9.2
 numpy==1.26.4
 openai==1.86.0
 pandas==2.2.2
-pyan3==1.2.0
 pydantic==2.11.6
 python-dotenv==1.1.0
-python_call_graph==2.1.2
+pyyaml==6.0.2
 scikit_learn==1.7.0
 tqdm==4.67.1
 wordcloud==1.9.4

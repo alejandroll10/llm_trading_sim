@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-trading-sim"
+version = "0.1.0"
+description = "A simulated stock market where LLM agents act as autonomous, heterogeneous trading agents"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Alejandro Lopez-Lira" }]
+dependencies = [
+    "matplotlib>=3.9",
+    "numpy>=1.26",
+    "openai>=1.86",
+    "pandas>=2.2",
+    "pydantic>=2.11",
+    "python-dotenv>=1.1",
+    "pyyaml>=6.0",
+    "scikit-learn>=1.7",
+    "tqdm>=4.67",
+    "wordcloud>=1.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    # Call-graph utilities used only by src/dependency_tree.py and
+    # src/analyze_execution.py, not by the simulation itself
+    "graphviz==0.20.3",
+    "pyan3==1.2.0",
+    "python_call_graph==2.1.2",
+]
+
+[project.urls]
+Repository = "https://github.com/alejandroll10/llm_trading_sim"
+Paper = "https://ssrn.com/abstract=5217340"
+
+# The code base uses flat absolute imports rooted at src/ (e.g. `from market...`,
+# `import base_sim`), so src/ is mapped as the package root. `pip install -e .`
+# makes those imports work without the sys.path bootstrapping in tests/conftest.py
+# and the run scripts.
+[tool.setuptools]
+package-dir = { "" = "src" }
+py-modules = [
+    "aggregate_sweep",
+    "analyze_execution",
+    "base_sim",
+    "calculate_fundamental",
+    "constants",
+    "dependency_tree",
+    "regenerate_plots",
+    "run_base_sim",
+    "run_ratio_analysis",
+    "run_sweep",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
+# Keep locally-generated run output (src/logs symlinks/dirs, caches) out of
+# the discovered package set — otherwise the wheel contents depend on which
+# simulations the builder happened to run.
+exclude = ["logs*", "*__pycache__*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
