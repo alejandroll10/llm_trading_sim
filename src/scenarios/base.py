@@ -1,3 +1,4 @@
+import copy
 from typing import Dict, Any
 from enum import Enum
 from calculate_fundamental import (
@@ -81,6 +82,68 @@ def resolve_llm_api_key():
     return os.environ.get("OPENAI_API_KEY")
 # =============================================================================
 
+# Keys whose dict values are complete specifications rather than incremental
+# tweaks: an override REPLACES the whole value instead of merging into it.
+# (Merging an agent_composition override into the default composition would
+# silently keep default agent types the scenario meant to drop.)
+REPLACE_WHOLESALE_KEYS = {"agent_composition", "STOCKS"}
+
+
+def merge_params(base: Dict[str, Any], overrides: Dict[str, Any]) -> Dict[str, Any]:
+    """Deep-merge `overrides` onto `base`, returning a new dict.
+
+    Nested dicts merge recursively, so a scenario or sweep variant can tweak a
+    single nested key (e.g. AGENT_PARAMS -> initial_cash) without restating the
+    whole block — and without silently dropping sibling defaults, which is what
+    happens when a scenario rebuilds AGENT_PARAMS from scratch. Non-dict values
+    replace. Values under REPLACE_WHOLESALE_KEYS replace entirely even when
+    both sides are dicts. Neither input is mutated.
+
+    Typical scenario usage:
+
+        parameters = merge_params(DEFAULT_PARAMS, {
+            "NUM_ROUNDS": 20,
+            "AGENT_PARAMS": {
+                "allow_short_selling": True,
+                "agent_composition": {"value": 2, "momentum": 2},
+            },
+        })
+    """
+    merged = copy.deepcopy(base)
+    for key, value in overrides.items():
+        if (key not in REPLACE_WHOLESALE_KEYS
+                and isinstance(merged.get(key), dict)
+                and isinstance(value, dict)):
+            merged[key] = merge_params(merged[key], value)
+        else:
+            merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def normalize_fundamental_info_mode(params: Dict[str, Any]) -> None:
+    """Normalize FUNDAMENTAL_INFO_MODE in `params`, in place.
+
+    Handles the legacy HIDE_FUNDAMENTAL_PRICE flag, fills in the default mode,
+    and coerces raw strings (e.g. from JSON sweep-variant packs) to the enum.
+    Called by SimulationScenario.__init__ and by the sweep-override path in
+    run_base_sim, which bypasses scenario construction.
+    """
+    if "HIDE_FUNDAMENTAL_PRICE" in params and "FUNDAMENTAL_INFO_MODE" not in params:
+        hide = params.pop("HIDE_FUNDAMENTAL_PRICE")
+        params["FUNDAMENTAL_INFO_MODE"] = (
+            FundamentalInfoMode.PROCESS_ONLY if hide else FundamentalInfoMode.FULL
+        )
+
+    # Ensure we have a valid mode (use default if missing)
+    if "FUNDAMENTAL_INFO_MODE" not in params:
+        params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode.PROCESS_ONLY
+
+    # Convert string to enum if needed
+    mode = params["FUNDAMENTAL_INFO_MODE"]
+    if isinstance(mode, str):
+        params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode(mode)
+
+
 class SimulationScenario:
     """
     Represents a specific simulation scenario with a defined set of parameters.
@@ -109,26 +172,7 @@ class SimulationScenario:
 
     def _normalize_fundamental_info_mode(self):
         """Convert legacy HIDE_FUNDAMENTAL_PRICE to FUNDAMENTAL_INFO_MODE if needed."""
-        params = self.parameters
-
-        # If using legacy parameter
-        if "HIDE_FUNDAMENTAL_PRICE" in params and "FUNDAMENTAL_INFO_MODE" not in params:
-            hide = params["HIDE_FUNDAMENTAL_PRICE"]
-            if hide:
-                params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode.PROCESS_ONLY
-            else:
-                params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode.FULL
-            # Remove legacy param to avoid confusion
-            del params["HIDE_FUNDAMENTAL_PRICE"]
-
-        # Ensure we have a valid mode (use default if missing)
-        if "FUNDAMENTAL_INFO_MODE" not in params:
-            params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode.PROCESS_ONLY
-
-        # Convert string to enum if needed
-        mode = params["FUNDAMENTAL_INFO_MODE"]
-        if isinstance(mode, str):
-            params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode(mode)
+        normalize_fundamental_info_mode(self.parameters)
 
     def _calculate_fundamental_values(self):
         """Calculate and enforce the constant fundamental value principle where:
@@ -184,9 +228,14 @@ class SimulationScenario:
                 num_rounds, expected_dividend, interest_rate, constant_fundamental
             )
 
-            # The difference should be very small (floating point precision)
+            # The difference should be very small (floating point precision).
+            # Raise (not assert) so the invariant also holds under `python -O`.
             difference = abs(test_fundamental - constant_fundamental)
-            assert difference < 1e-10, f"Fundamental value not constant: {test_fundamental} != {constant_fundamental}"
+            if difference >= 1e-10:
+                raise ValueError(
+                    f"Scenario '{self.name}': fundamental value not constant: "
+                    f"{test_fundamental} != {constant_fundamental}"
+                )
 
     def _calculate_regime_fundamental_values(self):
         """Calculate the piecewise fundamental path for scenarios with a

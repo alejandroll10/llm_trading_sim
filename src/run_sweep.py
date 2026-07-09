@@ -42,9 +42,11 @@ passed with --variants-file:
 If no variants file is given, a single "baseline" variant (no extra overrides) is used.
 Keys starting with "_" (e.g. "_meta") are ignored, so packs can carry version info.
 
-Overrides are applied as a shallow top-level merge onto the scenario parameters, so
-to tweak a nested key (e.g. inside AGENT_PARAMS) a variant must supply the whole
-top-level dict for that key.
+Overrides are deep-merged onto the scenario parameters (see
+scenarios.base.merge_params), so a variant can tweak a nested key, e.g.
+{"AGENT_PARAMS": {"initial_cash": 500000.0}}, without restating the whole
+top-level dict. Exception: dicts that are complete specifications
+(agent_composition, STOCKS) replace wholesale rather than merging.
 
 Prompt-family packs (issue #102)
 --------------------------------
@@ -94,7 +96,7 @@ from datetime import datetime
 from pathlib import Path
 
 from scenarios import get_scenario
-from scenarios.base import DEFAULT_LLM_MODEL
+from scenarios.base import DEFAULT_LLM_MODEL, merge_params
 from run_base_sim import run_scenario
 from services.model_pricing import compute_cost
 from services.usage_tracker import aggregate_summaries
@@ -188,12 +190,13 @@ def estimate_calls_per_cell(base_params: dict, overrides: dict = None) -> int:
     """Approximate LLM API calls for a single cell (one full simulation run).
 
     `overrides` (a cell's variant/param overrides) is merged onto a copy of
-    base_params first, so variants that flip NEWS_ENABLED or change NUM_ROUNDS /
-    agent_composition are costed accurately rather than under-reported.
+    base_params first — with the same deep merge run_scenario applies — so
+    variants that flip NEWS_ENABLED or change NUM_ROUNDS / agent_composition
+    are costed accurately rather than under-reported.
     """
     params = copy.deepcopy(base_params)
     if overrides:
-        params.update(overrides)
+        params = merge_params(params, overrides)
 
     num_rounds = params.get("NUM_ROUNDS", 0)
     llm_agents = count_llm_agents(params)

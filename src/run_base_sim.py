@@ -1,6 +1,7 @@
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
 import os
+import sys
 import copy
 import json
 import hashlib
@@ -12,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 from services.logging_service import LoggingService
 from scenarios import get_scenario, list_scenarios
-from scenarios.base import FundamentalInfoMode
+from scenarios.base import merge_params, normalize_fundamental_info_mode
 import shutil
 from visualization.plot_generator import PlotGenerator
 
@@ -183,17 +184,15 @@ def run_scenario(
     scenario = get_scenario(scenario_name)
     params = copy.deepcopy(scenario.parameters)
 
-    # Apply top-level parameter overrides (sweep driver) before anything reads them.
+    # Apply parameter overrides (sweep driver) before anything reads them.
+    # Deep merge: a variant can tweak a nested key (e.g. inside AGENT_PARAMS)
+    # without restating the whole top-level dict. Overrides bypass
+    # SimulationScenario.__init__, so re-normalize FUNDAMENTAL_INFO_MODE (a
+    # variant pack may supply it as a raw string where formatters expect the
+    # enum and call mode.value).
     if param_overrides:
-        params.update(param_overrides)
-        # Overrides bypass SimulationScenario.__init__ normalization, so a variant
-        # pack that supplies FUNDAMENTAL_INFO_MODE as a raw string (e.g.
-        # {"FUNDAMENTAL_INFO_MODE": "realizations_only"} from a sweep) would leave a
-        # plain str where the formatters expect the enum and call mode.value.
-        # Re-coerce here, mirroring SimulationScenario._normalize_fundamental_info_mode.
-        mode = params.get("FUNDAMENTAL_INFO_MODE")
-        if isinstance(mode, str):
-            params["FUNDAMENTAL_INFO_MODE"] = FundamentalInfoMode(mode)
+        params = merge_params(params, param_overrides)
+        normalize_fundamental_info_mode(params)
 
     # Apply overrides if provided
     agent_params = params.get("AGENT_PARAMS", {})
@@ -381,8 +380,8 @@ def main():
         print("Please choose from the available scenarios:")
         for name in available_scenarios.keys():
             print(f"  - {name}")
-        return
-        
+        sys.exit(1)
+
     # Run the selected scenario
     scenario_name = args.scenario
     print(f"\nRunning scenario: {scenario_name}")
@@ -399,6 +398,7 @@ def main():
         print(f"Error running scenario {scenario_name}: {str(e)}")
         import traceback
         print(traceback.format_exc())
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

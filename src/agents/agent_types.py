@@ -7,57 +7,68 @@ class AgentType(BaseModel):
     user_prompt_template: str
     type_id: str = ""
 
+def resolve_agent_type(requested: str) -> str:
+    """Resolve a requested agent type to a registered AGENT_TYPES key.
+
+    Matching is exact. Prefix matching was removed on purpose: it silently
+    resolved ambiguous requests (e.g. 'default' -> 'default'/'default_gpt'/
+    'default_llama') by dict insertion order. Unknown types raise ValueError
+    with near-matches as a hint.
+    """
+    if requested in AGENT_TYPES:
+        return requested
+    near_matches = sorted(t for t in AGENT_TYPES if t.startswith(requested))
+    hint = f" Did you mean one of {near_matches}?" if near_matches else ""
+    raise ValueError(
+        f"Unknown agent type '{requested}'.{hint} "
+        f"Known types: {sorted(AGENT_TYPES)}")
+
+
 def generate_agent_composition(total_agents: int, distribution_type: str | dict) -> dict:
     """
     Generate agent composition for different experimental setups.
     """
     print(f"Generating agent composition for {total_agents} agents with distribution type: {distribution_type}")
     base_types = list(AGENT_TYPES.keys())
-    
+
     # Handle dictionary distribution type
     if isinstance(distribution_type, dict):
         distribution = {agent_type: 0 for agent_type in base_types}
         total_requested = sum(distribution_type.values())
-        
-        # Validate all requested types exist
+
+        # Validate all requested types exist (exact match)
         for req_type in distribution_type:
-            matching_type = next((t for t in base_types if t.startswith(req_type)), None)
-            if not matching_type:
-                raise ValueError(f"No matching agent type found for: {req_type}")
-                
+            resolve_agent_type(req_type)
+
         # Validate total matches
         if total_requested != total_agents:
             raise ValueError(f"Sum of agents in distribution ({total_requested}) doesn't match total_agents ({total_agents})")
-            
+
         # Fill in the distribution
         for req_type, count in distribution_type.items():
-            matching_type = next(t for t in base_types if t.startswith(req_type))
-            distribution[matching_type] = count
-            
+            distribution[resolve_agent_type(req_type)] = count
+
         return distribution
 
     # New: Handle comma-separated list of agents
     if "," in distribution_type:
         requested_types = [t.strip() for t in distribution_type.split(",")]
-        # Validate all requested types exist
+        # Validate all requested types exist (exact match)
         for req_type in requested_types:
-            matching_type = next((t for t in base_types if t.startswith(req_type)), None)
-            if not matching_type:
-                raise ValueError(f"No matching agent type found for: {req_type}")
-        
+            resolve_agent_type(req_type)
+
         if len(requested_types) > total_agents:
             raise ValueError(f"Requested {len(requested_types)} types but only {total_agents} agents available")
-        
+
         # Distribute agents evenly among requested types
         base_count = total_agents // len(requested_types)
         remainder = total_agents % len(requested_types)
-        
+
         # Create distribution dict
         distribution = {agent_type: 0 for agent_type in base_types}
         for i, req_type in enumerate(requested_types):
-            matching_type = next(t for t in base_types if t.startswith(req_type))
-            distribution[matching_type] = base_count + (1 if i < remainder else 0)
-        
+            distribution[resolve_agent_type(req_type)] = base_count + (1 if i < remainder else 0)
+
         return distribution
 
     # Helper function for cases with fewer agents than types
@@ -86,11 +97,9 @@ def generate_agent_composition(total_agents: int, distribution_type: str | dict)
         if prop1 + prop2 != 100:
             raise ValueError("Proportions must sum to 100")
             
-        # Find matching agent types
-        type1_full = next((t for t in base_types if t.startswith(type1)), None)
-        type2_full = next((t for t in base_types if t.startswith(type2)), None)
-        if not type1_full or not type2_full:
-            raise ValueError(f"Agent types not found for: {type1} and/or {type2}")
+        # Find matching agent types (exact match)
+        type1_full = resolve_agent_type(type1)
+        type2_full = resolve_agent_type(type2)
             
         # Calculate counts (rounding to nearest integer)
         count1 = round(total_agents * prop1 / 100)
@@ -117,18 +126,13 @@ def generate_agent_composition(total_agents: int, distribution_type: str | dict)
     elif distribution_type.endswith("_only"):
         # Extract the agent type from the distribution_type (e.g., "value_only" -> "value")
         target_type = distribution_type.replace("_only", "")
-        # Find the matching agent type from base_types
-        matching_type = next((t for t in base_types if t.startswith(target_type)), None)
-        if not matching_type:
-            raise ValueError(f"No matching agent type found for distribution: {distribution_type}")
+        matching_type = resolve_agent_type(target_type)
         return {agent_type: (total_agents if agent_type == matching_type else 0)
                 for agent_type in base_types}
-    
+
     elif distribution_type.endswith("_heavy"):
         target_type = distribution_type.replace("_heavy", "")
-        matching_type = next((t for t in base_types if t.startswith(target_type)), None)
-        if not matching_type:
-            raise ValueError(f"No matching agent type found for distribution: {distribution_type}")
+        matching_type = resolve_agent_type(target_type)
         
         if total_agents < len(base_types):
             # Ensure heavy type gets one agent if possible

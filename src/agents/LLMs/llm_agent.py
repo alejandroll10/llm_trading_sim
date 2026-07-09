@@ -24,6 +24,11 @@ class LLMAgent(BaseAgent):
                  system_prompt_override: str = None,
                  *args, **kwargs):  # Usually set via scenario params
         super().__init__(agent_id, *args, **kwargs)
+        if agent_type not in AGENT_TYPES:
+            raise ValueError(
+                f"Unknown LLM agent type '{agent_type}'. Known types: "
+                f"{sorted(AGENT_TYPES)}. Deterministic agents must be registered "
+                f"in DETERMINISTIC_AGENTS (src/agents/deterministic/deterministic_registry.py).")
         self.agent_type = AGENT_TYPES[agent_type]
         # Prompt-family sweeps (issue #102): a scenario/variant may replace this
         # agent type's system prompt while keeping the type's identity and stats.

@@ -1,0 +1,12 @@
+# Example config-file scenario: runs like any Python-defined scenario.
+#   python src/run_base_sim.py example_yaml_scenario
+# Parameters are deep-merged over DEFAULT_PARAMS (src/scenarios/base.py), so
+# only override what differs. See src/scenarios/config_loader.py for the format.
+name: example_yaml_scenario
+description: "Example scenario defined in YAML (no Python needed): 2 value + 2 momentum LLM agents, 10 rounds"
+parameters:
+  NUM_ROUNDS: 10
+  AGENT_PARAMS:
+    agent_composition:
+      value: 2
+      momentum: 2

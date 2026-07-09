@@ -324,3 +324,8 @@ MULTI_MODEL_SCENARIOS = {
         }
     ),
 }
+
+
+# Standardized export consumed by the scenarios package auto-discovery
+# (kept alongside the historical MULTI_MODEL_SCENARIOS name).
+SCENARIOS = MULTI_MODEL_SCENARIOS
