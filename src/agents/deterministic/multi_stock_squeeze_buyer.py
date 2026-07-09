@@ -1,71 +1,57 @@
 """Multi-stock squeeze buyer agent for testing margin calls across stocks"""
 
-from agents.base_agent import BaseAgent
-from typing import List
+from agents.agents_api import OrderDetails, OrderType, TradeDecision
+from agents.deterministic.multi_stock_base import MultiStockAgent
 
 
-class MultiStockSqueezeBuyer(BaseAgent):
+class MultiStockSqueezeBuyer(MultiStockAgent):
     """Buys aggressively starting at specific round to trigger price spike and margin calls.
 
     Like the single-stock SqueezeBuyerAgent, this activates at a specific round and
     aggressively buys to push prices up and trigger margin violations on short sellers.
     """
 
+    VALUATION_REASONING = "Aggressive buying to trigger short squeeze"
+
     def __init__(self, activation_round: int = 3, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.activation_round = activation_round
 
-    def make_decision(self, market_state: dict, history: list, round_number: int):
-        from agents.agents_api import TradeDecision, OrderDetails, OrderType
-
-        orders = []
-
+    def make_decision(self, market_state: dict, history: list, round_number: int) -> TradeDecision:
         # Only activate starting at the specified round
         if round_number < self.activation_round:
-            return TradeDecision(
-                valuation_reasoning="Waiting for activation round",
-                valuation=0.0,
-                price_prediction_reasoning="N/A",
-                price_prediction_t=0.0,
-                price_prediction_t1=0.0,
-                price_prediction_t2=0.0,
+            return self.neutral_decision(
                 orders=[],
                 reasoning=f"Waiting until round {self.activation_round} to activate squeeze",
-                replace_decision="Replace"
+                valuation_reasoning="Waiting for activation round",
             )
+        return super().make_decision(market_state, history, round_number)
 
-        if market_state.get('is_multi_stock'):
-            stocks_data = market_state['stocks']
-            num_stocks = len(stocks_data)
+    def decide_orders(self, stocks_data: dict, round_number: int):
+        orders = []
+        num_stocks = len(stocks_data)
 
-            for stock_id, stock_state in stocks_data.items():
-                price = stock_state['price']
+        for stock_id, stock_state in stocks_data.items():
+            price = stock_state['price']
 
-                # Calculate max shares we can buy - use ALL available cash aggressively
-                # Split cash evenly across stocks
-                available_cash = self.cash / num_stocks
-                max_shares = int(available_cash / (price * 1.10))  # 10% buffer for price limit
+            # Calculate max shares we can buy - use ALL available cash aggressively
+            # Split cash evenly across stocks
+            available_cash = self.cash / num_stocks
+            max_shares = int(available_cash / (price * 1.10))  # 10% buffer for price limit
 
-                if max_shares <= 0:
-                    continue
+            if max_shares <= 0:
+                continue
 
-                # Buy aggressively with limit order above current price
-                orders.append(OrderDetails(
-                    stock_id=stock_id,
-                    decision="Buy",
-                    quantity=max_shares,
-                    order_type=OrderType.LIMIT,
-                    price_limit=price * 1.50  # Willing to pay 50% above current - very aggressive!
-                ))
+            # Buy aggressively with limit order above current price
+            orders.append(OrderDetails(
+                stock_id=stock_id,
+                decision="Buy",
+                quantity=max_shares,
+                order_type=OrderType.LIMIT,
+                price_limit=price * 1.50  # Willing to pay 50% above current - very aggressive!
+            ))
 
-        return TradeDecision(
-            valuation_reasoning="Aggressive buying to trigger short squeeze",
-            valuation=0.0,
-            price_prediction_reasoning="N/A",
-            price_prediction_t=0.0,
-            price_prediction_t1=0.0,
-            price_prediction_t2=0.0,
-            orders=orders,
-            reasoning=f"SQUEEZE ACTIVATED! Round {round_number}: Placed {len(orders)} aggressive buy orders",
-            replace_decision="Replace"
-        )
+        reasoning = (
+            f"SQUEEZE ACTIVATED! Round {round_number}: "
+            f"Placed {len(orders)} aggressive buy orders")
+        return orders, reasoning

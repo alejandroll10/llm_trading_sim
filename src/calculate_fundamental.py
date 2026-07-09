@@ -127,6 +127,31 @@ def verify_fundamental_path_consistency(
             )
 
 
+def regime_fundamental_path(
+    dividend_params: Dict[str, Any],
+    num_rounds: int,
+    interest_rate: float,
+    terminal_value: Optional[float] = None,
+) -> tuple:
+    """
+    Build and verify the per-round fundamental path for a dividend regime
+    schedule (issue #96). Returns (path, terminal_value).
+
+    The path follows the no-arbitrage recursion FV_t = (e_t + FV_{t+1})/(1+r)
+    anchored at `terminal_value`. When `terminal_value` is None it defaults to
+    the terminal-regime continuation value E[d_last] / r (the infinite-horizon
+    anchor); finite-horizon callers pass their redemption value instead.
+    """
+    expected_dividends = build_expected_dividend_path(dividend_params, num_rounds)
+    if terminal_value is None:
+        terminal_value = expected_dividend_from_params(
+            resolve_regime_params(dividend_params, num_rounds - 1)
+        ) / interest_rate
+    path = calculate_fundamental_path(expected_dividends, interest_rate, terminal_value)
+    verify_fundamental_path_consistency(path, expected_dividends, interest_rate, terminal_value)
+    return path, terminal_value
+
+
 def calculate_fundamental_price(
     num_rounds: int,
     expected_dividend: float,

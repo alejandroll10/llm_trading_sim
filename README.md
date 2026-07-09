@@ -58,6 +58,12 @@ This paper presents a realistic simulated stock market where large language mode
     pip install -r requirements.txt
     ```
 
+    For development (running the test suite, call-graph utilities), install the
+    package in editable mode with the dev extras instead:
+    ```bash
+    pip install -e .[dev]
+    ```
+
 4.  **Configure LLM Provider:**
 
     **Step 1 - Add API Key:**
@@ -69,22 +75,31 @@ This paper presents a realistic simulated stock market where large language mode
 
     - **UF Hypergator:** Get virtual key from https://api.ai.it.ufl.edu/ui/
     - **OpenAI:** Get API key from https://platform.openai.com/api-keys
+    - **DeepInfra:** Set `DEEPINFRA_TOKEN` instead of `OPENAI_API_KEY`
 
-    **Step 2 - Select Model:**
+    **Step 2 - Select Endpoint & Model:**
 
-    Edit lines 8-9 in `src/scenarios/base.py`:
+    Copy the example config and edit it (the copy is gitignored, so your local
+    settings never end up in a commit):
+    ```bash
+    cp src/llm_config.example.py src/llm_config.py
+    ```
 
     **Option A - UF Hypergator (Free for UF users):**
     ```python
-    DEFAULT_LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"
-    DEFAULT_LLM_MODEL = "llama-3.1-70b-instruct"
+    LLM_BASE_URL = "https://api.ai.it.ufl.edu/v1"
+    LLM_MODEL = "gpt-oss-120b"
     ```
 
     **Option B - OpenAI (Paid service):**
     ```python
-    DEFAULT_LLM_BASE_URL = None  # None = use OpenAI's default endpoint
-    DEFAULT_LLM_MODEL = "gpt-4o-2024-11-20"
+    LLM_BASE_URL = None  # None = use OpenAI's default endpoint
+    LLM_MODEL = "gpt-4o-2024-11-20"
     ```
+
+    Any OpenAI-compatible endpoint works (DeepInfra, local vLLM, ...); see
+    `src/llm_config.example.py` for more options. If `src/llm_config.py` does
+    not exist, the UF Hypergator defaults are used.
 
     **Verified Working Models:**
     - UF Hypergator: `llama-3.1-70b-instruct` ✅, `llama-3.3-70b-instruct` ✅, `gpt-oss-20b` ✅, `gpt-oss-120b` ✅
@@ -142,6 +157,17 @@ The simulation operates in discrete rounds. The following steps occur in each ro
 5.  **Pay Dividends/Interest:** Any scheduled dividends or interest payments are distributed to the agents.
 
 This lifecycle is orchestrated by the `execute_round` method in `src/base_sim.py`.
+
+**Round lifecycle hooks:** custom behavior can attach to the lifecycle without
+editing the orchestrator. Register callables on a simulation instance before
+calling `run()`; they are invoked as `hook(sim, round_number)`:
+
+```python
+sim = BaseSimulation(...)
+sim.register_before_round(lambda sim, r: ...)  # runs before each round
+sim.register_after_round(lambda sim, r: ...)   # runs after each round's updates
+sim.run()
+```
 
 ## Key Features
 
@@ -262,7 +288,15 @@ When enabled, agents receive their previous notes and can read messages from oth
 
 ## Testing
 
-Run the health check script to verify all features work correctly:
+Run the unit test suite (no API key needed; also runs in CI on every push/PR):
+
+```bash
+pip install pytest   # or: pip install -e .[dev]
+pytest tests/ -q
+```
+
+Run the health check script to verify all features work correctly end-to-end
+(this one runs real simulations):
 
 ```bash
 # Quick test (single-stock scenarios only, ~5 minutes)
@@ -296,31 +330,90 @@ The health check verifies:
 
 ## Adding New Scenarios
 
-You can define custom scenarios by adding new `SimulationScenario` objects to the `SCENARIOS` dictionary in `src/scenarios.py`.
+Scenarios live in the `src/scenarios/` package and are **auto-discovered** —
+no registration edits are needed. Scenario names must be unique across all
+modules and config files (duplicates raise at import time). There are two
+ways to add one:
 
-Each scenario requires:
-- A unique `name`.
-- A `description`.
-- A `parameters` dictionary, which can override the `DEFAULT_PARAMS`.
+**Option A - Config file (no Python needed):** drop a `.yaml` (or `.json`)
+file into `src/scenarios/configs/`:
 
-Here is an example of a new scenario definition:
+```yaml
+# src/scenarios/configs/my_custom_scenario.yaml
+name: my_custom_scenario
+description: "A custom scenario for testing a new agent type."
+parameters:            # deep-merged over DEFAULT_PARAMS
+  NUM_ROUNDS: 5
+  AGENT_PARAMS:
+    agent_composition:
+      value: 1
+      market_maker: 1
+```
+
+See `src/scenarios/configs/example_yaml_scenario.yaml` for a working example
+and `src/scenarios/config_loader.py` for the full format (including several
+scenarios per file).
+
+**Option B - Python module:** create (or extend) a module in `src/scenarios/`
+that defines a module-level `SCENARIOS` dict. Build parameters with
+`merge_params`, which deep-merges your overrides onto `DEFAULT_PARAMS` — you
+only state what differs, and nested defaults are inherited instead of
+restated:
+
 ```python
-# src/scenarios.py
+# src/scenarios/my_scenarios.py
+from .base import SimulationScenario, DEFAULT_PARAMS, merge_params
 
-"my_custom_scenario": SimulationScenario(
-    name="my_custom_scenario",
-    description="A custom scenario for testing a new agent type.",
-    parameters={
-        **DEFAULT_PARAMS,
-        "NUM_ROUNDS": 5,
-        "AGENT_PARAMS": {
-            **DEFAULT_PARAMS["AGENT_PARAMS"],
-            'agent_composition': {
-                'my_new_agent': 1,
-                'market_maker': 1,
+SCENARIOS = {
+    "my_custom_scenario": SimulationScenario(
+        name="my_custom_scenario",
+        description="A custom scenario for testing a new agent type.",
+        parameters=merge_params(DEFAULT_PARAMS, {
+            "NUM_ROUNDS": 5,
+            "AGENT_PARAMS": {
+                "agent_composition": {
+                    "value": 1,
+                    "market_maker": 1,
+                },
             },
-        }
-    }
+        }),
+    ),
+}
+```
+
+Notes on `merge_params`: nested dicts merge recursively, but
+`agent_composition` and `STOCKS` replace wholesale (an override is a complete
+specification, so default agent types don't leak in). Every type named in
+`agent_composition` is validated against the agent registry at simulation
+construction, so typos fail immediately with the list of known types.
+
+After adding your scenario, run it by name as described above:
+```bash
+python3 src/run_base_sim.py my_custom_scenario
+```
+
+## Adding New Agent Types
+
+**LLM personality (one edit):** add an entry to `AGENT_TYPES` in
+`src/agents/agent_types.py`:
+
+```python
+"my_persona": AgentType(
+    name="My Persona",
+    system_prompt="""You are a trader who ...""",
+    user_prompt_template=STANDARD_USER_TEMPLATE,
+    type_id="my_persona",
 ),
 ```
-After adding your new scenario, you can run it by providing its name as a command-line argument as described above. 
+
+Any type string not registered as deterministic is treated as an LLM
+personality, so it is immediately usable in `agent_composition`.
+
+**Deterministic (rule-based) agent (two edits):**
+1. Create a class under `src/agents/deterministic/` subclassing `BaseAgent`
+   and implementing `make_decision()` (see `buy_agent.py` for a template).
+2. Register it in `DETERMINISTIC_AGENTS` in
+   `src/agents/deterministic/deterministic_registry.py`.
+
+The unified registry (`src/agents/registry.py`) mirrors deterministic types
+into `AGENT_TYPES` automatically — no third placeholder edit is needed.
