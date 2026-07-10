@@ -262,7 +262,7 @@ scenario = {
 ### Agent Types
 The simulation supports multiple agent types with different trading strategies:
 
-**LLM Agent Types** (defined in `src/agents/agent_types.py`):
+**LLM Agent Types** (prompt files in `src/agents/prompts/`, one `.md` per persona):
 - **default:** Balanced, analytical trader
 - **speculator:** Risk-seeking, momentum-focused
 - **optimistic:** Bullish bias, sees upside potential
@@ -394,20 +394,23 @@ python3 src/run_base_sim.py my_custom_scenario
 
 ## Adding New Agent Types
 
-**LLM personality (one edit):** add an entry to `AGENT_TYPES` in
-`src/agents/agent_types.py`:
+**LLM personality (no code):** drop a prompt file at
+`src/agents/prompts/<type_id>.md` — the filename is the type string used in
+`agent_composition`:
 
-```python
-"my_persona": AgentType(
-    name="My Persona",
-    system_prompt="""You are a trader who ...""",
-    user_prompt_template=STANDARD_USER_TEMPLATE,
-    type_id="my_persona",
-),
+```markdown
+---
+name: My Persona
+---
+You are a trader who ...
 ```
 
-Any type string not registered as deterministic is treated as an LLM
-personality, so it is immediately usable in `agent_composition`.
+Everything after the closing `---` line is the system prompt, byte-exact
+(minus the file's final newline). All persona files are loaded into the
+`AGENT_TYPES` registry at import. Existing persona prompts are pinned by
+sha256 in `tests/test_persona_prompts.py` because prompt text drives paper
+results — if you deliberately edit a prompt, update its hash there in the
+same commit (new personas just need an entry added).
 
 **Deterministic (rule-based) agent (two edits):**
 1. Create a class under `src/agents/deterministic/` subclassing `BaseAgent`

@@ -63,5 +63,11 @@ namespaces = true
 # simulations the builder happened to run.
 exclude = ["logs*", "*__pycache__*"]
 
+# Non-Python data files shipped inside the package: LLM persona prompts
+# (src/agents/prompts/) and config-file scenarios (src/scenarios/configs/).
+[tool.setuptools.package-data]
+"agents.prompts" = ["*.md"]
+"scenarios.configs" = ["*.yaml", "*.yml", "*.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
