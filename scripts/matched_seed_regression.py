@@ -33,6 +33,7 @@ SCENARIOS = [
     "deterministic_only",
     "multi_basic",
     "single_leverage",
+    "single_leverage_short",
     "leverage_stress_test",
     "deterministic_short_selling",
     "multi_short",

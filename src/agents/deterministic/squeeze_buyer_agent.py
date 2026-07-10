@@ -39,7 +39,7 @@ class SqueezeBuyerAgent(BaseAgent):
         # Calculate massive order size
         max_shares = int(available_cash * self.buy_proportion / aggressive_price)
 
-        if max_shares == 0:
+        if max_shares <= 0:
             return TradeDecision(
                 orders=[],
                 replace_decision="Add",

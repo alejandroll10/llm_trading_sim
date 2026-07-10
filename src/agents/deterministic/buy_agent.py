@@ -34,11 +34,17 @@ class BuyTrader(BaseAgent):
         max_shares = int(available_cash / price)
         total_quantity = int(max_shares * self.max_proportion)
         
-        if total_quantity == 0:
+        if total_quantity <= 0:
             return TradeDecision(
                 orders=[],
                 replace_decision="Add",
-                reasoning="Insufficient cash for minimum trade"
+                reasoning="Insufficient cash for minimum trade",
+                valuation=100.0,
+                valuation_reasoning="Basic buy valuation based on current market conditions",
+                price_prediction_reasoning="Cannot participate without cash",
+                price_prediction_t=price,
+                price_prediction_t1=price,
+                price_prediction_t2=price,
             )
         
         # Split quantity between two orders

@@ -34,7 +34,7 @@ class MarketBuyAgent(BaseAgent):
         max_shares = int(available_cash / price)
         quantity = int(max_shares * self.buy_proportion)
 
-        if quantity == 0:
+        if quantity <= 0:
             return TradeDecision(
                 orders=[],
                 replace_decision="Add",

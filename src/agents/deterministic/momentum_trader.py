@@ -79,7 +79,7 @@ class MomentumTrader(BaseAgent):
             max_shares = int(available_cash / current_price)
             quantity = int(max_shares * min(abs(trend), self.max_position))
 
-            if quantity == 0:
+            if quantity <= 0:
                 decision = TradeDecision(
                     orders=[],
                     replace_decision="Add",
@@ -127,7 +127,7 @@ class MomentumTrader(BaseAgent):
         available_shares = self.available_shares
         quantity = int(available_shares * min(abs(trend), self.max_position))
 
-        if quantity == 0:
+        if quantity <= 0:
             decision = TradeDecision(
                 orders=[],
                 replace_decision="Add",

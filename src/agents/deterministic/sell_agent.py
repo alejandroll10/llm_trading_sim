@@ -36,11 +36,17 @@ class SellTrader(BaseAgent):
         available_shares = self.available_shares
         quantity = int(available_shares * proportion)
         
-        if quantity == 0:
+        if quantity <= 0:
             return TradeDecision(
                 orders=[],  # Empty list for no orders
                 replace_decision="Add",
-                reasoning="Insufficient shares for minimum trade"
+                reasoning="Insufficient shares for minimum trade",
+                valuation=price * 0.9,
+                valuation_reasoning="Basic sell valuation based on current market conditions",
+                price_prediction_reasoning="Cannot participate without shares",
+                price_prediction_t=price,
+                price_prediction_t1=price,
+                price_prediction_t2=price,
             )
         
         # Create order details

@@ -30,11 +30,17 @@ class MarginBuyAgent(BaseAgent):
         max_shares = int(total_buying_power / price)
         total_quantity = int(max_shares * self.buy_proportion)
 
-        if total_quantity == 0:
+        if total_quantity <= 0:
             return TradeDecision(
                 orders=[],
                 replace_decision="Add",
-                reasoning=f"No buying power: cash=${available_cash:.2f}, borrow=${borrowing_power:.2f}"
+                reasoning=f"No buying power: cash=${available_cash:.2f}, borrow=${borrowing_power:.2f}",
+                valuation=100.0,
+                valuation_reasoning="Margin buyer always buys",
+                price_prediction_reasoning="Cannot participate without buying power",
+                price_prediction_t=price,
+                price_prediction_t1=price,
+                price_prediction_t2=price,
             )
 
         # Single aggressive buy order at 1% above market

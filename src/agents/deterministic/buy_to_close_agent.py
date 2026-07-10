@@ -78,7 +78,7 @@ class BuyToCloseTrader(BaseAgent):
         proportion = self.calculate_trade_proportion(price_change_pct)
         shares_to_buy = int(current_short * proportion)
 
-        if shares_to_buy == 0:
+        if shares_to_buy <= 0:
             return TradeDecision(
                 orders=[],
                 replace_decision="Add",

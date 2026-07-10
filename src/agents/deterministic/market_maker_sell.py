@@ -44,7 +44,7 @@ class MarketMakerSell(BaseAgent):
 
             # Check available shares
             available_shares = self.available_shares
-            if available_shares == 0:
+            if available_shares <= 0:
                 return TradeDecision(
                     orders=[],
                     replace_decision="Add",

@@ -69,7 +69,7 @@ class ProportionalGapTrader(BaseAgent):
             max_shares = int(total_buying_power / price)
             quantity = int(max_shares * proportion)
 
-            if quantity == 0:
+            if quantity <= 0:
                 decision = TradeDecision(
                     orders=[],
                     replace_decision="Add",
@@ -117,7 +117,7 @@ class ProportionalGapTrader(BaseAgent):
         available_shares = self.available_shares
         quantity = int(available_shares * proportion)
 
-        if quantity == 0:
+        if quantity <= 0:
             decision = TradeDecision(
                 orders=[],
                 replace_decision="Add",

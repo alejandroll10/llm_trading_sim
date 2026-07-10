@@ -57,7 +57,7 @@ class MarketMakerBuy(BaseAgent):
         available_cash = self.available_cash
         max_shares = int(available_cash / bid_price)
 
-        if max_shares == 0:
+        if max_shares <= 0:
             return TradeDecision(
                 orders=[],
                 replace_decision="Add",

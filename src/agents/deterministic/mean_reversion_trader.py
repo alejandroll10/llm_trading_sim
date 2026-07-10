@@ -63,7 +63,7 @@ class MeanReversionTrader(BaseAgent):
             available_shares = self.available_shares
             quantity = int(available_shares * min(abs(deviation), self.max_position))
 
-            if quantity == 0:
+            if quantity <= 0:
                 return TradeDecision(
                     orders=[],
                     replace_decision="Add",
@@ -100,7 +100,7 @@ class MeanReversionTrader(BaseAgent):
         max_shares = int(available_cash / current_price)
         quantity = int(max_shares * min(abs(deviation), self.max_position))
 
-        if quantity == 0:
+        if quantity <= 0:
             return TradeDecision(
                 orders=[],
                 replace_decision="Add",
