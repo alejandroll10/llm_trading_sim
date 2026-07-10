@@ -339,3 +339,88 @@ def test_realized_dividends_respect_active_regime():
             assert realization.total_dividend in (pytest.approx(0.4), pytest.approx(2.4))
         else:
             assert realization.total_dividend in (pytest.approx(0.5), pytest.approx(1.5))
+
+
+# ---------------------------------------------------------------------------
+# Multi-stock regime schedules (enabled by the issue #106 market collection)
+# ---------------------------------------------------------------------------
+
+def test_multi_stock_regime_schedule_end_to_end(tmp_path, monkeypatch):
+    """One stock follows a regime schedule while the other stays stationary.
+
+    Each stock's fundamental must track its own path; the verifier checks
+    this every round (verify_fundamental_path), so a full run doubles as the
+    invariant test.
+    """
+    from base_sim import BaseSimulation
+    from services.logging_service import LoggingService
+
+    # The shared stub returns None for data/run dirs; the recorder needs a
+    # real directory to save CSVs at the end of the run
+    monkeypatch.setattr(LoggingService, 'get_data_dir',
+                        staticmethod(lambda: tmp_path), raising=False)
+
+    random.seed(42)
+    num_rounds = 8
+
+    # Deterministic dividends (p=1, no variation) so the run is offline and
+    # reproducible; the SHIFTER stock drops E[d] 1.4 -> 1.0 at round 4
+    shifting = shifted_params(shift_round=4, base_dividend=1.0)
+    shifting.update({'dividend_probability': 1.0, 'dividend_variation': 0.0})
+    stationary = dict(BASE_DIVIDEND_PARAMS)
+    stationary.update({'dividend_probability': 1.0, 'dividend_variation': 0.0})
+
+    stock_configs = {
+        'SHIFTER': {
+            'INITIAL_PRICE': 28.0,
+            'FUNDAMENTAL_PRICE': 28.0,
+            'REDEMPTION_VALUE': 20.0,   # terminal regime E[d]/r = 1.0/0.05
+            'TRANSACTION_COST': 0.0,
+            'DIVIDEND_PARAMS': shifting,
+        },
+        'STEADY': {
+            'INITIAL_PRICE': 28.0,
+            'FUNDAMENTAL_PRICE': 28.0,
+            'REDEMPTION_VALUE': 28.0,   # E[d]/r = 1.4/0.05
+            'TRANSACTION_COST': 0.0,
+            'DIVIDEND_PARAMS': stationary,
+        },
+    }
+    agent_params = {
+        'allow_short_selling': False,
+        'position_limit': 100000,
+        'initial_cash': 100000.0,
+        'initial_positions': {'SHIFTER': 100, 'STEADY': 100},
+        'max_order_size': 100,
+        'agent_composition': {'hold_trader': 2},
+        'interest_model': {'rate': RATE, 'compound_frequency': 'per_round',
+                           'destination': 'dividend'},
+    }
+
+    sim = BaseSimulation(
+        num_rounds=num_rounds,
+        initial_price=28.0,
+        fundamental_price=28.0,
+        redemption_value=None,
+        agent_params=agent_params,
+        dividend_params=None,
+        interest_params={'rate': RATE, 'compound_frequency': 'per_round',
+                         'destination': 'dividend'},
+        stock_configs=stock_configs,
+        sim_type='test_multi_regime',
+    )
+
+    shifter_path = sim.markets['SHIFTER'].fundamental_path
+    assert shifter_path is not None and len(shifter_path) == num_rounds
+    assert sim.markets['STEADY'].fundamental_path is None
+    # Anchored at the redemption value; starts above it because dividends
+    # are higher before the downshift
+    assert shifter_path[-1] == pytest.approx(20.0)
+    assert shifter_path[0] > 20.0
+    # Round-0 fundamental already reflects the path
+    assert sim.markets['SHIFTER'].context.fundamental_price == pytest.approx(shifter_path[0])
+
+    sim.run()  # verifier checks each stock's fundamental against its path every round
+
+    assert sim.markets['SHIFTER'].context.fundamental_price == pytest.approx(20.0)
+    assert sim.markets['STEADY'].context.fundamental_price == pytest.approx(28.0)

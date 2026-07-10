@@ -1,6 +1,7 @@
 from typing import Optional, Dict, Union
 from agents.agent_manager.services.commitment_services import CommitmentCalculator
 from agents.agent_manager.services.position_services import PositionCalculator
+from market.stock_market import DEFAULT_STOCK_ID
 from services.messaging_service import MessagingService
 
 class SharedServiceFactory:
@@ -60,7 +61,7 @@ class SharedServiceFactory:
         return cls._position_calculator
 
     @classmethod
-    def get_transaction_cost(cls, stock_id: str = "DEFAULT_STOCK") -> float:
+    def get_transaction_cost(cls, stock_id: str = DEFAULT_STOCK_ID) -> float:
         """Get the per-trade fee rate for a stock"""
         if isinstance(cls._transaction_cost, dict):
             return cls._transaction_cost.get(stock_id, 0.0)

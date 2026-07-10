@@ -5,6 +5,7 @@ from market.orders.order import OrderState
 from agents.agent_types import *
 from agents.agents_api import *
 from market.engine.match_engine import MatchingEngine
+from market.engine.market_result import MarketResult
 from market.state.market_state_manager import MarketStateManager
 from agents.agent_manager.base_agent_manager import AgentManager
 from market.data_recorder import DataRecorder
@@ -18,6 +19,7 @@ from agents.registry import (
 )
 from agents.agent_factory import AgentFactory
 from market.state.sim_context import SimulationContext
+from market.stock_market import StockMarket, MarketCollection, DEFAULT_STOCK_ID
 from market.orders.order_repository import OrderRepository
 from market.state.services.dividend_service import DividendService
 from agents.agent_manager.agent_repository import AgentRepository
@@ -47,15 +49,22 @@ class BaseSimulation:
     This class orchestrates the entire simulation, including setting up the
     environment, creating agents, running the market rounds, and collecting data.
 
+    Stocks are held in a MarketCollection (self.markets): each StockMarket
+    bundles the per-stock context, order book, borrowing pool, dividend
+    service, market state manager, and matching engine. A single-stock run
+    is simply the N=1 case keyed by DEFAULT_STOCK_ID; construction and the
+    round phases iterate the collection either way. Legacy singular/plural
+    attributes (context/contexts, order_book/order_books, ...) are exposed
+    as read-only views over the collection.
+
     Attributes:
         num_rounds (int): The total number of rounds to run the simulation.
         agent_params (dict): Parameters for creating agents.
         sim_type (str): The name of the scenario being run.
         run_dir (Path): The directory where simulation data and plots are saved.
-        context (TradingContext): The context object holding the current state of the market.
+        markets (MarketCollection): Per-stock market components.
         agent_repository (AgentRepository): The repository managing all agents.
         data_recorder (DataRecorder): The service for recording simulation data.
-        market (Market): The market where trades are executed.
         dividend_service (DividendService): The service for managing dividends.
         interest_service (InterestService): The service for managing interest payments.
         lendable_shares (int): Total shares available to borrow for short positions.
@@ -98,15 +107,15 @@ class BaseSimulation:
         # Setup logging with sim_type directory structure
         self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.sim_type = sim_type
-        
+
         # Let LoggingService handle directory creation
         LoggingService.initialize(f"{sim_type}/{self.run_id}")
         self.logger = LoggingService.get_logger('simulation')
-        
+
         # Get directories from LoggingService
         self.run_dir = LoggingService.get_run_dir()
         self.data_dir = LoggingService.get_data_dir()
-        
+
         # Store parameters
         self.dividend_params = dividend_params
         self.initial_price = initial_price
@@ -114,41 +123,52 @@ class BaseSimulation:
         self.enable_intra_round_margin_checking = enable_intra_round_margin_checking
         self.order_repository = OrderRepository()
 
-        # MULTI-STOCK SUPPORT: Detect if this is a multi-stock scenario
+        # Multi-stock scenarios pass stock_configs; the mode drives the
+        # agent-facing market_state shape and recording formats, so it is
+        # kept explicit rather than inferred from the stock count.
         self.is_multi_stock = stock_configs is not None
         self.stock_configs = stock_configs
 
-        # Validate stock_configs if provided
         if self.is_multi_stock and not stock_configs:
             raise ValueError("stock_configs cannot be empty when multi-stock mode is enabled")
 
+        # Normalize to per-stock configs so single-stock is just the N=1 case
         if self.is_multi_stock:
-            # Multi-stock: Create contexts for each stock (FOR LOOP!)
-            self.contexts = {}
-            for stock_id, config in stock_configs.items():
-                self.contexts[stock_id] = SimulationContext(
+            normalized_configs = stock_configs
+        else:
+            normalized_configs = {
+                DEFAULT_STOCK_ID: {
+                    'INITIAL_PRICE': initial_price,
+                    'FUNDAMENTAL_PRICE': fundamental_price,
+                    'REDEMPTION_VALUE': redemption_value,
+                    'TRANSACTION_COST': transaction_cost,
+                    'LENDABLE_SHARES': lendable_shares,
+                    'DIVIDEND_PARAMS': dividend_params,
+                }
+            }
+
+        self.markets = MarketCollection()
+        for stock_id, config in normalized_configs.items():
+            self.markets.add(StockMarket(
+                stock_id=stock_id,
+                config=config,
+                context=SimulationContext(
                     num_rounds=num_rounds,
                     initial_price=config['INITIAL_PRICE'],
                     fundamental_price=config['FUNDAMENTAL_PRICE'],
                     redemption_value=config.get('REDEMPTION_VALUE'),
                     transaction_cost=config.get('TRANSACTION_COST', 0.0),
-                    logger=LoggingService.get_logger(f'context_{stock_id}'),
+                    logger=LoggingService.get_logger(self._stock_logger_name('context', stock_id)),
                     infinite_rounds=self.infinite_rounds
-                )
-            # For backwards compatibility, expose first stock as .context
-            self.context = list(self.contexts.values())[0]
-        else:
-            # Single stock: Original behavior (backwards compatible)
-            self.context = SimulationContext(
-                num_rounds=num_rounds,
-                initial_price=initial_price,
-                fundamental_price=fundamental_price,
-                redemption_value=redemption_value,
-                transaction_cost=transaction_cost,
-                logger=LoggingService.get_logger('context'),
-                infinite_rounds=self.infinite_rounds
-            )
-        
+                ),
+                # Style category for style-level dividend shocks; multi-stock only
+                style=self._stock_style_from_config(config) if self.is_multi_stock else None,
+            ))
+
+        # Per-stock volume of the previous round, used to build the next
+        # round's market state (empty means round 0: no prior volume).
+        self._last_round_volumes: Dict[str, float] = {}
+
         # Basic simulation parameters
         self.fundamental_volatility = fundamental_volatility
         self.news_enabled = news_enabled
@@ -173,7 +193,7 @@ class BaseSimulation:
 
         # Keep hide_fundamental_price for components that still use it
         self.hide_fundamental_price = self.fundamental_info_mode != FundamentalInfoMode.FULL
-        
+
         # Set default agent parameters if none provided
         self.agent_params = agent_params
 
@@ -209,78 +229,55 @@ class BaseSimulation:
         borrow_model = self.agent_params.get('borrow_model', {})
         allow_partial_borrows = borrow_model.get('allow_partial_borrows', True)
 
-        # Initialize borrowing repository/repositories (for short selling)
-        if self.is_multi_stock:
-            # Multi-stock: Create borrowing repository for each stock (FOR LOOP!)
-            self.borrowing_repositories = {}
-            for stock_id, config in stock_configs.items():
-                lendable = config.get('LENDABLE_SHARES', 0)
-                self.borrowing_repositories[stock_id] = BorrowingRepository(
-                    total_lendable=lendable,
-                    allow_partial_borrows=allow_partial_borrows,
-                    logger=LoggingService.get_logger(f'borrowing_{stock_id}')
-                )
-            # For backwards compatibility, expose first stock's repo
-            self.borrowing_repository = list(self.borrowing_repositories.values())[0] if self.borrowing_repositories else None
-
-            # Pass dict of borrowing repositories to AgentRepository
-            self.agent_repository = AgentRepository(
-                agents,
-                logger=LoggingService.get_logger('agent_repository'),
-                context=self.context,
-                borrowing_repositories=self.borrowing_repositories
-            )
-        else:
-            # Single stock: Original behavior (backwards compatible)
-            self.borrowing_repository = BorrowingRepository(
-                total_lendable=lendable_shares,
+        # Initialize a borrowing repository per stock (for short selling)
+        for stock_id, market in self.markets.items():
+            market.borrowing_repository = BorrowingRepository(
+                total_lendable=market.config.get('LENDABLE_SHARES', 0),
                 allow_partial_borrows=allow_partial_borrows,
-                logger=LoggingService.get_logger('borrowing')
+                logger=LoggingService.get_logger(self._stock_logger_name('borrowing', stock_id))
             )
 
+        # AgentRepository keys per-stock borrow lookups off which parameter
+        # is passed, so the mode picks the constructor form.
+        if self.is_multi_stock:
             self.agent_repository = AgentRepository(
                 agents,
                 logger=LoggingService.get_logger('agent_repository'),
                 context=self.context,
-                borrowing_repository=self.borrowing_repository
+                borrowing_repositories=self.markets.borrowing_repositories()
             )
-        # Initialize components in correct order
-        if self.is_multi_stock:
-            # Multi-stock: Create order books for each stock (FOR LOOP!)
-            self.order_books = {}
-            for stock_id in self.contexts.keys():
-                self.order_books[stock_id] = OrderBook(
-                    context=self.contexts[stock_id],
-                    logger=LoggingService.get_logger(f'order_book_{stock_id}'),
-                    order_repository=self.order_repository
-                )
-            # For backwards compatibility, expose first stock's order book
-            self.order_book = list(self.order_books.values())[0]
         else:
-            # Single stock: Original behavior
-            self.order_book = OrderBook(
+            self.agent_repository = AgentRepository(
+                agents,
+                logger=LoggingService.get_logger('agent_repository'),
                 context=self.context,
-                logger=LoggingService.get_logger('order_book'),
+                borrowing_repository=self.markets.primary.borrowing_repository
+            )
+
+        # Order book per stock
+        for stock_id, market in self.markets.items():
+            market.order_book = OrderBook(
+                context=market.context,
+                logger=LoggingService.get_logger(self._stock_logger_name('order_book', stock_id)),
                 order_repository=self.order_repository
             )
-        
-        # Initialize shared services
+
+        # Initialize shared services (the factory's multi-stock mode changes
+        # commitment lookups, so it must follow the scenario mode exactly)
         if self.is_multi_stock:
-            # Multi-stock: Pass all order books so commitment calculator can use the right one
             SharedServiceFactory.initialize(
-                order_books=self.order_books,
+                order_books=self.markets.order_books(),
                 transaction_cost={
-                    stock_id: config.get('TRANSACTION_COST', 0.0)
-                    for stock_id, config in stock_configs.items()
+                    stock_id: market.config.get('TRANSACTION_COST', 0.0)
+                    for stock_id, market in self.markets.items()
                 }
             )
         else:
-            # Single-stock: Pass single order book
             SharedServiceFactory.initialize(
                 order_book=self.order_book,
                 transaction_cost=transaction_cost
             )
-        
+
         # Create order services through factory
         self.order_state_manager, self.trade_execution_service = OrderServiceFactory.create_services(
             order_repository=self.order_repository,
@@ -288,37 +285,26 @@ class BaseSimulation:
             order_book= self.order_book,
             logger=LoggingService.get_logger('order_state')
         )
-        
-        # Initialize dividend service(s)
-        if self.is_multi_stock:
-            # Multi-stock: Create dividend service for each stock (FOR LOOP!)
-            self.dividend_services = {}
-            for stock_id in self.contexts.keys():
-                stock_dividend_params = stock_configs[stock_id].get('DIVIDEND_PARAMS')
-                if stock_dividend_params:
-                    self.dividend_services[stock_id] = DividendService(
-                        agent_repository=self.agent_repository,
-                        logger=LoggingService.get_logger(f'dividend_{stock_id}'),
-                        dividend_params=stock_dividend_params,
-                        redemption_value=self.contexts[stock_id].redemption_value,
-                        stock_id=stock_id  # Pass stock_id so it pays dividends for correct stock
-                    )
-            # For backwards compatibility
-            self.dividend_service = list(self.dividend_services.values())[0] if self.dividend_services else None
-        else:
-            # Single stock: Original behavior
-            self.dividend_service = DividendService(
-                agent_repository=self.agent_repository,
-                logger=LoggingService.get_logger('market_state'),
-                dividend_params=self.dividend_params,
-                redemption_value=self.context.redemption_value
-            ) if dividend_params else None
+
+        # Dividend service per stock that pays dividends
+        for stock_id, market in self.markets.items():
+            stock_dividend_params = market.config.get('DIVIDEND_PARAMS')
+            if stock_dividend_params:
+                market.dividend_service = DividendService(
+                    agent_repository=self.agent_repository,
+                    logger=LoggingService.get_logger(
+                        f'dividend_{stock_id}' if self.is_multi_stock else 'market_state'),
+                    dividend_params=stock_dividend_params,
+                    redemption_value=market.context.redemption_value,
+                    stock_id=stock_id
+                )
 
         # Piecewise fundamental path for dividend regime schedules (issue #96):
         # None for stationary scenarios, one value per round otherwise
-        self.fundamental_path = self._build_fundamental_path(interest_params)
-        if self.fundamental_path is not None:
-            self.context.fundamental_price = self.fundamental_path[0]
+        for market in self.markets:
+            market.fundamental_path = self._build_fundamental_path(market, interest_params)
+            if market.fundamental_path is not None:
+                market.context.fundamental_price = market.fundamental_path[0]
 
         # Initialize dividend shock structure (for systematic vs idiosyncratic shocks)
         # Can be configured at the agent_params level or individually per stock
@@ -380,54 +366,32 @@ class BaseSimulation:
             self.cash_lending_repo = None
             self.leverage_interest_service = None
 
-        # Create market state manager(s) - one per stock in multi-stock mode
-        if self.is_multi_stock:
-            # Multi-stock: Create market state manager for each stock (FOR LOOP!)
-            self.market_state_managers = {}
-            for stock_id in self.contexts.keys():
-                self.market_state_managers[stock_id] = MarketStateManager(
-                    context=self.contexts[stock_id],
-                    order_book=self.order_books[stock_id],
-                    agent_repository=self.agent_repository,
-                    logger=LoggingService.get_logger(f'market_state_{stock_id}'),
-                    information_service=None,  # Will set after creating InformationService
-                    dividend_service=self.dividend_services.get(stock_id),
-                    interest_service=self.interest_service,
-                    borrow_service=self.borrow_service,
-                    hide_fundamental_price=self.hide_fundamental_price,
-                    news_enabled=self.news_enabled
-                )
-            # For backwards compatibility, expose first stock's manager
-            self.market_state_manager = list(self.market_state_managers.values())[0]
-
-            # Create information service with all managers
-            information_service = InformationService(
+        # Market state manager per stock; the shared information service is
+        # created afterwards and attached to every manager
+        for stock_id, market in self.markets.items():
+            market.market_state_manager = MarketStateManager(
+                context=market.context,
+                order_book=market.order_book,
                 agent_repository=self.agent_repository,
-                market_state_managers=self.market_state_managers,
-                info_capabilities_config=self.agent_params.get('info_capabilities')
-            )
-
-            # Set information service on all managers
-            for manager in self.market_state_managers.values():
-                manager.information_service = information_service
-        else:
-            # Single stock: Original behavior
-            information_service = InformationService(
-                agent_repository=self.agent_repository,
-                info_capabilities_config=self.agent_params.get('info_capabilities')
-            )
-            self.market_state_manager = MarketStateManager(
-                context=self.context,
-                order_book=self.order_book,
-                agent_repository=self.agent_repository,
-                logger=LoggingService.get_logger('market_state'),
-                information_service=information_service,
-                dividend_service=self.dividend_service,
+                logger=LoggingService.get_logger(
+                    f'market_state_{stock_id}' if self.is_multi_stock else 'market_state'),
+                information_service=None,  # Set below once the shared service exists
+                dividend_service=market.dividend_service,
                 interest_service=self.interest_service,
                 borrow_service=self.borrow_service,
                 hide_fundamental_price=self.hide_fundamental_price,
                 news_enabled=self.news_enabled
             )
+
+        # A managers dict switches the information service into multi-stock
+        # signal generation, so it is only passed in multi-stock mode
+        self.information_service = InformationService(
+            agent_repository=self.agent_repository,
+            market_state_managers=self.markets.market_state_managers() if self.is_multi_stock else None,
+            info_capabilities_config=self.agent_params.get('info_capabilities')
+        )
+        for market in self.markets:
+            market.market_state_manager.information_service = self.information_service
 
         # Create data recorder with repository
         self.data_recorder = DataRecorder(
@@ -452,40 +416,21 @@ class BaseSimulation:
             commitment_calculator=SharedServiceFactory.get_commitment_calculator()
         )
 
-        # Initialize matching engine(s)
-        if self.is_multi_stock:
-            # Multi-stock: Create matching engine for each stock (FOR LOOP!)
-            self.matching_engines = {}
-            for stock_id in self.contexts.keys():
-                self.matching_engines[stock_id] = MatchingEngine(
-                    order_book=self.order_books[stock_id],
-                    agent_manager=self.agent_manager,
-                    logger=LoggingService.get_logger('order_book'),  # Use generic logger for all stocks
-                    trades_logger=LoggingService.get_logger('market'),  # Use generic logger for all stocks
-                    trade_execution_service=self.trade_execution_service,
-                    order_repository=self.order_repository,
-                    order_state_manager=self.order_state_manager,
-                    agent_repository=self.agent_repository,
-                    context=self.contexts[stock_id],
-                    is_multi_stock=True,  # Flag multi-stock mode
-                    enable_intra_round_margin_checking=self.enable_intra_round_margin_checking,
-                    stock_id=stock_id  # Pass stock identifier for margin checking
-                )
-            # For backwards compatibility
-            self.matching_engine = list(self.matching_engines.values())[0]
-        else:
-            # Single stock: Original behavior
-            self.matching_engine = MatchingEngine(
-                order_book=self.order_book,
+        # Matching engine per stock
+        for stock_id, market in self.markets.items():
+            market.matching_engine = MatchingEngine(
+                order_book=market.order_book,
                 agent_manager=self.agent_manager,
                 logger=LoggingService.get_logger('order_book'),
-                trades_logger=LoggingService.get_logger('trades'),
+                trades_logger=LoggingService.get_logger('market' if self.is_multi_stock else 'trades'),
                 trade_execution_service=self.trade_execution_service,
                 order_repository=self.order_repository,
                 order_state_manager=self.order_state_manager,
                 agent_repository=self.agent_repository,
-                context=self.context,
-                enable_intra_round_margin_checking=self.enable_intra_round_margin_checking
+                context=market.context,
+                is_multi_stock=self.is_multi_stock,
+                enable_intra_round_margin_checking=self.enable_intra_round_margin_checking,
+                stock_id=stock_id
             )
 
         # Initialize agent-dependent structures
@@ -507,14 +452,14 @@ class BaseSimulation:
         self.verifier = SimulationVerifier(
             agent_repository=self.agent_repository,
             context=self.context,
-            contexts=self.contexts if self.is_multi_stock else None,
+            contexts=self.markets.contexts() if self.is_multi_stock else None,
             order_repository=self.order_repository,
             order_book=self.order_book,
-            order_books=self.order_books if self.is_multi_stock else None,
+            order_books=self.markets.order_books() if self.is_multi_stock else None,
             borrowing_repository=self.borrowing_repository,
-            borrowing_repositories=self.borrowing_repositories if self.is_multi_stock else None,
+            borrowing_repositories=self.markets.borrowing_repositories() if self.is_multi_stock else None,
             dividend_service=self.dividend_service,
-            dividend_services=self.dividend_services if self.is_multi_stock else None,
+            dividend_services=self.markets.dividend_services() if self.is_multi_stock else None,
             is_multi_stock=self.is_multi_stock,
             infinite_rounds=self.infinite_rounds,
             agent_params=self.agent_params,
@@ -523,8 +468,84 @@ class BaseSimulation:
             interest_service=self.interest_service,
             borrow_service=self.borrow_service,
             leverage_interest_service=self.leverage_interest_service if self.leverage_enabled else None,
-            fundamental_path=self.fundamental_path
+            fundamental_paths={
+                stock_id: market.fundamental_path
+                for stock_id, market in self.markets.items()
+            }
         )
+
+    # ------------------------------------------------------------------
+    # Legacy singular/plural component views (kept for compatibility with
+    # external consumers; internally the collection is the source of truth)
+    # ------------------------------------------------------------------
+
+    @property
+    def context(self):
+        """The first stock's context (the only one in single-stock mode)."""
+        return self.markets.primary.context
+
+    @property
+    def contexts(self):
+        return self.markets.contexts()
+
+    @property
+    def order_book(self):
+        return self.markets.primary.order_book
+
+    @property
+    def order_books(self):
+        return self.markets.order_books()
+
+    @property
+    def market_state_manager(self):
+        return self.markets.primary.market_state_manager
+
+    @property
+    def market_state_managers(self):
+        return self.markets.market_state_managers()
+
+    @property
+    def matching_engine(self):
+        return self.markets.primary.matching_engine
+
+    @property
+    def matching_engines(self):
+        return {stock_id: market.matching_engine for stock_id, market in self.markets.items()}
+
+    @property
+    def dividend_service(self):
+        """First stock that pays dividends, or None (legacy behavior)."""
+        return next((m.dividend_service for m in self.markets if m.dividend_service), None)
+
+    @property
+    def dividend_services(self):
+        return self.markets.dividend_services()
+
+    @property
+    def borrowing_repository(self):
+        return self.markets.primary.borrowing_repository
+
+    @property
+    def borrowing_repositories(self):
+        return self.markets.borrowing_repositories()
+
+    @property
+    def fundamental_path(self):
+        return self.markets.primary.fundamental_path
+
+    def _stock_logger_name(self, base: str, stock_id: str) -> str:
+        """Legacy logger naming: bare names in single-stock mode, per-stock
+        suffixes in multi-stock mode."""
+        return f"{base}_{stock_id}" if self.is_multi_stock else base
+
+    @staticmethod
+    def _stock_style_from_config(config: dict) -> Optional[str]:
+        """Style category for shock lookup: stock level, falling back to
+        DIVIDEND_PARAMS."""
+        style = config.get('style')
+        if style is None:
+            style = (config.get('DIVIDEND_PARAMS') or {}).get('style')
+        return style
 
     def register_before_round(self, hook):
         """Register a callable invoked as hook(sim, round_number) before each round."""
@@ -557,7 +578,7 @@ class BaseSimulation:
         new_orders = self._phase_collect_decisions(market_state, round_number)
 
         # 3. EXECUTE TRADES using the matching engine
-        market_result, stock_market_results = self._phase_match_orders(new_orders, round_number)
+        market_result, results_by_stock = self._phase_match_orders(new_orders, round_number)
 
         # Update market depth after matching
         self._update_all_market_depths()
@@ -567,15 +588,13 @@ class BaseSimulation:
             round_number=round_number,
             market_state=market_state,
             market_result=market_result,
-            new_orders=new_orders,
-            stock_market_results=stock_market_results if self.is_multi_stock else None
+            new_orders=new_orders
         )
 
         # 5. FINAL END-OF-ROUND UPDATES (including interest/dividend payments)
         self._phase_end_of_round(
             round_number=round_number,
-            market_result=market_result,
-            stock_market_results=stock_market_results,
+            results_by_stock=results_by_stock,
             pre_round_states=pre_round_states,
             last_paid_dividend=last_paid_dividend
         )
@@ -638,33 +657,9 @@ class BaseSimulation:
         round (see market/state/services/shock_service.py)."""
         return generate_dividend_shocks(self.shock_config, self.shock_enabled, self.logger)
 
-    def _get_stock_style(self, stock_id: str) -> Optional[str]:
-        """Get the style category for a stock (for shock lookup).
-
-        Args:
-            stock_id: The stock identifier
-
-        Returns:
-            Style string if configured, None otherwise
-        """
-        if not self.is_multi_stock or not self.stock_configs:
-            return None
-
-        stock_config = self.stock_configs.get(stock_id, {})
-        # Style can be in DIVIDEND_PARAMS or at stock level
-        style = stock_config.get('style')
-        if style is None:
-            dividend_params = stock_config.get('DIVIDEND_PARAMS', {})
-            style = dividend_params.get('style')
-        return style
-
     def _cancel_all_orders_for_stock(self, stock_id: str):
         """Cancel all orders for a specific stock (used during final redemption)"""
-        # Get the correct order book for this stock
-        if self.is_multi_stock:
-            order_book = self.order_books[stock_id]
-        else:
-            order_book = self.order_book
+        order_book = self.markets[stock_id].order_book
 
         # Get all agents and cancel their orders for this stock
         for agent_id in self.agent_repository.get_all_agent_ids():
@@ -699,54 +694,64 @@ class BaseSimulation:
         self.order_book.log_order_book_state(f"End of Round {round_number}")
 
     def _update_all_market_depths(self):
-        """Update market depth for all stocks (handles both single and multi-stock)"""
-        if self.is_multi_stock:
-            for manager in self.market_state_managers.values():
-                manager.update_market_depth()
-        else:
-            self.market_state_manager.update_market_depth()
+        """Update market depth for every stock"""
+        for market in self.markets:
+            market.market_state_manager.update_market_depth()
 
-    def _build_fundamental_path(self, interest_params: dict) -> Optional[list]:
+    def _build_fundamental_path(self, market: StockMarket, interest_params: dict) -> Optional[list]:
         """Build the per-round fundamental value path for a dividend regime
         schedule (issue #96). Returns None for stationary scenarios.
 
         The path follows the no-arbitrage recursion V_t = (e_t + V_{t+1})/(1+r)
         anchored at the redemption value (finite horizon) or the terminal-regime
-        continuation value E[d]/r (infinite horizon). It is applied to
-        context.fundamental_price at the start of every round, so recorded
+        continuation value E[d]/r (infinite horizon). It is applied to the
+        stock's fundamental_price at the start of every round, so recorded
         market data reflects the active regime.
         """
-        if self.is_multi_stock:
-            for stock_id, config in self.stock_configs.items():
-                if (config.get('DIVIDEND_PARAMS') or {}).get('regime_schedule'):
-                    raise ValueError(
-                        f"Stock {stock_id}: dividend regime schedules are not yet "
-                        f"supported in multi-stock mode"
-                    )
-            return None
-        if not self.dividend_params or not self.dividend_params.get('regime_schedule'):
+        dividend_params = market.config.get('DIVIDEND_PARAMS')
+        if not dividend_params or not dividend_params.get('regime_schedule'):
             return None
 
         interest_rate = (
             interest_params or self.agent_params.get('interest_model', {})
         ).get('rate', 0.05)
-        num_rounds = self.context._num_rounds
+        num_rounds = market.context._num_rounds
 
         # Terminal anchor: redemption value for finite horizons, terminal-regime
         # continuation value E[d]/r otherwise (None -> computed by the helper)
-        if not self.infinite_rounds and self.context.redemption_value is not None:
-            terminal_anchor = self.context.redemption_value
+        if not self.infinite_rounds and market.context.redemption_value is not None:
+            terminal_anchor = market.context.redemption_value
         else:
             terminal_anchor = None
 
         path, terminal_value = regime_fundamental_path(
-            self.dividend_params, num_rounds, interest_rate, terminal_anchor
+            dividend_params, num_rounds, interest_rate, terminal_anchor
         )
         self.logger.info(
-            f"Dividend regime schedule active: fundamental path {path[0]:.4f} -> {path[-1]:.4f}, "
+            f"Dividend regime schedule active for {market.stock_id}: "
+            f"fundamental path {path[0]:.4f} -> {path[-1]:.4f}, "
             f"terminal anchor {terminal_value:.4f}"
         )
         return path
+
+    def _ensure_providers_registered(self):
+        """Register information providers once, on the first distributing
+        round (matches the legacy lazy registration inside
+        MarketStateManager._distribute_market_information)."""
+        if self.information_service.providers:
+            return
+        for market in self.markets:
+            manager = market.market_state_manager
+            ProviderRegistry.register_providers(
+                information_service=self.information_service,
+                market_state_manager=manager,
+                dividend_service=manager.dividend_service,
+                interest_service=manager.interest_service,
+                borrow_service=manager.borrow_service,
+                hide_fundamental_price=self.hide_fundamental_price,
+                news_enabled=self.news_enabled,
+                total_rounds=self.context._num_rounds
+            )
 
     def _phase_update_market(self, round_number: int) -> dict:
         """Phase 1: Update market state and prepare for trading
@@ -755,110 +760,56 @@ class BaseSimulation:
             round_number: Current round number
 
         Returns:
-            dict: Market state for agent decision making
+            dict: Market state for agent decision making (flat single-stock
+            shape, or {'stocks': {...}, 'is_multi_stock': True} in
+            multi-stock mode)
         """
         # Update market depths
         self._update_all_market_depths()
 
-        # Get last volume from data recorder
-        if self.is_multi_stock:
-            # Multi-stock: Get per-stock volumes from market_data
-            last_stock_volumes = {}
-            if self.data_recorder.market_data:
-                # Get volumes from previous round for each stock
-                for stock_id in self.contexts.keys():
-                    # Filter market_data for this stock and previous round
-                    prev_round_data = [
-                        entry for entry in self.data_recorder.market_data
-                        if entry['stock_id'] == stock_id and entry['round'] == round_number
-                    ]
-                    last_stock_volumes[stock_id] = (
-                        prev_round_data[-1]['total_volume']
-                        if prev_round_data
-                        else 0
-                    )
-            else:
-                # First round - no previous volume
-                last_stock_volumes = {stock_id: 0 for stock_id in self.contexts.keys()}
-        else:
-            # Single-stock: Get total volume from history
-            last_volume = (
-                self.data_recorder.history[-1]['total_volume']
-                if self.data_recorder.history
-                else 0
+        # Update each stock and collect its state; information distribution
+        # happens once afterwards, for all stocks
+        per_stock_state = {}
+        for stock_id, market in self.markets.items():
+            last_volume = self._last_round_volumes.get(stock_id, 0)
+
+            if market.fundamental_path is not None:
+                # Regime schedules: fundamental reflects the active dividend regime
+                market.context.fundamental_price = market.fundamental_path[
+                    min(round_number, len(market.fundamental_path) - 1)
+                ]
+            market.context.update_public_info(round_number, last_volume)
+            per_stock_state[stock_id] = market.market_state_manager.update(
+                round_number=round_number,
+                last_volume=last_volume,
+                is_round_end=False,
+                skip_distribution=True
             )
 
-        # Update market components and build market state
+        # Ensure providers are registered (lazy initialization)
+        self._ensure_providers_registered()
+
+        # Generate news for all stocks in ONE LLM call (multi-stock only;
+        # single-stock news flows through the provider during distribution)
+        if self.news_enabled and self.is_multi_stock:
+            from market.information.information_types import InformationType
+            news_provider = self.information_service.providers.get(InformationType.NEWS)
+            if news_provider:
+                news_provider.generate_news_for_all_stocks(
+                    round_number=round_number,
+                    managers=self.markets.market_state_managers()
+                )
+
+        # Distribute information ONCE for all stocks
+        self.information_service.distribute_information(round_number)
+
         if self.is_multi_stock:
-            # Multi-stock: Update each manager and aggregate state
-            market_state = {
-                'stocks': {},
+            return {
+                'stocks': per_stock_state,
                 'round_number': round_number + 1,
                 'is_multi_stock': True
             }
-
-            # Update all managers WITHOUT distributing information yet
-            for stock_id, manager in self.market_state_managers.items():
-                # Update public info for this stock BEFORE calling manager.update()
-                stock_last_volume = last_stock_volumes[stock_id]
-                self.contexts[stock_id].update_public_info(round_number, stock_last_volume)
-
-                # Call manager.update() with skip_distribution to avoid multiple calls
-                stock_market_state = manager.update(
-                    round_number=round_number,
-                    last_volume=stock_last_volume,
-                    is_round_end=False,
-                    skip_distribution=True  # Skip distribution in multi-stock mode
-                )
-                # Store this stock's state
-                market_state['stocks'][stock_id] = stock_market_state
-
-            # Now distribute information ONCE for all stocks
-            # Get any manager's information_service (they all share the same one)
-            first_manager = list(self.market_state_managers.values())[0]
-            information_service = first_manager.information_service
-
-            # Ensure providers are registered (lazy initialization)
-            if not information_service.providers:
-                for manager in self.market_state_managers.values():
-                    ProviderRegistry.register_providers(
-                        information_service=information_service,
-                        market_state_manager=manager,
-                        dividend_service=manager.dividend_service,
-                        interest_service=manager.interest_service,
-                        borrow_service=manager.borrow_service,
-                        hide_fundamental_price=self.hide_fundamental_price,
-                        news_enabled=self.news_enabled,
-                        total_rounds=self.context._num_rounds
-                    )
-
-            # Generate news for all stocks in ONE LLM call (if news enabled)
-            if self.news_enabled:
-                from market.information.information_types import InformationType
-                news_provider = information_service.providers.get(InformationType.NEWS)
-                if news_provider:
-                    news_provider.generate_news_for_all_stocks(
-                        round_number=round_number,
-                        managers=self.market_state_managers
-                    )
-
-            # Distribute information for all stocks
-            information_service.distribute_information(round_number)
-        else:
-            # Single stock: Original behavior
-            if self.fundamental_path is not None:
-                # Regime schedules: fundamental reflects the active dividend regime
-                self.context.fundamental_price = self.fundamental_path[
-                    min(round_number, len(self.fundamental_path) - 1)
-                ]
-            self.context.update_public_info(round_number, last_volume)
-            market_state = self.market_state_manager.update(
-                round_number=round_number,
-                last_volume=last_volume,
-                is_round_end=False
-            )
-
-        return market_state
+        return per_stock_state[DEFAULT_STOCK_ID]
 
     def _phase_collect_decisions(self, market_state: dict, round_number: int) -> list:
         """Phase 2: Collect agent decisions and create orders
@@ -897,78 +848,62 @@ class BaseSimulation:
             round_number: Current round number
 
         Returns:
-            tuple: (market_result, stock_market_results)
-                - market_result: Aggregated result or single-stock result
-                - stock_market_results: Per-stock results dict (multi-stock only, else None)
+            tuple: (market_result, results_by_stock)
+                - market_result: Single-stock result, or aggregated result in
+                  multi-stock mode (trades/volume summed over stocks)
+                - results_by_stock: Per-stock results dict
         """
-        if self.is_multi_stock:
-            # Multi-stock: Match orders FOR EACH STOCK separately
-            stock_market_results = {}
-
-            for stock_id in self.contexts.keys():
-                # Filter orders for THIS stock only
+        results_by_stock = {}
+        for stock_id, market in self.markets.items():
+            if self.is_multi_stock:
+                # Route each order to its own stock's engine
                 stock_orders = [o for o in new_orders if o.stock_id == stock_id]
-
                 self.logger.info(f"=== Matching {len(stock_orders)} orders for {stock_id} ===")
+            else:
+                stock_orders = new_orders
 
-                # Match orders for this stock
-                stock_market_results[stock_id] = self.matching_engines[stock_id].match_orders(
-                    stock_orders,
-                    self.contexts[stock_id].current_price,
-                    round_number + 1
-                )
-
-                # Update price for THIS stock
-                self.contexts[stock_id].current_price = stock_market_results[stock_id].price
-                self.contexts[stock_id].round_number = round_number + 1
-
-            # Aggregate all trades and volumes from all stocks
-            all_trades = []
-            total_volume = 0
-            for stock_id, result in stock_market_results.items():
-                all_trades.extend(result.trades)
-                total_volume += result.volume
-
-            # Create aggregated market result for backwards compatibility
-            # Use first stock's result as template, but with aggregated trades/volume
-            first_result = list(stock_market_results.values())[0]
-            market_result = type(first_result)(
-                price=first_result.price,  # Not used in multi-stock (each stock has own price)
-                trades=all_trades,
-                volume=total_volume
-            )
-
-            # Update backwards-compatible self.context
-            self.context.round_number = round_number + 1
-
-            # Update agent wealth with all stock prices (multi-stock)
-            all_prices = {stock_id: ctx.current_price for stock_id, ctx in self.contexts.items()}
-            self.agent_repository.update_all_wealth(all_prices)
-
-            return market_result, stock_market_results
-        else:
-            # Single stock: Original behavior
-            market_result = self.matching_engine.match_orders(
-                new_orders,
-                self.context.current_price,
+            result = market.matching_engine.match_orders(
+                stock_orders,
+                market.context.current_price,
                 round_number + 1
             )
+            results_by_stock[stock_id] = result
 
-            # Update price and round number in the context
-            self.context.current_price = market_result.price
-            self.context.round_number = round_number + 1
+            # Update price and round number for this stock
+            market.context.current_price = result.price
+            market.context.round_number = round_number + 1
 
-            return market_result, None
+        # Remember per-stock volume for the next round's market state
+        self._last_round_volumes = {
+            stock_id: result.volume for stock_id, result in results_by_stock.items()
+        }
 
-    def _phase_end_of_round(self, round_number: int, market_result,
-                           stock_market_results: dict, pre_round_states: dict,
-                           last_paid_dividend: float):
+        if self.is_multi_stock:
+            # Aggregate trades and volume across stocks for consumers that
+            # expect a single result (recorder); per-stock prices live in
+            # each stock's context
+            all_trades = [t for result in results_by_stock.values() for t in result.trades]
+            market_result = MarketResult(
+                price=results_by_stock[self.markets.primary.stock_id].price,
+                trades=all_trades,
+                volume=sum(result.volume for result in results_by_stock.values())
+            )
+
+            # Update agent wealth with all stock prices; in single-stock mode
+            # the matching engine already did this with its scalar price
+            self.agent_repository.update_all_wealth(self.markets.prices())
+
+            return market_result, results_by_stock
+
+        return results_by_stock[DEFAULT_STOCK_ID], results_by_stock
+
+    def _phase_end_of_round(self, round_number: int, results_by_stock: dict,
+                           pre_round_states: dict, last_paid_dividend: float):
         """Phase 5: End-of-round updates including dividends, redemptions, and interest
 
         Args:
             round_number: Current round number
-            market_result: Result from matching engine
-            stock_market_results: Per-stock results (multi-stock only)
+            results_by_stock: Per-stock matching results
             pre_round_states: Pre-round states for verification
             last_paid_dividend: Last paid dividend from phase 4 (for single-stock logging)
         """
@@ -980,61 +915,38 @@ class BaseSimulation:
         shocks = self._generate_dividend_shocks()
         self._current_round_shocks = shocks  # Store for data recording
 
-        if self.is_multi_stock:
-            # Multi-stock: Let each manager handle end-of-round processing
-            total_payments = 0.0
-
-            for stock_id, manager in self.market_state_managers.items():
-                # If final round with redemption, cancel all orders for this stock BEFORE redemption
-                if is_final_round and self.contexts[stock_id].redemption_value is not None:
-                    self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
-                    self._cancel_all_orders_for_stock(stock_id)
-
-                # Get the style-specific shock for this stock
-                stock_style = self._get_stock_style(stock_id)
-                style_shock = shocks['styles'].get(stock_style, 0.0) if stock_style else 0.0
-
-                # Manager.update() with is_round_end=True handles all end-of-round processing
-                # Pass THIS stock's volume, not the aggregated total
-                stock_volume = stock_market_results[stock_id].volume
-                manager.update(
-                    round_number=round_number,
-                    last_volume=stock_volume,
-                    is_round_end=True,
-                    systematic_shock=shocks['systematic'],
-                    style_shock=style_shock
-                )
-                manager.update_market_depth()
-
-                # Aggregate total payments from all stocks for logging
-                # dividend_history now contains DividendRealization objects
-                if manager.dividend_service and manager.dividend_service.dividend_history:
-                    last_realization = manager.dividend_service.dividend_history[-1]
-                    stock_payment = last_realization.total_dividend
-                    total_payments += stock_payment
-                    self.logger.info(f"  {stock_id} dividend payment: ${stock_payment:.2f}")
-
-            last_paid_dividend = total_payments
-            self.logger.info(f"Total payments across all stocks: ${total_payments:.2f}")
-        else:
-            # Single stock: Original behavior
-            # If final round with redemption, cancel all orders BEFORE redemption
-            if is_final_round and self.context.redemption_value is not None:
-                stock_id = self.dividend_service.stock_id if self.dividend_service else "DEFAULT_STOCK"
+        total_payments = 0.0
+        for stock_id, market in self.markets.items():
+            # If final round with redemption, cancel all orders for this stock BEFORE redemption
+            if is_final_round and market.context.redemption_value is not None:
                 self.logger.info(f"Final round: cancelling all orders for {stock_id} before redemption")
                 self._cancel_all_orders_for_stock(stock_id)
 
-            # For single stock, pass systematic shock (no style shock)
-            self.market_state_manager.update(
+            # Style-level shock for this stock (single-stock has no style)
+            style_shock = shocks['styles'].get(market.style, 0.0) if market.style else 0.0
+
+            # Manager.update() with is_round_end=True handles all end-of-round
+            # processing; pass THIS stock's volume, not the aggregated total
+            market.market_state_manager.update(
                 round_number=round_number,
-                last_volume=market_result.volume,
+                last_volume=results_by_stock[stock_id].volume,
                 is_round_end=True,
                 systematic_shock=shocks['systematic'],
-                style_shock=0.0  # Single stock doesn't use style shocks
+                style_shock=style_shock
             )
-            self.market_state_manager.update_market_depth()
+            market.market_state_manager.update_market_depth()
 
-            # Use last_paid_dividend passed from phase_record_data
+            # Aggregate total payments from all stocks for logging
+            # dividend_history contains DividendRealization objects
+            if self.is_multi_stock and market.dividend_service and market.dividend_service.dividend_history:
+                last_realization = market.dividend_service.dividend_history[-1]
+                stock_payment = last_realization.total_dividend
+                total_payments += stock_payment
+                self.logger.info(f"  {stock_id} dividend payment: ${stock_payment:.2f}")
+
+        if self.is_multi_stock:
+            last_paid_dividend = total_payments
+            self.logger.info(f"Total payments across all stocks: ${total_payments:.2f}")
 
         self.logger.info(f"Dividends paid last round: {last_paid_dividend}")
 
@@ -1059,7 +971,7 @@ class BaseSimulation:
         self.verifier.verify_round_end_states(pre_round_states)
 
     def _phase_record_data(self, round_number: int, market_state: dict, market_result,
-                          new_orders: list, stock_market_results: dict = None):
+                          new_orders: list):
         """Phase 4: Record round data including dividends and trades
 
         Args:
@@ -1067,7 +979,6 @@ class BaseSimulation:
             market_state: Current market state
             market_result: Result from matching engine
             new_orders: List of orders placed this round
-            stock_market_results: Per-stock results (multi-stock only)
         """
         # Log state after matching
         LoggingService.log_all_agent_states(self.agent_repository, round_number, "Post-Matching ")
@@ -1085,11 +996,11 @@ class BaseSimulation:
             dividends_by_stock = {}  # Track per-stock for detailed recording
             realizations_by_stock = {}  # Track full realizations for shock logging
 
-            for stock_id, manager in self.market_state_managers.items():
-                if manager.dividend_service and manager.dividend_service.dividend_history:
+            for stock_id, market in self.markets.items():
+                if market.dividend_service and market.dividend_service.dividend_history:
                     # Get last paid dividend for this stock
-                    # dividend_history now contains DividendRealization objects
-                    last_realization = manager.dividend_service.dividend_history[-1]
+                    # dividend_history contains DividendRealization objects
+                    last_realization = market.dividend_service.dividend_history[-1]
                     stock_dividend = last_realization.total_dividend
                     dividends_by_stock[stock_id] = stock_dividend
                     realizations_by_stock[stock_id] = last_realization
