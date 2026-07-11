@@ -183,7 +183,7 @@ class PlotGenerator:
                 print("  Processing leverage metrics...")
 
                 # Get leverage parameters from simulation
-                leverage_params = self.simulation.params.get('AGENT_PARAMS', {}).get('leverage_params', {})
+                leverage_params = (self.simulation.agent_params or {}).get('leverage_params', {})
                 maintenance_margin = leverage_params.get('maintenance_margin', 0.25)
                 initial_margin = leverage_params.get('initial_margin', 0.5)
 
