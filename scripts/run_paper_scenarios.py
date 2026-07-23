@@ -2,7 +2,7 @@
 """
 Run Paper Scenarios - Reproducibility Script
 
-This script runs all scenarios defined for the Management Science paper
+This script runs all scenarios defined for the paper
 and saves results to a versioned directory with full provenance tracking.
 
 Usage:
@@ -34,7 +34,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
-from scenarios.paper_management_science import PAPER_SCENARIO_NAMES, PAPER_VERSION
+from scenarios.paper_scenarios import PAPER_SCENARIO_NAMES, PAPER_VERSION
 
 
 def get_git_info():

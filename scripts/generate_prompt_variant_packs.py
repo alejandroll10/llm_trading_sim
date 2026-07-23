@@ -15,7 +15,7 @@ paraphrases_<persona>.json   One pack per workhorse persona (default, value,
 persona_families.json        p0-p4 applied to ALL six personas at once (index-
                              matched), for mixed-composition scenarios where a
                              cell should hold one consistent wording family.
-framing_cook.json            Cook et al. framings: trader vs advisor ("you
+framing_advisor.json            Advisor-framing pack (cf. Cook et al. 2026): trader vs advisor ("you
                              trade" vs "you manage a client's account") x
                              explicit vs partially masked economic context
                              (FUNDAMENTAL_INFO_MODE=realizations_only).
@@ -261,13 +261,13 @@ In every decision, pursue the maximum expected profit.""",
 }
 
 # =============================================================================
-# Advisor framing (Cook et al.): the same strategy content, reframed from
+# Advisor framing (cf. Cook et al. 2026): the same strategy content, reframed from
 # "you are a trader acting for yourself" to "you manage a client's account".
 # The portfolio, cash, and constraints shown in the user prompt belong to the
 # client; the agent places orders on the client's behalf.
 #
 # CAVEAT: advisor rewrites exist only for the six workhorse personas. Running
-# framing_cook.json against a scenario whose composition includes OTHER LLM
+# framing_advisor.json against a scenario whose composition includes OTHER LLM
 # personas (e.g. contrarian, news) would leave those agents in trader framing
 # while the rest switch to advisor framing — a mixed-framing cell. Use it with
 # compositions drawn from PERSONAS (e.g. the prompt_variant_smoke scenario).
@@ -384,10 +384,10 @@ def build_packs() -> dict:
             persona: PARAPHRASES[persona][i - 1] for persona in PERSONAS}}
     packs["persona_families"] = pack
 
-    # Cook et al. framing pack: trader/advisor x explicit/masked context.
+    # Advisor framing pack: trader/advisor x explicit/masked context.
     pack = {"_meta": meta(
-        "framing_cook",
-        "Cook et al. framing variants: 'you are a trader' vs 'advise a client' "
+        "framing_advisor",
+        "Advisor/framing variants (cf. Cook et al. 2026): 'you are a trader' vs 'advise a client' "
         "(advisor framing for all six workhorse personas), crossed with explicit "
         "vs partially masked economic context (FUNDAMENTAL_INFO_MODE="
         "realizations_only: agents see past dividends but not the dividend model). "
@@ -401,7 +401,7 @@ def build_packs() -> dict:
         "SYSTEM_PROMPT_OVERRIDES": dict(ADVISOR_FRAMINGS),
         "FUNDAMENTAL_INFO_MODE": "realizations_only",
     }
-    packs["framing_cook"] = pack
+    packs["framing_advisor"] = pack
 
     # A3 objective-framing arms on the value persona.
     pack = {"_meta": meta(

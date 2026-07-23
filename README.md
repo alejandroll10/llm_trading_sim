@@ -138,7 +138,7 @@ To run the simulation, you can execute the `run_base_sim.py` script from the `sr
     **Prompt-family variant packs** (`sweeps/variants/`): checked-in JSON packs for robustness across prompt wordings, consumed via `--variants-file`. Each pack has one unmodified control plus variants that set `SYSTEM_PROMPT_OVERRIDES` (agent type → replacement system prompt) and optionally `FUNDAMENTAL_INFO_MODE`:
     - `paraphrases_<persona>.json` — 4 semantically equivalent paraphrases each for `default`, `value`, `momentum`, `market_maker`, `optimistic`, `profit_maximizer`
     - `persona_families.json` — index-matched paraphrases applied to all six personas at once (for mixed compositions)
-    - `framing_cook.json` — trader vs. financial-advisor framing × explicit vs. masked economic context (advisor rewrites exist only for the six workhorse personas, so use compositions drawn from those)
+    - `framing_advisor.json` — trader vs. financial-advisor framing × explicit vs. masked economic context (advisor rewrites exist only for the six workhorse personas, so use compositions drawn from those)
     - `objective_framing_a3.json` — the same value strategy under different stated objectives (maximize wealth / follow the strategy even at a loss / maximize risk-adjusted return / no objective)
 
     ```bash

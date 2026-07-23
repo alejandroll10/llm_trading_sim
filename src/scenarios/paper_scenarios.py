@@ -1,5 +1,5 @@
 """
-Paper Scenarios: Management Science Submission
+Paper Scenarios (frozen for reproducibility)
 
 This file contains all scenarios used in the paper:
 "Can Large Language Models Trade? Testing Financial Theories with LLM Agents"

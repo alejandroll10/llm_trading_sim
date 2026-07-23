@@ -1,11 +1,11 @@
 {
   "_meta": {
-    "pack": "framing_cook",
+    "pack": "framing_advisor",
     "version": "1.0.0",
     "issue": "https://github.com/alejandroll10/llm_trading_sim/issues/102",
     "generated_by": "scripts/generate_prompt_variant_packs.py (do not edit by hand)",
-    "description": "Cook et al. framing variants: 'you are a trader' vs 'advise a client' (advisor framing for all six workhorse personas), crossed with explicit vs partially masked economic context (FUNDAMENTAL_INFO_MODE=realizations_only: agents see past dividends but not the dividend model). Use only with compositions drawn from the six workhorse personas: other LLM personas have no advisor rewrite and would keep trader framing, mixing framings within a cell.",
-    "usage": "python src/run_sweep.py <scenario> --variants-file sweeps/variants/framing_cook.json"
+    "description": "Advisor/framing variants (cf. Cook et al. 2026): 'you are a trader' vs 'advise a client' (advisor framing for all six workhorse personas), crossed with explicit vs partially masked economic context (FUNDAMENTAL_INFO_MODE=realizations_only: agents see past dividends but not the dividend model). Use only with compositions drawn from the six workhorse personas: other LLM personas have no advisor rewrite and would keep trader framing, mixing framings within a cell.",
+    "usage": "python src/run_sweep.py <scenario> --variants-file sweeps/variants/framing_advisor.json"
   },
   "trader_explicit": {},
   "advisor_explicit": {
