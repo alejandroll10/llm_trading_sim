@@ -12,7 +12,7 @@ preserved:
 
   1. Valuation error vs the true fundamental value, by info mode x price anchor.
      The FULL row is the arithmetic control; the FULL - REALIZATIONS_ONLY gap is
-     the "inference vs arithmetic" headline (answers R2).
+     the "inference vs arithmetic" headline: does the agent infer value, or just execute supplied arithmetic?
   2. Anchoring regression: stated valuation on the contemporaneous observed price,
      coefficient by info mode (0 => tracks fundamentals, 1 => pure price anchoring),
      with cluster-robust standard errors. A second table regresses valuation on the
