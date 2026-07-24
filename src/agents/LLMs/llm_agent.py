@@ -53,6 +53,11 @@ class LLMAgent(BaseAgent):
         # Store last round's reasoning for continuity (always enabled)
         self.last_reasoning: Dict[str, Any] = {}  # {round, reasoning, valuation_reasoning, price_prediction_reasoning}
 
+        # Exact prompts sent to the LLM, per round: (round, system_prompt, user_prompt).
+        # The user prompt embeds the (depth-truncated) book view the agent saw,
+        # which belief-action estimators need verbatim (issue #111).
+        self.rendered_prompts: List[tuple] = []
+
         # Conditionally initialize memory based on feature flags
         if Feature.MEMORY in self.enabled_features:
             self.memory_notes = []  # List of (round_number, note) tuples for agent memory
@@ -122,6 +127,8 @@ class LLMAgent(BaseAgent):
 
             # Determine system prompt: use mutable version if self-modify enabled
             system_prompt = self.get_current_system_prompt()
+
+            self.rendered_prompts.append((round_number, system_prompt, user_prompt))
 
             # Create LLM request with enabled features
             request = LLMRequest(

@@ -550,6 +550,9 @@ class DataRecorder:
         # Save agent prompt evolution (self-modification history)
         self._save_agent_prompt_evolution(data_path)
 
+        # Save exact per-round prompts sent to the LLM (book view ground truth)
+        self._save_rendered_prompts(data_path)
+
         # Create a summary statistics file with safe dividend access
         dividend_model = self.market_state_manager.dividend_model
         
@@ -631,6 +634,41 @@ class DataRecorder:
                     )
                 except:
                     pass  # Logging is optional
+
+    def _save_rendered_prompts(self, data_path: Path):
+        """Export the exact prompts each LLM agent received, one row per decision.
+
+        Unlike agent_prompt_evolution.csv (system-prompt history only), this
+        captures the full per-round user prompt — including the depth-truncated
+        order-book view the agent actually saw — so estimators can score
+        decisions against the agent's true information set without
+        reconstructing it from market_state.csv and info-capability config
+        (issue #111). Written as JSONL because prompts are large multi-line
+        text; load with pd.read_json(path, lines=True).
+
+        Args:
+            data_path: Directory path where the file should be saved
+        """
+        records = []
+        for agent_id in self.agent_repository.get_all_agent_ids():
+            agent = self.agent_repository.get_agent(agent_id)
+            if hasattr(agent, 'rendered_prompts') and agent.rendered_prompts:
+                agent_type_name = getattr(agent.agent_type, 'name', 'unknown')
+                model = getattr(agent, 'model', 'unknown')
+                for round_num, system_prompt, user_prompt in agent.rendered_prompts:
+                    records.append({
+                        'agent_id': agent_id,
+                        'agent_type': agent_type_name,
+                        'model': model,
+                        'round': round_num,
+                        'system_prompt': system_prompt,
+                        'user_prompt': user_prompt,
+                    })
+
+        if records:
+            prompts_df = pd.DataFrame(records).sort_values(['round', 'agent_id'])
+            prompts_df.to_json(data_path / 'rendered_prompts.jsonl',
+                               orient='records', lines=True)
 
     def _save_agent_prompt_evolution(self, data_path: Path):
         """Export all agent prompt evolution history to a separate CSV file
