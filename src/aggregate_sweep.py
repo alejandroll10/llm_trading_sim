@@ -1,10 +1,11 @@
 """
 Aggregate the per-cell outputs of a sweep (see run_sweep.py) into tidy panels.
 
-For each requested CSV (default: structured_decisions.csv and market_data.csv) it
-collects that file from every completed cell, prepends the cell's metadata columns
-(cell_id, seed, temperature, model, variant, prompt_family, run_dir), and concatenates
-everything into a single long / tidy panel written under <sweep_root>/aggregated/.
+For each requested CSV (default: structured_decisions.csv, market_data.csv and
+order_data.csv) it collects that file from every completed cell, prepends the cell's
+metadata columns (cell_id, seed, temperature, model, variant, prompt_family, run_dir),
+and concatenates everything into a single long / tidy panel written under
+<sweep_root>/aggregated/.
 prompt_family is the clustering key for inference: runs sharing a prompt family
 (or model family) are not independent draws.
 
@@ -43,7 +44,11 @@ def cell_prompt_family(cell: dict) -> str:
             or cell.get("variant")
             or "baseline")
 
-DEFAULT_FILES = ["structured_decisions.csv", "market_data.csv"]
+# order_data.csv carries every agent's submitted orders (not just the LLM
+# agents that write structured_decisions.csv), so it is the only panel that can
+# measure market-wide order flow -- the regressor for the realized price-impact
+# coefficient in analysis/impact_estimators.py (issue #111 phase 2).
+DEFAULT_FILES = ["structured_decisions.csv", "market_data.csv", "order_data.csv"]
 
 
 def find_csv(run_dir: Path, filename: str):

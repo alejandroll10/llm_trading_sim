@@ -146,6 +146,15 @@ To run the simulation, you can execute the `run_base_sim.py` script from the `sr
     ```
     The packs are generated artifacts — edit `scripts/generate_prompt_variant_packs.py` (the single source of truth) and rerun it; `tests/test_prompt_variants.py` fails if the JSON drifts from the generator.
 
+4.  **Run the Estimators:**
+    Each module under `src/analysis/` reads the aggregated panels and writes tables + figures into `logs/sweeps/<sweep_name>/aggregated/`. Every estimate is reported as a distribution across the seed × temperature grid with `prompt_family` and `model` preserved, and regressions use cluster-robust standard errors.
+    ```bash
+    python3 src/analysis/a1_estimators.py logs/sweeps/<sweep_name>              # valuation error, anchoring, learning curve
+    python3 src/analysis/belief_action_estimators.py logs/sweeps/<sweep_name>   # price/direction coherence, forecast skill, belief-message divergence
+    python3 src/analysis/impact_estimators.py logs/sweeps/<sweep_name>          # price-impact lambdas + size coherence
+    ```
+    `impact_estimators.py` additionally parses `data/rendered_prompts.jsonl` — the exact per-round prompt each LLM agent received — to recover the order book the agent actually saw, including any per-agent depth truncation. Runs recorded before that logging existed still produce every other estimate; only the seen-book benchmark is skipped.
+
 ## Simulation Lifecycle
 
 The simulation operates in discrete rounds. The following steps occur in each round:
