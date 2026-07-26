@@ -51,6 +51,50 @@ def cell_prompt_family(cell: dict) -> str:
 DEFAULT_FILES = ["structured_decisions.csv", "market_data.csv", "order_data.csv"]
 
 
+# Columns that identify one source row within a cell. If the same key turns up
+# under more than one cell_id, the per-cell CSVs overlap -- the signature of log
+# rows leaking across runs sharing a process (issue #120) -- and every per-cell
+# statistic computed from the panel is contaminated. Note the key need not be
+# unique *within* a cell (an agent submitting two orders in one round writes two
+# rows with the same timestamp); only its appearance across cells is a problem.
+CELL_IDENTITY_KEYS = {
+    "structured_decisions.csv": ["timestamp", "agent_id", "round"],
+}
+
+
+def report_cross_cell_duplicates(panel: pd.DataFrame, filename: str) -> int:
+    """Warn when one source row is claimed by several cells. Returns #bad keys.
+
+    The timestamp is second-resolution, so two cells that happen to log the same
+    agent's decision for the same round within one second would be flagged
+    without a real leak. That needs cells short enough to overlap on both round
+    and wall-clock second, which no realistic sweep produces -- but it is the
+    reason this warns rather than fails the aggregation.
+    """
+    key = CELL_IDENTITY_KEYS.get(filename)
+    if not key or panel.empty or not set(key).issubset(panel.columns):
+        return 0
+
+    cells_per_key = panel.groupby(key, dropna=False)["cell_id"].nunique()
+    offenders = cells_per_key[cells_per_key > 1]
+    if offenders.empty:
+        return 0
+
+    examples = ", ".join(
+        "(" + ", ".join(str(v) for v in (k if isinstance(k, tuple) else (k,))) + ")"
+        for k in offenders.index[:3]
+    )
+    print(f"  [LEAK] {len(offenders)} of {len(cells_per_key)} distinct "
+          f"({'+'.join(key)}) keys appear under more than one cell_id "
+          f"(worst: {int(offenders.max())} cells claim the same row).")
+    print(f"         e.g. {examples}")
+    print(f"         The per-cell {filename} files overlap. This is issue #120: logger "
+          f"handlers accumulating across runs in one process, so cell k's file also "
+          f"collected later cells' rows. Estimates from this panel are biased -- re-run "
+          f"the affected cells with the fix in place before using it.")
+    return len(offenders)
+
+
 def find_csv(run_dir: Path, filename: str):
     """Locate `filename` anywhere under run_dir (root or data/). Returns Path or None."""
     matches = list(run_dir.rglob(filename))
@@ -184,6 +228,7 @@ def main():
     out_dir = Path(args.out_dir) if args.out_dir else sweep_root / 'aggregated'
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    leaky_files = []
     for filename in args.files:
         print(f"\n{filename}:")
         panel = aggregate_file(cells, filename)
@@ -193,11 +238,18 @@ def main():
         panel.to_csv(out_path, index=False)
         print(f"  -> {len(panel)} rows across {panel['cell_id'].nunique() if len(panel) else 0} cells "
               f"written to {out_path}")
+        if report_cross_cell_duplicates(panel, filename):
+            leaky_files.append(filename)
 
     # Roll up realized token/cost usage across cells (issue #104).
     write_usage_rollup(cells, out_dir)
 
     print(f"\nDone. Panels in {out_dir}")
+    if leaky_files:
+        # Repeated at the end so it survives a long scroll-back.
+        print(f"\n*** WARNING: cross-cell row leakage detected in "
+              f"{', '.join(leaky_files)} (see [LEAK] above). Do not use these "
+              f"panels for per-cell inference. ***")
 
 
 if __name__ == "__main__":

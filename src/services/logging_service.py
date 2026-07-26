@@ -18,6 +18,11 @@ class LoggingService:
 
     _instance = None
     _loggers: Dict[str, logging.Logger] = {}
+    # True only between the end of initialize() and the next reset(). Readiness is
+    # tracked explicitly rather than inferred from `_loggers` being non-empty: the
+    # dict is also non-empty while it still holds the *previous* run's loggers, and
+    # empty for a moment in the middle of a re-initialize.
+    _initialized: bool = False
     _run_dir: Optional[Path] = None
     _latest_dir: Optional[Path] = None
     _data_dir: Optional[Path] = None
@@ -29,8 +34,40 @@ class LoggingService:
         return cls._instance
 
     @classmethod
+    def reset(cls):
+        """Tear down every logger this service created.
+
+        Python's loggers are process-global and keyed by name, so a second
+        initialize() in one process reuses the same logger objects. run_sweep.py
+        runs every cell of a sweep in a single process, which made two distinct
+        leaks bite (issue #120):
+
+        1. The named loggers rebuilt by _setup_all_loggers kept the previous
+           cell's file handlers, so each line was written to both cells' files:
+           cell k's structured_decisions.csv accumulated the rows of cells
+           k+1..N, and aggregate_sweep then attributed them to cell k.
+        2. Loggers created on demand by get_logger() (market_state,
+           agent_repository, per-stock order books, ...) were cached in _loggers
+           and never rebuilt, so from cell 2 on their output went only to cell
+           1's directory and their own cells had no such file at all.
+
+        Clearing the cache after closing the handlers fixes both: the named
+        loggers are rebuilt against the new run directory, and the ad-hoc ones
+        are recreated on first use. Objects holding a reference to a logger stay
+        valid -- logging.getLogger returns the same object, only its handlers
+        change.
+        """
+        cls._initialized = False
+        for logger in cls._loggers.values():
+            LoggerFactory.reset_handlers(logger)
+        cls._loggers.clear()
+
+    @classmethod
     def initialize(cls, run_id: str):
         """Initialize all loggers and directories."""
+        # Detach the previous run's handlers before wiring up this run (#120).
+        cls.reset()
+
         # Create base directory structure
         base_log_dir = Path('logs')
         cls._run_dir = base_log_dir / run_id
@@ -70,26 +107,35 @@ class LoggingService:
         for logger in cls._loggers.values():
             logger.propagate = False
 
+        cls._initialized = True
+
+    # (filename, header) for every CSV that is written through a logger handler
+    # rather than by DataRecorder.
+    _CSV_FILES = (
+        ('validation_errors.csv', CSVHeaders.VALIDATION_ERRORS),
+        ('margin_calls.csv', CSVHeaders.MARGIN_CALLS),
+        ('structured_decisions.csv', CSVHeaders.STRUCTURED_DECISIONS),
+    )
+
     @classmethod
     def _initialize_csv_headers(cls):
-        """Initialize all CSV files with headers."""
-        # Validation errors CSV
-        CSVHeaderManager.initialize_csv_files(
-            [cls._run_dir / 'validation_errors.csv', cls._latest_dir / 'validation_errors.csv'],
-            CSVHeaders.VALIDATION_ERRORS
-        )
+        """Initialize all CSV files with headers.
 
-        # Margin calls CSV
-        CSVHeaderManager.initialize_csv_files(
-            [cls._run_dir / 'margin_calls.csv', cls._latest_dir / 'margin_calls.csv'],
-            CSVHeaders.MARGIN_CALLS
-        )
+        The run directory is created fresh per run, so its files are only
+        created. The copies directly under logs/latest_sim/ are shared by every
+        run in the repo, so they are truncated: "latest" should mean the latest
+        run, not every run ever appended together (#120).
 
-        # Structured decisions CSV
-        CSVHeaderManager.initialize_csv_files(
-            [cls._run_dir / 'structured_decisions.csv', cls._latest_dir / 'structured_decisions.csv'],
-            CSVHeaders.STRUCTURED_DECISIONS
-        )
+        "Fresh per run" rests on run_id being unique: it is a second-resolution
+        timestamp (base_sim.py), so two runs of the same sim_type started within
+        the same second would share a directory and interleave. run_sweep.py
+        avoids that by nesting each cell under its own cell_id.
+        """
+        for filename, header in cls._CSV_FILES:
+            CSVHeaderManager.initialize_csv_file(cls._run_dir / filename, header)
+            CSVHeaderManager.initialize_csv_file(
+                cls._latest_dir / filename, header, truncate=True
+            )
 
     @classmethod
     def _setup_all_loggers(cls, console_handler: logging.Handler):
@@ -313,13 +359,19 @@ class LoggingService:
     @classmethod
     def get_logger(cls, name: str) -> logging.Logger:
         """Get logger by name. Creates a default logger if not found."""
-        if not cls._loggers:
-            raise RuntimeError("LoggingService not initialized. Call initialize() first.")
+        if not cls._initialized:
+            raise RuntimeError(
+                "LoggingService not initialized (or a re-initialize is in progress). "
+                "Call initialize() first."
+            )
 
         if name not in cls._loggers:
             # Create a default logger for unregistered names
             # This prevents None returns and crashes
             logger = logging.getLogger(name)
+            # The name may carry handlers from an earlier run in this process
+            # (reset() clears the ones we tracked; this covers the rest) (#120).
+            LoggerFactory.reset_handlers(logger)
             logger.setLevel(logging.DEBUG)
 
             # Add file handler if run_dir is available

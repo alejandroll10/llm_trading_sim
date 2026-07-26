@@ -25,26 +25,30 @@ class CSVHeaderManager:
     """Manages initialization of CSV files with headers."""
 
     @staticmethod
-    def initialize_csv_file(file_path: Path, header: str) -> None:
+    def initialize_csv_file(file_path: Path, header: str, truncate: bool = False) -> None:
         """
         Initialize a CSV file with a header if it doesn't exist or is empty.
 
         Args:
             file_path: Path to the CSV file
             header: Header string to write
+            truncate: If True, rewrite the header even when the file already has
+                rows, discarding them. Used for the shared logs/latest_sim/
+                copies, which otherwise accumulate every run ever made.
         """
-        if not file_path.exists() or file_path.stat().st_size == 0:
+        if truncate or not file_path.exists() or file_path.stat().st_size == 0:
             with open(file_path, 'w') as f:
                 f.write(f"{header}\n")
 
     @staticmethod
-    def initialize_csv_files(file_paths: List[Path], header: str) -> None:
+    def initialize_csv_files(file_paths: List[Path], header: str, truncate: bool = False) -> None:
         """
         Initialize multiple CSV files with the same header.
 
         Args:
             file_paths: List of paths to CSV files
             header: Header string to write to all files
+            truncate: Passed through to initialize_csv_file.
         """
         for path in file_paths:
-            CSVHeaderManager.initialize_csv_file(path, header)
+            CSVHeaderManager.initialize_csv_file(path, header, truncate=truncate)
